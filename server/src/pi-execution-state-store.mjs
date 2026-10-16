@@ -77,11 +77,20 @@ function transitionAction(status) {
   return { ADMITTED: "operation_admitted", DECISION_REQUIRED: "decision_requested",
     FAILED: "operation_failed", CANCELLED: "operation_cancelled" }[status] ?? "phase_changed";
 }
-export function validatePiExecutionHistory(events) {
-  const byOperation = new Map();
-  const byIntent = new Map();
-  const keys = new Map();
-  const cohorts = new Map();
+export function createPiExecutionHistoryValidator({minimumCacheEvents=64}={}) {
+ let snapshot=null;
+ return function validate(events) {
+  let digests=null;
+  if(events.length>=minimumCacheEvents)try {
+    digests=events.map(event=>createHash('sha256').update(canonicalJson(event)).digest('hex'));
+  }catch{fail('CORRUPT_STATE');}
+  const reusable=digests&&snapshot&&snapshot.digests.length<=digests.length
+    &&snapshot.digests.every((hash,index)=>hash===digests[index]);
+  const start=reusable?snapshot.digests.length:0;
+  const byOperation = reusable?structuredClone(snapshot.byOperation):new Map();
+  const byIntent = reusable?new Map(snapshot.byIntent):new Map();
+  const keys = reusable?new Map(snapshot.keys):new Map();
+  const cohorts = reusable?structuredClone(snapshot.cohorts):new Map();
   function bindCanary(record) {
     const binding=record.command?.canary_binding;
     if(!binding)return;
@@ -97,7 +106,7 @@ export function validatePiExecutionHistory(events) {
       keys.set(action.idempotency_key, binding);
     }
   }
-  for (const event of events) {
+  for (const event of start===0?events:events.slice(start)) {
     if ([2, 3].includes(event.execution_projection?.schema_version)) {
       const raw = event.execution_projection;
       const prior = byOperation.get(raw.state?.operation_id)?.execution_projection;
@@ -155,8 +164,13 @@ export function validatePiExecutionHistory(events) {
     }
     byOperation.set(state.operation_id, event);
   }
+  if(digests&&(!snapshot||digests.length>=snapshot.digests.length))snapshot={digests,
+    byOperation:structuredClone(byOperation),byIntent:new Map(byIntent),keys:new Map(keys),cohorts:structuredClone(cohorts)};
   return byOperation;
+ };
 }
+const validateDefaultHistory=createPiExecutionHistoryValidator();
+export function validatePiExecutionHistory(events){return validateDefaultHistory(events);}
 function resultOf(event) {
   const record = validatedProjection(event.execution_projection);
   const state = record.state;

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {cp,mkdtemp,mkdir,readFile,writeFile,readdir,lstat,symlink,rm} from 'node:fs/promises';
-import {execFile} from 'node:child_process';
+import {execFile,spawn} from 'node:child_process';
 import {promisify} from 'node:util';
 import {randomUUID} from 'node:crypto';
 import {pathToFileURL,fileURLToPath} from 'node:url';
@@ -18,9 +18,14 @@ function intent(id,context,actions,bootstrap=false){return {schema_version:1,...
 test('actual MCP default ingress completes cold lifecycle and terminal no replay using existing official SDK',async t=>{
  const root=await mkdtemp(path.join(os.tmpdir(),'pi-wire-')),repo=path.join(root,'repo');await mkdir(repo,{recursive:true});
  const git=(args,options={})=>exec(process.platform==='win32'?'git.exe':'git',args,{cwd:options.cwd??repo,windowsHide:true,shell:false,timeout:60000,maxBuffer:1024*1024});
- const clients=[];
+ const clients=[],workers=[];
  t.after(async()=>{
   for(const client of clients)try{await client.close();}catch{}
+  for(const worker of workers){
+   if(worker.exitCode!==null)continue;
+   if(worker.connected)worker.send({protocol:'writer-workbench/pi-durable-worker/v1',kind:'drain'});
+   await new Promise(resolve=>{const timer=setTimeout(()=>{worker.kill();resolve();},5000);worker.once('close',()=>{clearTimeout(timer);resolve();});});
+  }
   assert.equal(path.dirname(path.resolve(root)),path.resolve(os.tmpdir()));
   const metadata=await lstat(path.join(repo,'.git')).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
   if(metadata){
@@ -51,31 +56,50 @@ test('actual MCP default ingress completes cold lifecycle and terminal no replay
  for(const key of Object.keys(environment))if(key.startsWith('WRITER_WORKBENCH_ISOLATED_TEST_')||key==='WRITER_WORKBENCH_TEST_JOURNAL_GROUP')delete environment[key];
  const hook=fileURLToPath(new URL('./pi-bootstrap-wire-cold.fixture.mjs',import.meta.url));
  async function connect(exit){const transport=new StdioClientTransport({command:process.execPath,args:['--import',pathToFileURL(hook).href,path.join(repo,'server','src','mcp-server.mjs')],cwd:repo,env:{...environment,PI_POSTSEAL_WIRE_EXIT:exit?'1':'0'},stderr:'pipe'});transport.stderr?.on('data',chunk=>process.stderr.write(chunk));const client=new Client({name:'pi-postseal-wire-acceptance',version:'1'});clients.push(client);await client.connect(transport);return {client,transport};}
- const first=await connect(true);const toolNames=(await first.client.listTools()).tools.map(t=>t.name);assert(toolNames.includes('dev_capability_get_schema'));assert(toolNames.includes('dev_pi_execute_intent'));
+ async function startWorker(exit){
+  const worker=spawn(process.execPath,['--import',pathToFileURL(hook).href,path.join(repo,'server/src/mcp-server.mjs'),'--pi-worker'],
+   {cwd:repo,env:{...environment,PI_POSTSEAL_WIRE_EXIT:exit?'1':'0'},windowsHide:true,stdio:['ignore','ignore','pipe','ipc']});
+  workers.push(worker);worker.stderr.on('data',chunk=>process.stderr.write(chunk));return worker;
+ }
+ async function submitAndWait(client,contract){
+  let value=facts(await client.callTool({name:'dev_pi_execute_intent',arguments:{intent_json:JSON.stringify(contract)}},undefined,{timeout:300000}));
+  const deadline=Date.now()+300000;
+  while(!['COMPLETED','FAILED','CANCELLED','BLOCKED','DECISION_REQUIRED'].includes(value.state.status)&&Date.now()<deadline){
+   await new Promise(r=>setTimeout(r,100));
+   value=facts(await client.callTool({name:'dev_pi_execution_status',arguments:{operation_id:value.state.operation_id,...(contract.bootstrap?{bootstrap:true}:{workstream_id:contract.context.workstream_id,workspace_id:contract.context.workspace_id})}},undefined,{timeout:300000})).operation;
+  }return value;
+ }
+ const first=await connect(false);const toolNames=(await first.client.listTools()).tools.map(t=>t.name);assert(toolNames.includes('dev_capability_get_schema'));assert(toolNames.includes('dev_pi_execute_intent'));
  await assert.rejects(async()=>facts(await first.client.callTool({name:'dev_workspace_begin_workstream',arguments:{label:'direct must be rejected'}})),/PI_EXECUTION_INTENT_REQUIRED/);
  const actions=[['begin','workspace.begin_workstream',{label:'Actual MCP cold lifecycle',declared_scope:['tests/mcp/pi-wire-lifecycle-probe.test.mjs']}],['isolate','workspace.create_isolated',{}],['read','filesystem.read',{path:'package.json'}],['write','filesystem.write',{path:'tests/mcp/pi-wire-lifecycle-probe.test.mjs',content:"import test from 'node:test';import assert from 'node:assert/strict';test('GPT exact probe',()=>assert.equal(2+2,4));\n"}],['checkpoint','workspace.create_checkpoint',{label:'Wire checkpoint'}],['test','verification.focused',{suite:'mcp_pi_postseal'}],['commit','git.commit',{message:'GPT wire acceptance',paths:['tests/mcp/pi-wire-lifecycle-probe.test.mjs'],expectedHead:base}]].map(([step_id,capability,input],i)=>({step_id,capability,input,depends_on:i?[['begin','isolate','read','write','checkpoint','test','commit'][i-1]]:[],...(step_id==='read'?{}:{idempotency_key:'wire-lifecycle-'+step_id+'-0001'})}));
  for(const a of actions){const schema=facts(await first.client.callTool({name:'dev_capability_get_schema',arguments:{capability_name:a.capability}}));a.expected_capability_version=schema.capability_version;a.expected_schema_hash=schema.schema_hash;}
  const contract=intent('real-MCP-wire-lifecycle-0001',{project_id:'writer_workbench',workstream_id:null,workspace_id:shared},actions,true);
- await assert.rejects(first.client.callTool({name:'dev_pi_execute_intent',arguments:{intent_json:JSON.stringify(contract)}},undefined,{timeout:300000}));
- const exit=JSON.parse(await readFile(path.join(root,'exit-checkpoint.json'),'utf8'));assert.equal(exit.pid,first.transport.pid??exit.pid);await first.client.close();
+ const admitted=facts(await first.client.callTool({name:'dev_pi_execute_intent',arguments:{intent_json:JSON.stringify(contract)}},undefined,{timeout:300000}));
+ assert.equal(admitted.state.status,'CREATED');
+ await first.client.close();
+ const crashedWorker=await startWorker(true);
+ const workerExit=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Worker failed to reach checkpoint')),300000);crashedWorker.once('close',code=>{clearTimeout(timer);resolve(code);});crashedWorker.once('error',reject);});
+ assert.equal(workerExit,73);
+ const exit=JSON.parse(await readFile(path.join(root,'exit-checkpoint.json'),'utf8'));assert.equal(exit.pid,crashedWorker.pid);await first.client.close();
  const second=await connect(false);assert.notEqual(second.transport.pid,exit.pid);
  const saved=facts(await second.client.callTool({name:'dev_pi_execution_status',arguments:{intent_id:contract.intent_id,bootstrap:true}})).operation;
  assert.equal(saved.state.operation_id,exit.operation_id);assert.equal(saved.runtime.lifecycle_binding.workspace_id,exit.binding.workspace_id);assert(saved.state.completed_steps.includes('checkpoint'));
- const resumed=facts(await second.client.callTool({name:'dev_pi_execute_intent',arguments:{intent_json:JSON.stringify(contract)}},undefined,{timeout:300000}));assert.equal(resumed.state.status,'COMPLETED');assert.equal(resumed.state.operation_id,exit.operation_id);assert.equal(resumed.result.verification.focused,'passed');
+ await startWorker(false);
+ const resumed=await submitAndWait(second.client,contract);assert.equal(resumed.state.status,'COMPLETED',JSON.stringify({state:resumed.state,runtime:resumed.runtime,receipts:resumed.receipts.map(r=>({step_id:r.step_id,kind:r.kind,evidence:r.step_id==='test'?r.evidence:undefined}))}));assert.equal(resumed.state.operation_id,exit.operation_id);assert.equal(resumed.result.verification.focused,'passed');
  const context={project_id:'writer_workbench',workstream_id:exit.binding.workstream_id,workspace_id:exit.binding.workspace_id};
  const observations=intent('wire-read-checkpoint-0001',context,[{step_id:'workstream',capability:'workspace.get_workstream',input:{workstream_id:context.workstream_id},depends_on:[]},{step_id:'checkpoint',capability:'workspace.get_checkpoint',input:{checkpoint_id:exit.checkpoint.checkpoint_id},depends_on:['workstream']}]);
- const inspected=facts(await second.client.callTool({name:'dev_pi_execute_intent',arguments:{intent_json:JSON.stringify(observations)}},undefined,{timeout:300000}));assert.equal(inspected.state.status,'COMPLETED');const workstream=facts(inspected.receipts[0].evidence),checkpoint=facts(inspected.receipts[1].evidence);assert.equal(checkpoint.checkpoint_id,exit.checkpoint.checkpoint_id);assert.equal(checkpoint.workspace_id,context.workspace_id);assert.equal(checkpoint.workstream_id,context.workstream_id);assert.equal(checkpoint.git_head,base);
+ const inspected=(await submitAndWait(second.client,observations));assert.equal(inspected.state.status,'COMPLETED');const workstream=facts(inspected.receipts[0].evidence),checkpoint=facts(inspected.receipts[1].evidence);assert.equal(checkpoint.checkpoint_id,exit.checkpoint.checkpoint_id);assert.equal(checkpoint.workspace_id,context.workspace_id);assert.equal(checkpoint.workstream_id,context.workstream_id);assert.equal(checkpoint.git_head,base);
  const transition=async(state,revision)=>{
   const id='wire-recovery-'+state+'-0001';
   const contract=intent(id,context,[{step_id:'transition',capability:'workspace.update_workstream',input:{workstream_id:context.workstream_id,expected_revision:revision,state},depends_on:[],idempotency_key:id}]);
-  const result=facts(await second.client.callTool({name:'dev_pi_execute_intent',arguments:{intent_json:JSON.stringify(contract)}},undefined,{timeout:300000}));
+  const result=(await submitAndWait(second.client,contract));
   assert.equal(result.state.status,'COMPLETED');const record=facts(result.receipts[0].evidence);assert.equal(record.state,state);assert.equal(record.revision,revision+1);
-  const duplicate=facts(await second.client.callTool({name:'dev_pi_execute_intent',arguments:{intent_json:JSON.stringify(contract)}},undefined,{timeout:300000}));assert.equal(duplicate.projection_hash,result.projection_hash);return record;
+  const duplicate=(await submitAndWait(second.client,contract));assert.equal(duplicate.projection_hash,result.projection_hash);return record;
  };
  const paused=await transition('paused',workstream.revision);const active=await transition('active',paused.revision);
  const end=intent('wire-terminal-workstream-0001',context,[{step_id:'end',capability:'workspace.end_workstream',input:{workstream_id:context.workstream_id,expected_revision:active.revision,outcome:'completed'},depends_on:[],idempotency_key:'wire-workstream-end-0001'}]);
- assert.equal(facts(await second.client.callTool({name:'dev_pi_execute_intent',arguments:{intent_json:JSON.stringify(end)}},undefined,{timeout:300000})).state.status,'COMPLETED');
- const beforeCalls=resumed.state.tool_calls.length;const duplicate=facts(await second.client.callTool({name:'dev_pi_execute_intent',arguments:{intent_json:JSON.stringify(contract)}},undefined,{timeout:300000}));assert.equal(duplicate.state.tool_calls.length,beforeCalls);assert.equal(duplicate.projection_hash,resumed.projection_hash);
+ assert.equal((await submitAndWait(second.client,end)).state.status,'COMPLETED');
+ const beforeCalls=resumed.state.tool_calls.length;const duplicate=(await submitAndWait(second.client,contract));assert.equal(duplicate.state.tool_calls.length,beforeCalls);assert.equal(duplicate.projection_hash,resumed.projection_hash);
  const health=await journal.status();assert.equal(health.health,'healthy');assert.equal(health.active_operation_count,0);assert.equal(health.dangling_operation_count,0);
  assert.equal((await git(['rev-parse','HEAD'])).stdout.trim(),base);assert.equal((await git(['status','--porcelain'])).stdout,'');
  const records=(await readdir(path.join(journalRoot,'events'))).sort();const events=await Promise.all(records.map(f=>readFile(path.join(journalRoot,'events',f),'utf8').then(JSON.parse)));

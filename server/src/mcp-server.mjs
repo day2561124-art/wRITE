@@ -2102,7 +2102,7 @@ const toolDefinitions = [
         return jsonContent(await piProductionController.reconcileOnly(request));
       }
       intent = await adaptAuthorizedPiRequest(intent, { resolveWorkspace: resolveDevWorkspaceExecutionContext });
-      return jsonContent(await piProductionController.execute(intent));
+      return jsonContent(await piProductionController.submit(intent));
     },
   },
   {
@@ -5756,7 +5756,11 @@ const piLifecycleScopeVerifier = createPiLifecycleScopeVerifier({
   getCheckpoint: args => dev_workspace_get_checkpoint(args),
   getOperation: args => dev_workspace_get_operation(args),
 });
-const piProductionController = createPiProductionExecutionController({ route: piProductionRoute, transport: {
+// The controller's default route is backed by the same authoritative Journal.
+// Retain piProductionRoute for guardPiDirectExecution below; do not substitute
+// the unified snapshot for explicitly injected custom routes.
+const piProductionController = createPiProductionExecutionController({ transport: {
+  requestTimeoutMs:300000,longRequestTimeoutMs:8*60*60*1000,queryTimeoutMs:120000,
   callTool: params => callToolDirect(params),
   queryOperation: args => dev_workspace_get_operation(args),
   resolveWorkspace: async args => {
@@ -5976,6 +5980,7 @@ const dispatchQueueOverloadMessage = (
 
 let pending = Promise.resolve();
 let metadataPending = Promise.resolve();
+let piStatusPending = Promise.resolve();
 let pendingDispatchMessages = 0;
 
 function enqueueMessage(message, framing) {
@@ -5999,7 +6004,8 @@ function enqueueMessage(message, framing) {
     && message?.params?.name === "dev_capability_get_schema"
     && toolRegistry.get("dev_capability_get_schema")?.risk === "read"
     && toolRegistry.get("dev_capability_get_schema")?.annotations?.readOnlyHint === true;
-  const next = (metadata ? metadataPending : pending)
+  const observational=message?.method==='tools/call'&&message?.params?.name==='dev_pi_execution_status';
+  const next = (metadata ? metadataPending : observational ? piStatusPending : pending)
     .then(async () => {
       publishTrace(correlation,"mcp.queue_wait",performance.now()-queuedAt);
       await runRequestTrace(correlation,async()=>{
@@ -6017,6 +6023,7 @@ function enqueueMessage(message, framing) {
       pendingDispatchMessages -= 1;
     });
   if (metadata) metadataPending = next;
+  else if(observational) piStatusPending=next;
   else pending = next;
   return true;
 }
@@ -6349,6 +6356,12 @@ const ensureRuntimeReady = createRuntimeReadiness([
   ["transaction", ()=>traceSpan("transaction.readiness",initializeDevTransactionRuntime)],
 ], () => {}, publishRuntimeReadiness);
 
+if(process.argv.includes('--pi-worker')){
+ const {runPiDurableWorker}=await import('./pi-durable-worker.mjs');
+ await runPiDurableWorker({controller:piProductionController,ready:ensureRuntimeReady});
+ process.disconnect?.();
+ process.exit(0);
+}else{
 process.stdin.on("data", (chunk) => {
   acceptInputChunk(chunk);
 });
@@ -6356,3 +6369,4 @@ process.stdin.on("end", () => {
   inputEnded = true;
   maybeFinalizeEndOfInput();
 });
+}

@@ -39,7 +39,8 @@ export function validateCanaryBinding(value,intent) {
   return {...value,policy};
 }
 export function validateProductionBinding(value) {
- exact(value,["route_revision","route_hash"]);
+ exact(value,["route_revision","route_hash",...(Object.hasOwn(value,'worker_protocol')?['worker_protocol']:[])]);
+ if(Object.hasOwn(value,'worker_protocol')&&value.worker_protocol!=='writer-workbench/pi-durable-worker/v1')reliableFailure('CORRUPT_STATE');
  if(!Number.isSafeInteger(value.route_revision)||value.route_revision<1||!/^[a-f0-9]{64}$/u.test(value.route_hash))reliableFailure("CORRUPT_STATE");
  return {...value};
 }
@@ -144,6 +145,10 @@ export function reduceReliableProjection(prior,command,now) {
       runtime.isolation={decision_id:command.decision_id,reason:command.reason,
         anchor_revision:prior.revision,anchor_projection_hash:prior.projection_hash,
         isolated_at:now};break;
+    case "worker_enrolled":
+      exact(command,['type']);noCall();
+      if(state.status!=='CREATED'||runtime.owner!==null||runtime.durable_worker!==undefined)reliableFailure('INVALID_WORKER_ENROLLMENT');
+      runtime.durable_worker=true;break;
     case "owner_acquired":
       exact(command,["type","owner","replaced_worker_id"]);validateOwner(command.owner);
       if(command.replaced_worker_id!==(runtime.owner?.worker_id??null))reliableFailure("OWNER_CONFLICT");
@@ -261,7 +266,8 @@ export function validateReliableProjection(value,prior) {
       ||Buffer.byteLength(stableJson(value))>768*1024)reliableFailure("CORRUPT_STATE");
     const intent=createExecutionIntent(value.intent);const state=validateOperationState(value.state);
     exact(value.runtime,["retry_policy","owner","active_call","retry_at",
-      ...(intent.bootstrap?["lifecycle_binding"]:[]),...(Object.hasOwn(value.runtime,"isolation")?["isolation"]:[])]);
+      ...(intent.bootstrap?["lifecycle_binding"]:[]),...(Object.hasOwn(value.runtime,"isolation")?["isolation"]:[]),...(Object.hasOwn(value.runtime,'durable_worker')?['durable_worker']:[])]);
+    if(Object.hasOwn(value.runtime,'durable_worker')&&value.runtime.durable_worker!==true)reliableFailure('CORRUPT_STATE');
     validateRetryPolicy(value.runtime.retry_policy);
     if(value.runtime.owner!==null)validateOwner(value.runtime.owner);
     if(!prior) {
@@ -269,7 +275,7 @@ export function validateReliableProjection(value,prior) {
       if(Object.hasOwn(value.command,"canary_binding"))validateCanaryBinding(value.command.canary_binding,intent);
       if(Object.hasOwn(value.command,"production_binding"))validateProductionBinding(value.command.production_binding);
       if(value.command.type!=="operation_created"||value.action_type!=="operation_created"||value.revision!==1
-        ||Object.hasOwn(value.runtime,"isolation")
+        ||Object.hasOwn(value.runtime,"isolation")||Object.hasOwn(value.runtime,"durable_worker")
         ||value.previous_projection_hash!==null||value.runtime.owner!==null||value.runtime.active_call!==null
         ||value.runtime.retry_at!==null||(intent.bootstrap && value.runtime.lifecycle_binding!==null)||stableJson(state)!==stableJson(initialReliableState(intent,{
           operation_id:state.operation_id,parent_operation_id:state.parent_operation_id,timestamp:state.created_at})))reliableFailure("CORRUPT_STATE");

@@ -22,8 +22,9 @@ function timedRequest(callback,timeoutMs) {
   return Promise.race([Promise.resolve().then(callback),timeout]).finally(()=>clearTimeout(timer));
 }
 export function createPiReliableMcpAdapter({callTool,queryOperation,resolveWorkspace,verifyScope,reconnect,
-  requestTimeoutMs=120000,queryTimeoutMs=30000,validateCapabilityExpectation}={}) {
+  requestTimeoutMs=120000,longRequestTimeoutMs=requestTimeoutMs,queryTimeoutMs=30000,validateCapabilityExpectation}={}) {
   if(!Number.isSafeInteger(requestTimeoutMs)||requestTimeoutMs<1||requestTimeoutMs>1800000
+    ||!Number.isSafeInteger(longRequestTimeoutMs)||longRequestTimeoutMs<requestTimeoutMs||longRequestTimeoutMs>8*60*60*1000
     ||!Number.isSafeInteger(queryTimeoutMs)||queryTimeoutMs<1||queryTimeoutMs>300000
     ||(reconnect!==undefined&&typeof reconnect!=="function"))reliableFailure("INVALID_TRANSPORT_BINDING");
   if(typeof callTool!=="function"||typeof queryOperation!=="function"||typeof resolveWorkspace!=="function")
@@ -64,7 +65,7 @@ export function createPiReliableMcpAdapter({callTool,queryOperation,resolveWorks
       return callTool({name:step.tool,arguments:step.arguments,
         ...(step.effect?{_meta:{reconciliation_key:step.idempotency_key}}:{})},
         {authorizeDispatch:options.authorizeDispatch});
-    },requestTimeoutMs));
+    },step.tool==='dev_run_tests'?longRequestTimeoutMs:requestTimeoutMs));
     const action=intent.requested_actions.find(x=>x.step_id===stepId);
     const facts=observations(evidence);
     const deduped=facts.find(x=>x?.reconciled===true);

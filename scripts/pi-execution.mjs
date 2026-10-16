@@ -20,10 +20,13 @@ async function initialize(s){await rpc(s,{jsonrpc:"2.0",id:"pi-cli-init",method:
 export async function submitPiExecutionIntent(source,{sessionFactory=connect,sleep=ms=>new Promise(r=>setTimeout(r,ms)),clock=Date.now,deadlineMs=1800000}={}){
  const intent=createExecutionIntent(source),args={intent_json:JSON.stringify(intent)};
  if(!Number.isSafeInteger(deadlineMs)||deadlineMs<1||deadlineMs>1800000)fail("INVALID_SUBMISSION_DEADLINE");
- let session=null,retries=0,last=null,sequence=0;const deadline=clock()+deadlineMs;
+ let session=null,retries=0,last=null,sequence=0,submitted=false;const deadline=clock()+deadlineMs;
  try{while(clock()<deadline){try{
   if(!session){session=sessionFactory();await initialize(session);}
-  last=facts(await rpc(session,{jsonrpc:"2.0",id:"pi-cli-submit-"+(++sequence),method:"tools/call",params:{name:"dev_pi_execute_intent",arguments:args}}));
+  const response=facts(await rpc(session,{jsonrpc:"2.0",id:"pi-cli-submit-"+(++sequence),method:"tools/call",params:submitted
+   ?{name:'dev_pi_execution_status',arguments:{operation_id:last.state.operation_id,...(intent.bootstrap?{bootstrap:true}:{workspace_id:intent.context.workspace_id,workstream_id:intent.context.workstream_id})}}
+   :{name:'dev_pi_execute_intent',arguments:args}}));
+  last=submitted?response.operation:response;submitted=true;
   if(!last?.state?.operation_id||last.intent?.intent_id!==intent.intent_id||hashExecutionInput(last.intent)!==hashExecutionInput(intent)
    ||last.state.intent_id!==intent.intent_id||last.state.intent_hash!==hashExecutionInput(intent))fail("INVALID_PI_RESPONSE");
   if(done.has(last.state.status)||last.runtime?.isolation)return last;

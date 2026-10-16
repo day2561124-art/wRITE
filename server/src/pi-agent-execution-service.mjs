@@ -12,7 +12,7 @@ export const PI_RUNTIME_RUNNER_RELATIVE_PATH = "scripts/pi-runtime/runner.mjs";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..", "..");
 const runnerPath = path.join(projectRoot, ...PI_RUNTIME_RUNNER_RELATIVE_PATH.split("/"));
-const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_OUTPUT_BYTES = 64 * 1024;
 
 function parseNodeVersion(value) {

@@ -1,4 +1,5 @@
 import http from 'http';
+import {createPiDurableWorkerSupervisor} from './pi-durable-worker-supervisor.mjs';
 import { attachBoundedSseKeepalive } from './mcp-http-sse-keepalive.mjs';
 import { getMcpIdentity } from './mcp-http-identity.mjs';
 import { randomUUID } from 'crypto';
@@ -391,6 +392,8 @@ const workspaceSnapshotAuthority = createWorkspaceSnapshotAuthority({
 });
 
 const activeToolProfileName = process.env.MCP_TOOL_PROFILE?.trim() || 'chatgpt_public';
+// Reuse the existing engineering profile boundary; public hosts never spawn a privileged worker.
+const piDurableWorker=createPiDurableWorkerSupervisor({enabled:isDeveloperReloadAllowed()});
 const integrationControl = createParentIntegrationControl({ profile: activeToolProfileName });
 const DEV_MCP_RELOAD_TOOL_NAME = 'dev_mcp_reload';
 const REMOVE_ISOLATED_TOOL_NAME = 'dev_workspace_remove_isolated';
@@ -962,7 +965,7 @@ const instanceIdentity = { pi_execution_protocol: 'writer-workbench/pi-productio
   startedAt: new Date().toISOString(), profile: process.env.MCP_TOOL_PROFILE ?? 'chatgpt_public' };
 const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/health') {
-    writeHealthJson(res, 200, instanceIdentity);
+    writeHealthJson(res, 200, {...instanceIdentity,pi_durable_worker:piDurableWorker.getStatus()});
     return;
   }
   if (req.method === 'GET' && req.url === '/live') {
@@ -1246,6 +1249,7 @@ async function shutdown(signal) {
       '; closing sessions',
   );
   clearInterval(sessionReaper);
+  piDurableWorker.drain();
   workspaceChangeClockProvider.close();
 
   const entries = [...bridgeEntries];
