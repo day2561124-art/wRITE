@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { terminateProcessTree } from "../server/src/process-control.mjs";
+import {getDevTestSuiteMapping} from "../server/src/mcp-development-test-tools.mjs";
 import {
   formatTestDuration,
   printTestTimingSummary,
@@ -1031,7 +1032,7 @@ const steps = [
 
 function getTimeoutMs(label) {
   // Match the controlled mcp suite budget; each child still has its own deadline.
-  if (label === "MCP contract tests") return 1_500_000;
+  if (label === "MCP contract tests") return getDevTestSuiteMapping().mcp.timeout_ms;
 
   if (
     label === "UI server contract tests"

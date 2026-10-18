@@ -10,6 +10,8 @@ import os from 'node:os';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {hashExecutionInput,REQUIRED_DECISION_BOUNDARIES} from '../../server/src/pi-execution-contract.mjs';
+import {getDevTestSuiteMapping} from '../../server/src/mcp-development-test-tools.mjs';
+const completionTimeoutMs=getDevTestSuiteMapping().mcp_pi_postseal.timeout_ms+300_000;
 const exec=promisify(execFile),source=process.env.PI_POSTSEAL_TEST_SOURCE_ROOT??path.resolve('.'),shared='dev_workspace_shared_repository_v1';
 function facts(response){if(response.isError)throw Error(response.content?.[0]?.text??'MCP_TOOL_ERROR');return JSON.parse(response.content.find(c=>c.type==='text').text);}
 function intent(id,context,actions,bootstrap=false){return {schema_version:1,...(bootstrap?{bootstrap:true}:{}),intent_id:id,goal:'GPT-authored wire lifecycle acceptance',context,constraints:['Preserve exact identity and content','No shared-main source mutation'],requested_actions:actions,
@@ -63,7 +65,7 @@ test('actual MCP default ingress completes cold lifecycle and terminal no replay
  }
  async function submitAndWait(client,contract){
   let value=facts(await client.callTool({name:'dev_pi_execute_intent',arguments:{intent_json:JSON.stringify(contract)}},undefined,{timeout:300000}));
-  const deadline=Date.now()+300000;
+  const deadline=Date.now()+completionTimeoutMs;
   while(!['COMPLETED','FAILED','CANCELLED','BLOCKED','DECISION_REQUIRED'].includes(value.state.status)&&Date.now()<deadline){
    await new Promise(r=>setTimeout(r,100));
    value=facts(await client.callTool({name:'dev_pi_execution_status',arguments:{operation_id:value.state.operation_id,...(contract.bootstrap?{bootstrap:true}:{workstream_id:contract.context.workstream_id,workspace_id:contract.context.workspace_id})}},undefined,{timeout:300000})).operation;

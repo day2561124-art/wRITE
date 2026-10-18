@@ -431,3 +431,69 @@ test("history reducer rejects a failure relabeled as success and phase bypass of
   assert.throws(()=>reduceReliableProjection(waiting,{type:"phase_changed",worker_id:waiting.runtime.owner.worker_id,status:"EXECUTING"},
     waiting.state.updated_at),/INVALID_PHASE_COMMAND/);
 });
+
+const workspaceShell={step_id:'workspace_shell',capability:'workspace.powershell',input:{command:'Write-Output fixture',cwd:'.',timeoutMs:30000},depends_on:[],idempotency_key:'workspace-shell-reconciliation-key-001'};
+test('workspace shell not-admitted proof binds actual dispatch workspace and permits only same-key retry',async t=>{
+ const {store,journal}=await fixture(t);let calls=0;const sent=[],proofs=[];
+ const a=adapter(async p=>{sent.push(p);if(++calls===1)throw timeout();return {ok:true};},async p=>{proofs.push(p);return {...p,operation_id:null,reconciliation_state:'not_admitted',safe_to_reinitiate:true,reinitiate_requires_same_key:true,automatic_replay_allowed:false};},{verifyScope:async({step})=>step.scope==='workspace_shell'&&step.arguments.workspace_id===context.workspace_id});
+ const r=await engine(store,a).execute(intent([workspaceShell]));assert.equal(r.state.status,'COMPLETED');assert.equal(calls,2);
+ assert.deepEqual(sent.map(p=>p._meta.reconciliation_key),[workspaceShell.idempotency_key,workspaceShell.idempotency_key]);assert.ok(sent.every(p=>p.arguments.workspace_id===context.workspace_id));
+ assert.equal(proofs.length,1);assert.equal(proofs[0].request_fingerprint_sha256,hashExecutionInput({tool_name:sent[0].name,arguments:sent[0].arguments}));
+ const cold=createPiReliableExecutionStore({journal,isOwnerAlive:async()=>false});
+ assert.equal((await cold.inspect({operation_id:r.state.operation_id,context})).projection_hash,r.projection_hash);
+});
+test('workspace shell completed effect reconciles after disconnect without duplicate dispatch and survives cold history',async t=>{
+ const f=await fixture(t,{isOwnerAlive:async()=>false});let sends=0;const physical=path.join(f.root,'shell-effect.txt');
+ const a=adapter(async p=>{sends++;assert.equal(p.arguments.workspace_id,context.workspace_id);await writeFile(physical,'once');throw timeout();},async p=>({...p,operation_id:'dev_operation_'+'d'.repeat(32),reconciliation_state:'completed'}),{verifyScope:async({step})=>step.scope==='workspace_shell'&&step.arguments.workspace_id===context.workspace_id});
+ const r=await engine(f.store,a).execute(intent([workspaceShell]));assert.equal(r.state.status,'COMPLETED');assert.equal(sends,1);assert.equal(await readFile(physical,'utf8'),'once');assert.equal(r.receipts[0].kind,'reconciled_facts');
+ const cold=createPiReliableExecutionStore({journal:f.journal,isOwnerAlive:async()=>false});assert.equal((await cold.inspect({operation_id:r.state.operation_id,context})).projection_hash,r.projection_hash);assert.equal((await engine(cold,a).execute(intent([workspaceShell]))).state.status,'COMPLETED');assert.equal(sends,1);
+});
+test('workspace shell foreign workspace fingerprint never permits retry or completed-effect settlement',async t=>{
+ for(const reconciliation_state of ['not_admitted','completed']){
+  const f=await fixture(t);let sends=0;const foreign={...context,workspace_id:'dev_workspace_'+'f'.repeat(24)};
+  const a=adapter(async()=>{sends++;throw timeout();},async p=>({...p,request_fingerprint_sha256:hashExecutionInput({tool_name:'powershell_run',arguments:{...workspaceShell.input,workspace_id:foreign.workspace_id}}),operation_id:'dev_operation_'+'e'.repeat(32),reconciliation_state,safe_same_key_retry:true}),{verifyScope:async({step})=>step.scope==='workspace_shell'});
+  const r=await engine(f.store,a).execute(intent([workspaceShell]));assert.equal(r.state.status,'DECISION_REQUIRED');assert.equal(sends,1);assert.deepEqual(r.state.completed_steps,[]);
+ }
+});
+
+// Real isolated test-runner receipts: this private tiny `all` definition asserts
+// one fixture fact. It never claims the production repository full Gate passed.
+async function oversizedVerificationFixture(t,{failTest=false}={}) {
+ const f=await fixture(t),{mkdir}=await import('node:fs/promises');const root=path.join(f.root,'tiny-repo');await mkdir(root);
+ const git=async args=>(await promisify(execFile)('git.exe',args,{cwd:root,windowsHide:true})).stdout.trim();
+ await git(['init','--initial-branch=main']);await git(['config','user.name','Bounded test receipt fixture']);await git(['config','user.email','fixture@local.invalid']);
+ await writeFile(path.join(root,'.gitignore'),'node_modules/\n');await writeFile(path.join(root,'fact.txt'),'actual fixture fact\n');await git(['add','--','.gitignore','fact.txt']);await git(['commit','-m','fixture baseline']);
+ const head=await git(['rev-parse','HEAD']),workspace={...context,root,current_head:head,base_head:head,branch:'main',workspace_type:'isolated_worktree',lifecycle_state:'active',state:'active',healthy:true,mutation_allowed:true};
+ const {createDevTestRunner}=await import('../../server/src/mcp-development-test-tools.mjs');
+ const program="import assert from 'node:assert/strict';import{readFileSync}from'node:fs';process.stdout.write('fixture-output-'.repeat(8000));assert.equal(readFileSync('fact.txt','utf8'),"+JSON.stringify(failTest?'wrong fact\n':'actual fixture fact\n')+");";
+ const runner=createDevTestRunner({journal:f.journal,workspaceContextResolver:async()=>workspace,dependencyRoot:process.env.WRITER_WORKBENCH_DEPENDENCY_ROOT?.trim()||process.cwd(),lockPath:path.join(f.root,'tiny-all.lock'),resultPath:path.join(f.root,'tiny-all-last.json'),suiteDefinitions:{all:{executable:process.execPath,argv:['--input-type=module','-e',program],timeoutMs:10000}}});
+ const action={step_id:'large_gate',capability:'verification.full',input:{suite:'all'},depends_on:[],idempotency_key:'verified-large-test-receipt-001'},i=intent([action],{verification:{focused:[],affected:[],full:['large_gate']}});
+ let sends=0,backendCalls=0,originalBytes=0,queryCalls=0;
+ const a=adapter(async p=>{sends++;const executed=await f.journal.executeReconciled({tool_name:p.name,reconciliation_key:p._meta.reconciliation_key,request_fingerprint_sha256:hashExecutionInput({tool_name:p.name,arguments:p.arguments}),resolve_workspace_scope:async()=>context},async()=>{backendCalls++;const result=await runner(p.arguments);const raw={content:[{type:'text',text:JSON.stringify(result,null,2)}]};originalBytes=Buffer.byteLength(JSON.stringify(raw));return raw;});if(executed.reconciled)return {reconciled:true,...executed.operation};return executed.value;},async p=>{queryCalls++;return f.journal.getOperation(p);});
+ return {...f,action,i,a,counts:()=>({sends,backendCalls,originalBytes,queryCalls})};
+}
+test('real oversized verification response reconciles verified child PASS once and cold history preserves it',async t=>{
+ const f=await oversizedVerificationFixture(t),r=await engine(f.store,f.a).execute(f.i);
+ assert.equal(r.state.status,'COMPLETED');assert.equal(r.state.verification_state.full,'passed');assert.equal(f.counts().sends,1);assert.equal(f.counts().backendCalls,1);assert.ok(f.counts().originalBytes>64*1024);assert.equal(f.counts().queryCalls,1);
+ assert.equal(r.receipts[0].kind,'reconciled_facts');assert.equal(r.receipts[0].original_response_available,false);const facts=r.receipts[0].evidence.original_result;
+ assert.equal(facts.passed,true);assert.equal(facts.verification_manifest_gate_result,'passed');assert.match(facts.test_terminal_event_hash,/^[a-f0-9]{64}$/);assert.equal(Object.hasOwn(facts,'exit_code'),false);
+ const prefix=(await f.journal.verify()).events.map(e=>e.event_hash),coldJournal=createDevOperationJournalService({storageRoot:path.join(f.root,'journal')}),cold=createPiReliableExecutionStore({journal:coldJournal});
+ assert.equal((await cold.inspect({operation_id:r.state.operation_id,context})).projection_hash,r.projection_hash);assert.equal((await engine(cold,f.a).execute(f.i)).state.status,'COMPLETED');assert.equal(f.counts().backendCalls,1);assert.deepEqual((await coldJournal.verify()).events.map(e=>e.event_hash),prefix);
+});
+test('real oversized failed verification is never promoted to PASS or reexecuted',async t=>{
+ const f=await oversizedVerificationFixture(t,{failTest:true}),r=await engine(f.store,f.a).execute(f.i);
+ assert.equal(r.state.status,'DECISION_REQUIRED');assert.equal(r.state.last_error.code,'VALIDATION_EVIDENCE_REQUIRED');assert.notEqual(r.state.verification_state.full,'passed');assert.equal(f.counts().backendCalls,1);assert.equal(f.counts().sends,1);assert.ok(f.counts().originalBytes>64*1024);
+ const op=await f.journal.getOperation({reconciliation_key:f.action.idempotency_key});assert.equal(op.original_result.passed,false);assert.equal(op.original_result.verification_manifest_gate_result,'failed');assert.equal(op.automatic_replay_allowed,false);
+});
+for(const variant of ['duplicate_child','wrong_workspace','wrong_workstream','wrong_suite','wrong_snapshot','wrong_head','wrong_fingerprint','missing_manifest','inconsistent_pass','recovered_child','no_child'])test('test Status refuses unproven child evidence: '+variant,async t=>{
+ const f=await fixture(t),args={suite:'mcp',workspace_id:context.workspace_id},parent=await f.journal.begin({operation_type:'mcp_mutation',tool_name:'dev_run_tests',workspace_id:context.workspace_id,workstream_id:context.workstream_id,reconciliation_key:'bound-test-child-fixture-001',request_fingerprint_sha256:variant==='wrong_fingerprint'?'f'.repeat(64):hashExecutionInput({tool_name:'dev_run_tests',arguments:args})});
+ const result={suite:variant==='wrong_suite'?'all':'mcp',head:'a'.repeat(40),workspace_snapshot_id:'b'.repeat(64)};
+ if(variant!=='no_child')for(let k=0;k<(variant==='duplicate_child'?2:1);k++){
+  const scope={workspace_id:variant==='wrong_workspace'?'dev_workspace_'+'c'.repeat(24):context.workspace_id,workstream_id:variant==='wrong_workstream'?'dev_workstream_20261015-000000_123456789012':context.workstream_id};
+  const child=await f.journal.begin({operation_type:'test_evidence',tool_name:'dev_run_tests',...scope,parent_operation_id:parent.operation_id,result});
+  if(variant==='recovered_child')await f.journal.recover(child.operation_id,{reconciles_event_id:child.journal_event_id,result:{outcome:'no_effect_observed',reconciliation_required:false,recovered_from_started_event_id:child.journal_event_id}});
+  else await f.journal.complete(child.operation_id,{result:{...result,head:variant==='wrong_head'?'f'.repeat(40):result.head,workspace_snapshot_id:variant==='wrong_snapshot'?'d'.repeat(64):result.workspace_snapshot_id,passed:true,execution_ok:true,timed_out:false,verification_manifest_sha256:variant==='missing_manifest'?null:'e'.repeat(64),verification_manifest_gate_result:variant==='inconsistent_pass'?'failed':'passed'}});
+ }
+ await f.journal.complete(parent.operation_id,{result:{outcome:'intended_effect_observed'}});const before=(await f.journal.verify()).events.map(e=>e.event_hash);
+ const op=await f.journal.getOperation({operation_id:parent.operation_id});assert.equal(op.original_result.passed,undefined);assert.deepEqual((await f.journal.verify()).events.map(e=>e.event_hash),before);
+});

@@ -314,9 +314,9 @@ try {
   assert.deepEqual(mapping.cognition.argv, ["tests/run-cognition.mjs"]);
   assert.deepEqual(mapping.memory_retrieval.argv, ["tests/run-memory-retrieval.mjs"]);
   assert.deepEqual(mapping.all.argv, ["tests/run-all.mjs"]);
-  assert.equal(mapping.mcp.timeout_ms, 1_500_000);
+  assert.equal(mapping.mcp.timeout_ms, 2_400_000);
   assert.equal(mapping.mcp_core.timeout_ms, 900_000);
-  assert.equal(mapping.mcp_pi_postseal.timeout_ms, 300_000);
+  assert.equal(mapping.mcp_pi_postseal.timeout_ms, 600_000);
   assert.equal(mapping.mcp_infrastructure.timeout_ms, 1_500_000);
   assert.equal(mapping.mcp_reliability.timeout_ms, 1_500_000);
   assert.equal(mapping.mcp_tunnel.timeout_ms, 600_000);

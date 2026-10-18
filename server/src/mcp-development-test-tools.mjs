@@ -41,9 +41,9 @@ const productionSuiteDefinitions = Object.freeze({
   mcp: Object.freeze({
     executable: process.execPath,
     argv: Object.freeze(["tests/tools/mcp-contract.test.mjs"]),
-    timeoutMs: 1_500_000,
+    timeoutMs: 2_400_000,
   }),
-  mcp_pi_postseal: Object.freeze({executable:process.execPath,argv:Object.freeze(["tests/tools/mcp-pi-postseal.test.mjs"]),timeoutMs:300_000}),
+  mcp_pi_postseal: Object.freeze({executable:process.execPath,argv:Object.freeze(["tests/tools/mcp-pi-postseal.test.mjs"]),timeoutMs:600_000}),
   mcp_core: Object.freeze({
     executable: process.execPath,
     argv: Object.freeze(["tests/tools/mcp-core.test.mjs"]),

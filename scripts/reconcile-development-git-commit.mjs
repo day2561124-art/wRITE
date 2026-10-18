@@ -13,13 +13,18 @@ export async function reconcileDevelopmentWorkstreamStale(input, {apply=false, j
   return apply ? journal.resolveWorkstreamStaleMutation(input) : journal.inspectWorkstreamStaleMutation(input);
 }
 
+export async function reconcileDevelopmentWorkstreamCommitted(input, {apply=false, journal=createDevOperationJournalService()}={}) {
+  return apply ? journal.resolveWorkstreamCommittedMutation(input) : journal.inspectWorkstreamCommittedMutation(input);
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     if (process.argv.length !== 3 || !['--inspect','--apply'].includes(process.argv[2])) throw new Error('INVALID_RECONCILIATION_ACTION');
     process.stdin.setEncoding('utf8');let source='';
     for await (const chunk of process.stdin) {source+=chunk;if(Buffer.byteLength(source)>64*1024)throw new Error('RESOLUTION_RECORD_LIMIT');}
     const input=JSON.parse(source);
-    const reconcile=input.resolution_kind==='workstream_stale_before_write'
+    const reconcile=input.resolution_kind==='workstream_committed_update'
+      ?reconcileDevelopmentWorkstreamCommitted:input.resolution_kind==='workstream_stale_before_write'
       ?reconcileDevelopmentWorkstreamStale:reconcileDevelopmentGitCommit;
     const result=await reconcile(input, {apply:process.argv[2]==='--apply'});
     process.stdout.write(JSON.stringify(result)+'\n');

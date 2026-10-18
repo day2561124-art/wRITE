@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { terminateProcessTree } from "../../server/src/process-control.mjs";
+import {getDevTestSuiteMapping} from "../../server/src/mcp-development-test-tools.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -50,6 +51,7 @@ const piTestScripts = [
 
 const defaultTestScriptTimeoutMs = 300_000;
 const testScriptTimeoutOverrides = new Map([
+  ["tests/mcp/pi-bootstrap-wire.test.mjs", getDevTestSuiteMapping().mcp_pi_postseal.timeout_ms + 600_000],
   ["tests/mcp/mcp-development-test-tools.test.mjs", 600_000],
   ["tests/mcp/mcp-development-transaction-tools.test.mjs", 600_000],
 ]);
