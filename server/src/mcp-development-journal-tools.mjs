@@ -20,6 +20,7 @@ import {ISOLATION_RESOLUTION,ISOLATION_RESOLUTION_TOOL,inspectIsolationEvidence,
 import { readIsolationBeforeDispatchProof } from './mcp-workstream-prewrite-failure.mjs';
 import { isWorkstreamPrewriteFailure } from "./mcp-workstream-prewrite-failure.mjs";
 import { WORKSTREAM_STALE_RESOLUTION, validateWorkstreamStaleResolution, inspectWorkstreamStaleResolution } from "./mcp-workstream-stale-resolution.mjs";
+import { WORKSTREAM_METADATA_LIMIT_RESOLUTION, validateWorkstreamMetadataLimitResolution, inspectWorkstreamMetadataLimitResolution } from "./mcp-workstream-metadata-limit-resolution.mjs";
 import { WORKSTREAM_COMMITTED_RESOLUTION, validateWorkstreamCommittedResolution, inspectWorkstreamCommittedResolution } from "./mcp-workstream-committed-resolution.mjs";
 import { projectPaths, projectRoot } from "./project-paths.mjs";
 import { createWorkspaceSnapshotAuthorityIpcClient } from "./mcp-workspace-snapshot-authority-ipc.mjs";
@@ -310,7 +311,7 @@ function boundedResultMetadata(value) {
     if (key === "resolution_record" && typeof raw === "string" && Array.from(raw).length <= 32 * 1024) {
       let proof;
       try { proof = JSON.parse(raw); } catch { /* Keep legacy metadata handling for non-JSON values. */ }
-      if (["completed_git_commit", WORKSTREAM_STALE_RESOLUTION, WORKSTREAM_COMMITTED_RESOLUTION, ISOLATION_RESOLUTION].includes(proof?.resolution_kind)) { output[key] = raw; continue; }
+      if (["completed_git_commit", WORKSTREAM_STALE_RESOLUTION, WORKSTREAM_COMMITTED_RESOLUTION, WORKSTREAM_METADATA_LIMIT_RESOLUTION, ISOLATION_RESOLUTION].includes(proof?.resolution_kind)) { output[key] = raw; continue; }
     }
     if (raw === null || typeof raw === "boolean") output[key] = raw;
     else if (typeof raw === "number" && Number.isFinite(raw)) output[key] = raw;
@@ -895,6 +896,8 @@ export function createDevOperationJournalService({
     ?validateIsolationResolution(events,input)
     :input?.resolution_kind===WORKSTREAM_COMMITTED_RESOLUTION
     ?validateWorkstreamCommittedResolution(events,input)
+    :input?.resolution_kind===WORKSTREAM_METADATA_LIMIT_RESOLUTION
+    ?validateWorkstreamMetadataLimitResolution(events,input)
     :input?.resolution_kind===WORKSTREAM_STALE_RESOLUTION
     ?validateWorkstreamStaleResolution(events,input)
     :input?.resolution_kind==="completed_git_commit"
@@ -912,11 +915,11 @@ export function createDevOperationJournalService({
       const proof=JSON.parse(event.result?.resolution_record??"null");
       const {started,terminal}=validateResolution(events,proof??{});
       const admission=events.find(e=>e.operation_id===event.operation_id&&e.stage==="operation_started");
-      if(["completed_git_commit", WORKSTREAM_STALE_RESOLUTION, WORKSTREAM_COMMITTED_RESOLUTION, ISOLATION_RESOLUTION].includes(proof.resolution_kind) && (
+      if(["completed_git_commit", WORKSTREAM_STALE_RESOLUTION, WORKSTREAM_COMMITTED_RESOLUTION, WORKSTREAM_METADATA_LIMIT_RESOLUTION, ISOLATION_RESOLUTION].includes(proof.resolution_kind) && (
         admission?.reconciliation_key !== "resolution:" + started.operation_id
         || admission?.request_fingerprint_sha256 !== sha256Text(canonicalJson(proof))
         || admission?.tool_name !== (proof.resolution_kind === ISOLATION_RESOLUTION ? ISOLATION_RESOLUTION_TOOL : proof.resolution_kind === WORKSTREAM_COMMITTED_RESOLUTION
-          ? "pi.journal.resolve_workstream_committed" : proof.resolution_kind === WORKSTREAM_STALE_RESOLUTION
+          ? "pi.journal.resolve_workstream_committed" : proof.resolution_kind === WORKSTREAM_METADATA_LIMIT_RESOLUTION ? "pi.journal.resolve_workstream_metadata_limit" : proof.resolution_kind === WORKSTREAM_STALE_RESOLUTION
           ? "pi.journal.resolve_workstream_stale" : "pi.journal.resolve_completed_git_commit")
         || event.tool_name !== admission.tool_name || admission.sequence <= terminal.sequence || event.sequence <= admission.sequence
         || event.result.reconciliation_required !== false
@@ -1353,6 +1356,7 @@ export function createDevOperationJournalService({
       const started = verification.events.find((event) => event.operation_id === operationId && event.stage === "operation_started");
       if (!started) continue;
       if(started.operation_type==="pi_terminal_resolution"&&started.tool_name===ISOLATION_RESOLUTION_TOOL)continue;
+      if(started.operation_type==="pi_terminal_resolution"&&started.tool_name==="pi.journal.resolve_workstream_metadata_limit")continue;
       const transactionOperation = started.operation_type === "checkpoint_restore_transaction_create"
         || started.operation_type.startsWith("transaction_");
       const requiresWorkspaceContext = !started.operation_type.startsWith("checkpoint_")
@@ -1567,13 +1571,16 @@ export function createDevOperationJournalService({
     const completedChild=resolutionKind==="completed_child_create";
     const completedPowershell=resolutionKind==="completed_powershell_observation";
     const completedGit=resolutionKind==="completed_git_commit";
-    const workstreamStale=resolutionKind===WORKSTREAM_STALE_RESOLUTION;
+    const workstreamMetadata=resolutionKind===WORKSTREAM_METADATA_LIMIT_RESOLUTION;
+    const workstreamStale=workstreamMetadata||resolutionKind===WORKSTREAM_STALE_RESOLUTION;
     const workstreamCommitted=resolutionKind===WORKSTREAM_COMMITTED_RESOLUTION;
     const resolutionFields=isolation?["resolution_kind","original_request","observation","observation_sha256","authority_receipt"]:completedChild?["resolution_kind","expected_child_terminal_hash","observed_sha256"]
       :completedPowershell?["resolution_kind","expected_child_terminal_hash","expected_command_sha256","observed_exit_code"]
         :completedGit?["resolution_kind","observed_commit","precommit_manifest"]
           :workstreamCommitted?["resolution_kind","original_request","transaction_id","transaction_sha256",
             "audit_transaction_id","audit_transaction_sha256","audit_line_sha256","registry_sha256","pi_claim_event_hash"]
+          :workstreamMetadata?["resolution_kind","original_request","transaction_id","transaction_sha256",
+            "registry_sha256","observed_workstream_revision","source_contract_sha256","audit_transaction_id","audit_transaction_sha256","audit_line_sha256"]
           :workstreamStale?["resolution_kind","original_request","transaction_id","transaction_sha256",
             "registry_sha256","observed_workstream_revision","source_contract_sha256"]:[];
     const allowed=new Set(["operation_id","expected_terminal_hash","request_fingerprint_sha256","decision_owner","decision_id","reason",...resolutionFields]);
@@ -1615,7 +1622,7 @@ export function createDevOperationJournalService({
         throw new Error("RESOLUTION_OWNER_STILL_ACTIVE");
       if(completedGit) await inspectCompletedGitCommit(started,terminal,input);
       else if(workstreamCommitted) await inspectWorkstreamCommittedResolution(resolutionEvidenceRoot,started,terminal,input,verification.events);
-      else await inspectWorkstreamStaleResolution(resolutionEvidenceRoot,started,terminal,input);
+      else await (workstreamMetadata?inspectWorkstreamMetadataLimitResolution:inspectWorkstreamStaleResolution)(resolutionEvidenceRoot,started,terminal,input);
     }
     if(completedChild) {
       const resolve=resolutionContextResolver??(async workspace_id=>{
@@ -1640,7 +1647,7 @@ export function createDevOperationJournalService({
           :completedPowershell?"pi.journal.resolve_completed_powershell"
             :completedGit?"pi.journal.resolve_completed_git_commit"
               :workstreamCommitted?"pi.journal.resolve_workstream_committed"
-              :workstreamStale?"pi.journal.resolve_workstream_stale":"pi.journal.resolve_no_child_create",
+              :workstreamMetadata?"pi.journal.resolve_workstream_metadata_limit":workstreamStale?"pi.journal.resolve_workstream_stale":"pi.journal.resolve_no_child_create",
         workspace_id:started.workspace_id,workstream_id:started.workstream_id,parent_operation_id:started.operation_id,
         reconciliation_key:key,request_fingerprint_sha256:fingerprint,result:{resolution_record:canonicalJson(input)}}, {beforeAppend:checkIsolation});
       if(isolation)await isolationResolutionPublicationHook?.("after_admission");
@@ -1661,7 +1668,7 @@ export function createDevOperationJournalService({
             || event.result?.resolution_record!==canonicalJson(input);
         })) throw new Error("RESOLUTION_OWNER_STILL_ACTIVE");
       if(workstreamCommitted) await inspectWorkstreamCommittedResolution(resolutionEvidenceRoot,started,terminal,input,verification.events);
-      else await inspectWorkstreamStaleResolution(resolutionEvidenceRoot,started,terminal,input);
+      else await (workstreamMetadata?inspectWorkstreamMetadataLimitResolution:inspectWorkstreamStaleResolution)(resolutionEvidenceRoot,started,terminal,input);
     }
     let event;
     try{event=await complete(admission.operation_id,{reconciles_event_id:terminal.journal_event_id,
@@ -1681,6 +1688,8 @@ export function createDevOperationJournalService({
   const inspectCompletedGitCommitMutation=input=>resolveTerminalMutation(input,"completed_git_commit",{dryRun:true});
   const resolveWorkstreamStaleMutation=input=>resolveTerminalMutation(input,WORKSTREAM_STALE_RESOLUTION);
   const inspectWorkstreamStaleMutation=input=>resolveTerminalMutation(input,WORKSTREAM_STALE_RESOLUTION,{dryRun:true});
+  const resolveWorkstreamMetadataLimitMutation=input=>resolveTerminalMutation(input,WORKSTREAM_METADATA_LIMIT_RESOLUTION);
+  const inspectWorkstreamMetadataLimitMutation=input=>resolveTerminalMutation(input,WORKSTREAM_METADATA_LIMIT_RESOLUTION,{dryRun:true});
   const resolveWorkstreamCommittedMutation=input=>resolveTerminalMutation(input,WORKSTREAM_COMMITTED_RESOLUTION);
   const inspectWorkstreamCommittedMutation=input=>resolveTerminalMutation(input,WORKSTREAM_COMMITTED_RESOLUTION,{dryRun:true});
 
@@ -2116,6 +2125,8 @@ export function createDevOperationJournalService({
     inspectCompletedGitCommitMutation,
     resolveWorkstreamStaleMutation,
     inspectWorkstreamStaleMutation,
+    resolveWorkstreamMetadataLimitMutation,
+    inspectWorkstreamMetadataLimitMutation,
     resolveWorkstreamCommittedMutation,
     inspectWorkstreamCommittedMutation,
     inspectWorkspaceIsolationMutation,
