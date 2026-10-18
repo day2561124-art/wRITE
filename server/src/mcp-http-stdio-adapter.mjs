@@ -912,13 +912,17 @@ export function createStdioSession(options = {}) {
 
   function close() {
     if (closed) return;
+    const idle = pendingCallCount() === 0;
     closed = true;
     notifyPendingListeners(new Error('MCP stdio session closed.'));
     for (const finish of logicalCalls) finish(reliabilityError('SESSION_CLOSED', 'MCP stdio session closed.'), null);
     const currentChild = child;
     if (!currentChild || currentChild.exitCode !== null || currentChild.signalCode !== null) return;
     try {
-      terminateProcessTree(currentChild);
+      // Safe idle sessions own no active tool tree. Use the held child handle;
+      // Windows numeric PPID traversal can include unrelated, older processes.
+      if (idle) currentChild.kill();
+      else terminateProcessTree(currentChild);
     } catch {
       try { currentChild.kill(); } catch {}
     }
