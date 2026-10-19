@@ -62,6 +62,11 @@ function Write-ServiceConfiguration {
   Assert-NoRawTokenEnvironment
   $resolvedHostname = Resolve-Hostname
   $resolvedTokenFile = Resolve-TokenFile
+  # Same validated versioned source as the Listener, independent of shell env.
+  $profileReader = Join-Path $Root 'scripts\read-mcp-session-profile.mjs'
+  $sessionProfileJson = & node $profileReader
+  if ($LASTEXITCODE -ne 0) { throw 'Cannot load MCP session memory profile; service configuration was not written.' }
+  $sessionProfile = $sessionProfileJson | ConvertFrom-Json
   New-Item -ItemType Directory -Path $ServiceDir -Force | Out-Null
   New-Item -ItemType Directory -Path $ResolvedLogDirectory -Force | Out-Null
 
@@ -78,6 +83,8 @@ function Write-ServiceConfiguration {
   <env name="WRITER_MCP_TUNNEL_MODE" value="named" />
   <env name="WRITER_MCP_TUNNEL_HOSTNAME" value="$(Escape-XmlValue $resolvedHostname)" />
   <env name="WRITER_MCP_TUNNEL_TOKEN_FILE" value="$(Escape-XmlValue $resolvedTokenFile)" />
+  <env name="MCP_HTTP_SESSION_IDLE_TIMEOUT_MS" value="$(Escape-XmlValue $sessionProfile.MCP_HTTP_SESSION_IDLE_TIMEOUT_MS)" />
+  <env name="MCP_HTTP_MAX_IDLE_SESSION_COUNT" value="$(Escape-XmlValue $sessionProfile.MCP_HTTP_MAX_IDLE_SESSION_COUNT)" />
   <startmode>Automatic</startmode>
   <onfailure action="restart" delay="15 sec" />
   <onfailure action="restart" delay="60 sec" />

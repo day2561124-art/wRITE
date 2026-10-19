@@ -383,3 +383,4 @@ console.log('R5 cross-session HTTP reconciliation acceptance passed.');
 // Keep the opt-in memory profile regressions in the existing infrastructure route.
 await import('./mcp-session-memory-profile.test.mjs');
 await import('./mcp-session-idle-process-stop.test.mjs');
+await import('./mcp-launcher-session-profile.test.mjs');

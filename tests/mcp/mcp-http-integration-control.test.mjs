@@ -173,6 +173,7 @@ async function fixture() {
   await mkdir(scripts, { recursive: true });
   await mkdir(runtime);
   for (const file of [
+    'mcp-session-profile.mjs',
     'mcp-http-server.mjs', 'mcp-http-sse-keepalive.mjs', 'mcp-http-identity.mjs', 'mcp-http-integration-control.mjs', 'mcp-http-stdio-adapter.mjs',
     'mcp-runtime-diagnostics.mjs', 'mcp-runtime-readiness.mjs', 'mcp-request-tracing.mjs',
     'pi-durable-worker-supervisor.mjs', 'pi-durable-worker-protocol.mjs',
@@ -182,6 +183,8 @@ async function fixture() {
     'world-simulation-formal-experiential-deliberation-contract.mjs',
     'canonical-json-hash-service.mjs', 'process-control.mjs', 'file-transactions.mjs', 'project-paths.mjs',
   ]) await copyFile(path.join(root, 'server', 'src', file), path.join(src, file));
+  await mkdir(path.join(repo, 'config'));
+  await copyFile(path.join(root, 'config/mcp-session-memory-profile.json'), path.join(repo, 'config/mcp-session-memory-profile.json'));
   await copyFile(path.join(root, 'package-lock.json'), path.join(repo, 'package-lock.json'));
   await copyFile(
     path.join(root, 'scripts', 'mcp-workspace-change-watch.ps1'),

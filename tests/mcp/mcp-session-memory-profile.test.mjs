@@ -28,6 +28,9 @@ async function fixture(t,environment={},seed=false){
  const container=await mkdtemp(path.join(os.tmpdir(),'mcp-memory-')),repo=path.join(container,'repo');await mkdir(repo);
  const control=path.join(repo,'test-control');await mkdir(control);
  for(const dir of ['server','scripts'])await cp(path.join(source,dir),path.join(repo,dir),{recursive:true,filter:p=>!['node_modules','.tmp'].includes(path.basename(p))});
+ // Real HTTP startup now requires the versioned profile. Keep the fixture
+ // deployment complete; existing lifecycle assertions and override values stand.
+ await cp(path.join(source,'config'),path.join(repo,'config'),{recursive:true});
  await cp(path.join(source,'package.json'),path.join(repo,'package.json'));
  await cp(path.join(source,'package-lock.json'),path.join(repo,'package-lock.json'));
  await mkdir(path.join(repo,'tests'));await writeFile(path.join(repo,'tests/session-memory-slow.txt'),'real fixture read\n');
