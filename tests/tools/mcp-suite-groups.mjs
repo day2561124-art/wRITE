@@ -50,6 +50,8 @@ export const mcpPiCoreScripts = Object.freeze([
   "tests/mcp/pi-lifecycle-admission.test.mjs",
 ]);
 export const mcpPiPostSealScripts=Object.freeze([
+  "tests/mcp/mcp-development-transaction-checkpoint-health.test.mjs",
+  "tests/mcp/pi-reliable-owner-cleanup.test.mjs",
   "tests/mcp/mcp-http-sse-keepalive.test.mjs",
   "tests/mcp/pi-observational-read-failure.test.mjs",
   "tests/mcp/pi-production-status-snapshot.test.mjs",

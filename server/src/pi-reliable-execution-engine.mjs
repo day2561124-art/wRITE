@@ -21,6 +21,7 @@ export function createPiReliableExecutionEngine({store,adapter,retryPolicy={max_
     async function stop(code,status="DECISION_REQUIRED",receipt=null) {
       return own({type:"decision_requested",code,status,receipt});
     }
+    try {
     const owner=record.runtime.owner;
     if(owner) {
       const alive=await store.isOwnerAlive(owner);
@@ -132,6 +133,23 @@ export function createPiReliableExecutionEngine({store,adapter,retryPolicy={max_
       await executionHook?.("after_receipt",record);
     }
     return record;
+    } catch(error) {
+      // A publication can commit before its response fails. Inspect the durable
+      // projection, never the cached record, before releasing our own worker.
+      // Claims retain their owner and unknown outcome for reconciliation.
+      try {
+        const current=await inspect();
+        if(current.runtime.owner?.worker_id===worker.worker_id
+          &&!current.runtime.active_call&&!current.runtime.isolation) {
+          await store.command({operation_id:current.state.operation_id,context:current.intent.context,
+            expected_revision:current.revision,command:{type:"owner_released",worker_id:worker.worker_id}});
+        }
+      } catch {
+        // Failed inspection, contention or a revision race preserves the fence.
+        // Do not retry publication or mask the original execution exception.
+      }
+      throw error;
+    }
   }
   // Reconcile one existing claim only. No admission, dispatch, retry or next step.
   async function reconcileOnly(args) {

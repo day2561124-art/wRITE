@@ -1499,9 +1499,16 @@ export function createDevTransactionService({
         inspections.push({ transaction_id: transaction.transaction_id, issues: [{ severity: "corrupt", code: error.code ?? "TRANSACTION_STORE_CORRUPT", message: String(error.message).slice(0, 512) }], reclaimable_prepared_false_staging: false });
       }
     }
-    const checkpointStatus = await checkpoint.status().catch((error) => ({ health: "corrupt", last_health_error: String(error.message).slice(0, 512) }));
+    const checkpointStatus = await checkpoint.status().catch((error) => ({ health: "corrupt", last_health_error: String(error.message).slice(0, 512), last_health_error_code: error.code ?? null }));
     const integrityIssues = inspections.flatMap((inspection) => inspection.issues.map((issue) => ({ transaction_id: inspection.transaction_id, ...issue })));
-    if (checkpointStatus.health !== "healthy") integrityIssues.push({ transaction_id: null, severity: "degraded", code: "CHECKPOINT_STORE_NOT_HEALTHY", message: `Checkpoint store health is ${checkpointStatus.health}.` });
+    if (checkpointStatus.health !== "healthy") integrityIssues.push({
+      transaction_id: null,
+      severity: checkpointStatus.health === "corrupt" ? "corrupt" : "degraded",
+      code: "CHECKPOINT_STORE_NOT_HEALTHY",
+      message: `Checkpoint store health is ${checkpointStatus.health}.`,
+      checkpoint_error_code: checkpointStatus.last_health_error_code ?? null,
+      checkpoint_error: checkpointStatus.last_health_error == null ? null : String(checkpointStatus.last_health_error).slice(0, 512),
+    });
 
     // Validate the persistent barrier mapping in the reverse direction as well:
     // an orphan/malformed barrier must keep the workspace fail-closed and make
@@ -1559,9 +1566,14 @@ export function createDevTransactionService({
     const hasCorrupt = integrityIssues.some((issue) => issue.severity === "corrupt") || runtimeHealth === "corrupt";
     const hasDegraded = integrityIssues.some((issue) => issue.severity === "degraded") || recoveryRequired.length > 0 || runtimeHealth === "degraded";
     const health = hasCorrupt ? "corrupt" : hasDegraded ? "degraded" : recovering.length > 0 ? "recovering" : "healthy";
-    if (health === "corrupt") runtimeHealth = "corrupt";
-    else if (health === "degraded") runtimeHealth = "degraded";
+    // Dependency observations still close admission, but must not permanently
+    // taint this store after the dependency is independently verified healthy.
+    // Persistent transaction/barrier defects retain the existing sticky state.
+    const ownIssues = integrityIssues.filter((issue) => issue.code !== "CHECKPOINT_STORE_NOT_HEALTHY");
+    if (runtimeHealth === "corrupt" || ownIssues.some((issue) => issue.severity === "corrupt")) runtimeHealth = "corrupt";
+    else if (ownIssues.some((issue) => issue.severity === "degraded") || recoveryRequired.length > 0) runtimeHealth = "degraded";
     if (integrityIssues.length > 0) lastHealthError = `${integrityIssues[0].code}: ${integrityIssues[0].message}`.slice(0, 1024);
+    else if (health === "healthy") lastHealthError = null;
     return {
       schema_version: DEV_TRANSACTION_SCHEMA_VERSION,
       health,
