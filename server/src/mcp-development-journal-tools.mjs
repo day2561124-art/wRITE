@@ -1270,28 +1270,19 @@ export function createDevOperationJournalService({
     const record = normalizeExecutionProjection(value);
     if (!Number.isSafeInteger(expected_revision) || expected_revision < 0
       || typeof validateHistory !== "function") throw new Error("Invalid Pi persistence binding.");
-    await assertMutationAllowed();
     for (let pass = 0; pass < DEV_JOURNAL_VERIFY_MAX_CATCHUP_PASSES; pass += 1) {
+      await assertMutationAllowed();
       const verification = await verify();
       const { eventsPath } = await ensureStorageRoot(storageRoot);
-      const handle = await acquireJournalLock(lockPath, { timeoutMs: lockAcquireTimeoutMs });
+      // Validate the captured immutable history and candidate before taking the
+      // append lock. Exact head CAS below discards this work on any publication.
+      const history = executionProjectionEvents(verification.events);
+      const latest = validateHistory(history);
+      const existing = [...latest.values()].find(event => event.execution_projection.intent.intent_id === record.intent.intent_id);
+      function conflict(code) { const error = new Error(code); error.code = code; throw error; }
+      let publication = null, publicationFailure = null;
       try {
-        const head = await readHead(headPath);
-        // Safe storage contention only: no tool action has been dispatched.
-        if (canonicalJson(head) !== canonicalJson(verification.head)) continue;
-        const history = executionProjectionEvents(verification.events);
-        const latest = validateHistory(history);
-        const existing = [...latest.values()].find(event => event.execution_projection.intent.intent_id === record.intent.intent_id);
-        function conflict(code) { const error = new Error(code); error.code = code; throw error; }
-        // Trusted host admission authority runs inside the same CAS/append lock as publication.
-        if (expected_revision === 0 && admissionGuard !== undefined) {
-          if (typeof admissionGuard !== "function") conflict("INVALID_ADMISSION_AUTHORITY");
-          await admissionGuard({ history, latest, existing, record, allEvents: verification.events });
-        }
-        if (expected_revision === 0 && existing) {
-          if (existing.execution_projection.state.intent_hash !== record.state.intent_hash) conflict("INTENT_ID_CONFLICT");
-          return existing;
-        }
+      if (!(expected_revision === 0 && existing)) {
         const previous = latest.get(record.state.operation_id)?.execution_projection ?? null;
         if ((previous?.revision ?? 0) !== expected_revision) conflict("STATE_REVISION_CONFLICT");
         if (record.revision !== expected_revision + 1
@@ -1318,7 +1309,7 @@ export function createDevOperationJournalService({
           result: metadata, links, targets: [],
         };
         const started = normalizeBaseEvent({ ...base, stage: "operation_started" }, {
-          sequence: head.latest_sequence + 1, previousEventHash: head.latest_event_hash,
+          sequence: verification.head.latest_sequence + 1, previousEventHash: verification.head.latest_event_hash,
           eventId: eventIdGenerator(), timestamp,
         });
         const completed = normalizeBaseEvent({ ...base, stage: "operation_completed", execution_projection: record }, {
@@ -1328,6 +1319,29 @@ export function createDevOperationJournalService({
         validateHistory([...history, completed]);
         const encoded = [started, completed].map(event => canonicalJson(event) + "\n");
         if (encoded.some(text => Buffer.byteLength(text, "utf8") > DEV_JOURNAL_MAX_EXECUTION_EVENT_BYTES)) conflict("EXECUTION_PROJECTION_SIZE_LIMIT");
+        publication = { started, completed, encoded };
+      }
+      } catch (error) {
+        // Preserve the original locked Admission-before-candidate error order.
+        // A semantic capacity rejection is not evidence of corrupt history.
+        // On head drift the stale candidate result is discarded, as before.
+        publicationFailure = { error };
+      }
+      const handle = await acquireJournalLock(lockPath, { timeoutMs: lockAcquireTimeoutMs });
+      try {
+        const head = await readHead(headPath);
+        if (canonicalJson(head) !== canonicalJson(verification.head)) continue;
+        // Trusted host admission authority runs inside the same CAS/append lock as publication.
+        if (expected_revision === 0 && admissionGuard !== undefined) {
+          if (typeof admissionGuard !== "function") conflict("INVALID_ADMISSION_AUTHORITY");
+          await admissionGuard({ history, latest, existing, record, allEvents: verification.events });
+        }
+        if (expected_revision === 0 && existing) {
+          if (existing.execution_projection.state.intent_hash !== record.state.intent_hash) conflict("INTENT_ID_CONFLICT");
+          return existing;
+        }
+        if (publicationFailure) throw publicationFailure.error;
+        const { started, completed, encoded } = publication;
         await executionPublicationHook?.("before_events");
         await writeExclusiveDurableFile(path.join(eventsPath, eventFilename(started.sequence, started.journal_event_id)), encoded[0]);
         await executionPublicationHook?.("after_started");
