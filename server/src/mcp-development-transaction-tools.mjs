@@ -119,12 +119,18 @@ function assertCheckpointId(value) {
   return value;
 }
 
-function normalizeRelativePath(value) {
+// Git baseline names are metadata; actual restore targets retain strict policy.
+function normalizeInventoryPath(value) {
   if (typeof value !== "string" || !value.trim()) throw transactionError("TRANSACTION_PLAN_INVALID", "Transaction artifact path must be a non-blank relative path.");
   const normalized = value.replaceAll("\\", "/").replace(/^\.\//u, "");
   if (path.posix.isAbsolute(normalized) || normalized.split("/").includes("..") || normalized.includes("\u0000")) {
     throw transactionError("TRANSACTION_PLAN_INVALID", `Unsafe transaction path: ${value}.`);
   }
+  return normalized;
+}
+
+function normalizeRelativePath(value) {
+  const normalized = normalizeInventoryPath(value);
   const lower = normalized.toLowerCase();
   if (lower === ".git" || lower.startsWith(".git/") || lower.startsWith("data/outputs/logs/development_runtime/")) {
     throw transactionError("TRANSACTION_PROTECTED_PATH", `Transaction path is protected: ${normalized}.`);
@@ -450,8 +456,8 @@ async function gitBaselineState(context, gitHead, relativePath) {
 }
 
 async function gitBaselinePaths(context, gitHead) {
-  const result = await runGit(context.root, ["ls-tree", "-r", "--name-only", gitHead]);
-  return String(result.stdout).split(/\r?\n/u).filter(Boolean).map(normalizeRelativePath);
+  const result = await runGit(context.root, ["ls-tree", "-r", "-z", "--name-only", gitHead]);
+  return String(result.stdout).split("\u0000").filter(Boolean).map(normalizeInventoryPath);
 }
 
 function directoryExpected(content, baselinePaths, directory) {
@@ -527,7 +533,7 @@ async function buildPlan({ transactionId, context, targetCheckpoint, recoveryChe
   const caseAliases = new Map();
   const baselineCaseAliases = new Map();
   for (const baselinePath of baselinePaths) {
-    const canonicalBaseline = normalizeRelativePath(baselinePath);
+    const canonicalBaseline = normalizeInventoryPath(baselinePath);
     const lowerBaseline = canonicalBaseline.toLocaleLowerCase("en-US");
     const existingBaseline = baselineCaseAliases.get(lowerBaseline);
     if (existingBaseline && existingBaseline !== canonicalBaseline) {
