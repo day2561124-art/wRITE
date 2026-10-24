@@ -1,3 +1,4 @@
+import {decodeGitOutputStrict,parseGitPorcelainV1Z} from './git-status-porcelain.mjs';
 import { spawn, execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { promisify } from "node:util";
@@ -50,7 +51,7 @@ async function defaultResolveWorkspace(workspaceId) {
   return resolveDevWorkspaceExecutionContext({ workspace_id: workspaceId }, { mutation: false });
 }
 
-async function runGit(repositoryRoot, args) {
+async function runGit(repositoryRoot, args, {raw = false} = {}) {
   const { stdout } = await execFileAsync(
     fixedGitExecutable,
     ["--no-pager", "-c", "core.fsmonitor=false", ...args],
@@ -67,19 +68,16 @@ async function runGit(repositoryRoot, args) {
       timeout: 10_000,
       maxBuffer: 2 * 1024 * 1024,
       shell: false,
+      encoding: "buffer",
     },
   );
-  return String(stdout).trim();
+  const text = decodeGitOutputStrict(stdout);
+  return raw ? text : text.trim();
 }
 
-function parsePorcelainPath(line) {
-  const raw = line.slice(3);
-  const arrowIndex = raw.lastIndexOf(" -> ");
-  return (arrowIndex === -1 ? raw : raw.slice(arrowIndex + 4)).replaceAll("\\", "/");
-}
 
 function projectedStateFromStatus(line) {
-  const xy = line.slice(0, 2);
+  const xy = line.status;
   if (xy === "??") return "untracked";
   if (xy.includes("D")) return "deleted";
   if (xy.includes("A")) return "added";
@@ -93,7 +91,7 @@ function snapshotGitProjection(snapshot) {
   const head = String(snapshot.head ?? "").toLowerCase();
   if (!/^[a-f0-9]{40}$/u.test(head)) throw new Error("workspace snapshot Git projection HEAD is invalid.");
   const entries = snapshot.manifest.map((entry) => ({
-    path: String(entry?.path ?? "").replaceAll("\\", "/"),
+    path: String(entry?.path ?? ""),
     state: String(entry?.state ?? ""),
   }));
   if (entries.some((entry) => !entry.path || !["modified", "added", "deleted", "untracked"].includes(entry.state))) {
@@ -105,15 +103,15 @@ function snapshotGitProjection(snapshot) {
 
 async function currentGitProjection(repositoryRoot) {
   const headBefore = (await runGit(repositoryRoot, ["rev-parse", "--verify", "HEAD"])).toLowerCase();
-  const status = await runGit(repositoryRoot, ["status", "--porcelain=v1", "--untracked-files=all"]);
+  const status = await runGit(repositoryRoot, ["status", "--porcelain=v1", "-z", "--untracked-files=all"], {raw: true});
   const headAfter = (await runGit(repositoryRoot, ["rev-parse", "--verify", "HEAD"])).toLowerCase();
   if (!/^[a-f0-9]{40}$/u.test(headBefore) || !/^[a-f0-9]{40}$/u.test(headAfter)) {
     throw new Error("workspace Git projection HEAD is invalid.");
   }
   if (headBefore !== headAfter) throw new Error("workspace Git projection changed while being read.");
   const normalizedHead = headAfter;
-  const entries = status.split(/\r?\n/u).filter(Boolean).map((line) => ({
-    path: parsePorcelainPath(line),
+  const entries = parseGitPorcelainV1Z(status).map((line) => ({
+    path: line.path,
     state: projectedStateFromStatus(line),
   }));
   entries.sort((left, right) => left.path.localeCompare(right.path) || left.state.localeCompare(right.state));

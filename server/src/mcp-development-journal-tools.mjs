@@ -1,3 +1,4 @@
+import {decodeGitOutputStrict,parseGitPorcelainV1Z} from './git-status-porcelain.mjs';
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -2629,15 +2630,11 @@ async function runSnapshotGit(repositoryRoot, args) {
     timeout: 30_000,
     maxBuffer: 2 * 1024 * 1024,
     shell: false,
+    encoding: "buffer",
   });
-  return String(stdout);
+  return decodeGitOutputStrict(stdout);
 }
 
-function parsePorcelainPath(line) {
-  const raw = line.slice(3);
-  const arrowIndex = raw.lastIndexOf(" -> ");
-  return (arrowIndex === -1 ? raw : raw.slice(arrowIndex + 4)).replaceAll("\\", "/");
-}
 
 function elapsedSnapshotMs(startedAt) {
   return Math.max(0, performance.now() - startedAt);
@@ -2697,7 +2694,7 @@ async function computeWorkspaceSnapshotAttempt(context, {
     head = (await runSnapshotGit(context.root, ["rev-parse", "--verify", "HEAD"])).trim().toLowerCase();
     gitHeadMs = elapsedSnapshotMs(headStartedAt);
     const statusStartedAt = performance.now();
-    rawStatus = await runSnapshotGit(context.root, ["status", "--porcelain=v1", "--untracked-files=all"]);
+    rawStatus = await runSnapshotGit(context.root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
     gitStatusMs = elapsedSnapshotMs(statusStartedAt);
   } catch (error) {
     const fixtureHead = String(context.current_head ?? "").toLowerCase();
@@ -2751,7 +2748,7 @@ async function computeWorkspaceSnapshotAttempt(context, {
   }
   if (!gitSha1Pattern.test(head)) throw new Error("Workspace snapshot could not read a valid HEAD.");
 
-  const statusLines = rawStatus.split(/\r?\n/u).filter(Boolean);
+  const statusLines = parseGitPorcelainV1Z(rawStatus);
   const resolvedRepositoryRoot = path.resolve(context.root);
   let realRepositoryRoot = resolvedRepositoryRoot;
   let rootResolveMs = 0;
@@ -2761,8 +2758,8 @@ async function computeWorkspaceSnapshotAttempt(context, {
     rootResolveMs = elapsedSnapshotMs(rootResolveStartedAt);
   }
   const entries = statusLines.map((line, statusIndex) => {
-    const xy = line.slice(0, 2);
-    const artifactPath = parsePorcelainPath(line);
+    const xy = line.status;
+    const artifactPath = line.path;
     let state = "modified";
     if (xy === "??") state = "untracked";
     else if (xy.includes("D")) state = "deleted";
@@ -3270,7 +3267,7 @@ export async function computeWorkspaceSnapshot(context, options = {}) {
 
     const consistencyRecheckStartedAt = performance.now();
     const recheckHead = (await runSnapshotGit(context.root, ["rev-parse", "--verify", "HEAD"])).trim().toLowerCase();
-    const recheckStatus = await runSnapshotGit(context.root, ["status", "--porcelain=v1", "--untracked-files=all"]);
+    const recheckStatus = await runSnapshotGit(context.root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
     timingTotals.consistency_recheck_ms += elapsedSnapshotMs(consistencyRecheckStartedAt);
 
     let artifactVersionsStable = true;

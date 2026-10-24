@@ -178,7 +178,7 @@ async function fixture() {
     'mcp-runtime-diagnostics.mjs', 'mcp-runtime-readiness.mjs', 'mcp-request-tracing.mjs',
     'pi-durable-worker-supervisor.mjs', 'pi-durable-worker-protocol.mjs',
     'mcp-workspace-snapshot-authority.mjs', 'mcp-workspace-snapshot-authority-ipc.mjs', 'mcp-workspace-change-clock.mjs',
-    'mcp-workspace-change-clock-provider.mjs',
+    'mcp-workspace-change-clock-provider.mjs', 'git-status-porcelain.mjs',
     'world-simulation-prepared-turn-ephemeral-broker.mjs', 'world-simulation-prepared-turn-broker-ipc.mjs',
     'world-simulation-formal-experiential-deliberation-contract.mjs',
     'canonical-json-hash-service.mjs', 'process-control.mjs', 'file-transactions.mjs', 'project-paths.mjs',
