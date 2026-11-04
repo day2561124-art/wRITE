@@ -114,6 +114,7 @@ $requestId = $null
 $resultPath = $null
 $stdoutPath = $null
 $stderrPath = $null
+$process = $null
 $startedAt = [Diagnostics.Stopwatch]::StartNew()
 
 try {
@@ -152,6 +153,10 @@ try {
 
     $process = Start-Process -FilePath $powershellExe -ArgumentList $argumentString -WorkingDirectory $cwdResolved -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -WindowStyle Hidden -PassThru
 
+    # Retain the native process handle before it can exit. PS5.1 Start-Process
+    # otherwise may expose a null ExitCode after WaitForExit/Refresh.
+    $null = $process.Handle
+
     $finished = $process.WaitForExit($timeoutMs)
     $timedOut = -not $finished
     if ($timedOut) {
@@ -165,7 +170,11 @@ try {
     $stdout = Read-BoundedUtf8 -Path $stdoutPath
     $stderr = Read-BoundedUtf8 -Path $stderrPath
     if (-not $timedOut) { $process.Refresh() }
-    $exitCode = if ($timedOut -or -not $process.HasExited) { $null } else { [int]$process.ExitCode }
+    $rawExitCode = if ($timedOut -or -not $process.HasExited) { $null } else { $process.ExitCode }
+    if (-not $timedOut -and $null -eq $rawExitCode) {
+        throw 'Native process exit code is unavailable; success cannot be established.'
+    }
+    $exitCode = if ($null -eq $rawExitCode) { $null } else { [int]$rawExitCode }
 
     Write-Result -ResultPath $resultPath -Payload @{
         schema_version = 1
@@ -200,6 +209,7 @@ catch {
     }
 }
 finally {
+    if ($null -ne $process) { $process.Dispose() }
     Remove-Item -LiteralPath $workingPath -Force -ErrorAction SilentlyContinue
     if ($stdoutPath) { Remove-Item -LiteralPath $stdoutPath -Force -ErrorAction SilentlyContinue }
     if ($stderrPath) { Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue }

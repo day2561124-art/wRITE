@@ -258,4 +258,6 @@ try {
   await rm(tempRoot, { recursive: true, force: true });
 }
 
+await import("./mcp-powershell-admin-native-exit.test.mjs");
+
 console.log("PowerShell maintenance tool tests passed.");
