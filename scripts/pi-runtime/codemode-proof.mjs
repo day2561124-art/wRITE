@@ -58,6 +58,14 @@ try {
   assert.equal(timeout.ok, false);
   assert.equal(timeout.error.kind, "timeout");
 
+  const cancellation = new AbortController();
+  const pending = sandbox.execute("while (true) {}", { signal: cancellation.signal });
+  const cancelTimer = setTimeout(() => cancellation.abort(), 100);
+  const cancelled = await pending;
+  clearTimeout(cancelTimer);
+  assert.equal(cancelled.ok, false);
+  assert.equal(cancelled.error.kind, "aborted");
+
   const afterTimeout = await sandbox.execute("return 7;");
   assert.equal(afterTimeout.ok, true);
   assert.equal(afterTimeout.value, 7);

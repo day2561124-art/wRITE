@@ -56,6 +56,8 @@ realTest("Pi bridge blocks extra args, workspace switching and ambient capabilit
     "return await tools.dev_list_directory({path:'.', command:'arbitrary'});",
     "return await tools.dev_read_file({path:'fixture.md',maxBytes:8193});",
     "return await tools.dev_git_push({});",
+    "return await tools.dev_read_file({path:'fixture.md',maxBytes:'8'});",
+    "return await tools.dev_list_directory({path:'.',maxEntries:'2'});",
   ]) assert.equal((await executePiReadOnly({ code }, options)).ok, false);
   assert.equal(host, 0);
   const globals = await executePiReadOnly({ code: "return [typeof process,typeof require,typeof fetch,typeof models,typeof setTimeout];" }, options);

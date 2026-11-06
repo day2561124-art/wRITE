@@ -110,3 +110,28 @@ test("Pi runtime status preserves bounded probe failure state", async () => {
   assert.equal(status.reason, "sidecar_probe_failed");
   assert.equal(status.probe.exit_code, 1);
 });
+
+test("Installed Pi matches the pinned runtime and executes SDK to MCP with durable session restore", { timeout: 90_000 }, async (t) => {
+  const { existsSync, readFileSync } = await import("node:fs");
+  const installed = new URL("../../scripts/pi-runtime/node_modules/@earendil-works/pi-coding-agent/package.json", import.meta.url);
+  if (!existsSync(installed) || !isPiNodeVersionCompatible(process.versions.node)) {
+    t.skip("optional installed Pi sidecar and supported Node required");
+    return;
+  }
+  const manifest = JSON.parse(readFileSync(new URL("../../scripts/pi-runtime/package.json", import.meta.url), "utf8"));
+  const actual = await getPiRuntimeStatus();
+  assert.equal(actual.ready, true);
+  assert.equal(actual.probe.package_version, manifest.dependencies[PI_PACKAGE_NAME]);
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const { fileURLToPath } = await import("node:url");
+  const { stdout } = await promisify(execFile)(process.execPath,
+    [fileURLToPath(new URL("../../scripts/pi-runtime/sdk-proof.mjs", import.meta.url))],
+    { timeout: 60_000, windowsHide: true, maxBuffer: 64 * 1024, encoding: "utf8" });
+  const result = JSON.parse(stdout.trim());
+  assert.equal(result.ok, true);
+  assert.equal(result.model_requests, 0);
+  assert(result.checks.includes("real_stdio_mcp"));
+  assert(result.checks.includes("session_disk_restore"));
+  assert(result.mcp_calls >= 6);
+});
