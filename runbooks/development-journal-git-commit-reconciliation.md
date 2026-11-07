@@ -45,3 +45,13 @@ Verify from a fresh process and the active MCP connection:
 `healthy`, `chain_verified=true`, `reconciliation_required=false`, active 0,
 dangling 0. Compare the entire old event prefix byte digest, registry digest,
 workspace HEAD/status and unrelated dirty-file hashes against the saved baseline.
+
+The host entry also accepts `integration_preflight_before_completion` for an exact
+`dev_workspace_integration_preflight` request rejected by the reviewed active-state
+guard before candidate creation. Supply the original request, active workstream
+revision/state/update time, workstream and integration registry byte digests, and
+the pinned integration implementation digest, plus the same terminal/GPT decision
+fields. Inspect and apply must use identical JSON. Dead same-host owners, no
+unrelated pending operations, verified registry checksums, no source candidates,
+and unchanged physical evidence are required at each append. No preflight replay
+is authorized. Keep this decoder in future deployments for historical reads.

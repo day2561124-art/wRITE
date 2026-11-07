@@ -275,3 +275,5 @@ test('completed powershell child ambiguity resolves append-only with exact recei
  const operation=await reopened.getOperation({operation_id:outer.operation_id});
  assert.equal(operation.reconciliation_state,'completed');assert.equal(operation.automatic_replay_allowed,false);assert.equal(operation.safe_to_reinitiate,false);
 });
+
+import './pi-integration-preflight-resolution.test.mjs';
