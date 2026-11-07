@@ -277,3 +277,13 @@ test('completed powershell child ambiguity resolves append-only with exact recei
 });
 
 import './pi-integration-preflight-resolution.test.mjs';
+
+test('interrupted launcher exception requires the exact reviewed immutable receipt',async()=>{
+ const {REVIEWED_INTERRUPTED_LAUNCHER:p,isReviewedInterruptedLauncherReceipt:accept}=await import('../../server/src/mcp-development-journal-tools.mjs');
+ const start={event_hash:p.start_hash};const done={event_hash:p.child_terminal_hash,result:{command_sha256:p.command_sha256,timed_out:true,execution_ok:true,exit_code:0}};
+ const input={operation_id:p.operation_id,expected_terminal_hash:p.terminal_hash,expected_child_terminal_hash:p.child_terminal_hash,expected_command_sha256:p.command_sha256,observed_exit_code:0};
+ assert.equal(accept(start,done,input),true);
+ for(const field of ['operation_id','expected_terminal_hash','expected_child_terminal_hash','expected_command_sha256'])assert.equal(accept(start,done,{...input,[field]:'different'}),false);
+ for(const change of [{exit_code:1},{execution_ok:false},{timed_out:false},{command_sha256:'b'.repeat(64)}])assert.equal(accept(start,{...done,result:{...done.result,...change}},input),false);
+ assert.equal(accept({event_hash:'b'.repeat(64)},done,input),false);assert.equal(accept(start,{...done,event_hash:'b'.repeat(64)},input),false);
+});

@@ -42,6 +42,23 @@ const parentWorkspaceSnapshotAuthorityIpcClient =
     ? createWorkspaceSnapshotAuthorityIpcClient()
     : null;
 
+// One reviewed launcher exited zero, but its detached waiter's inherited pipe
+// held the outer call past its deadline. This is not a general timeout override.
+export const REVIEWED_INTERRUPTED_LAUNCHER = Object.freeze({
+  operation_id:"dev_operation_cfbd683c22734ae9a45470ab235f5a31",
+  start_hash:"06d5ecdbd65a56b14d895070df1eed2f864587476dfa67d6bdbe28d0fc006b56",
+  terminal_hash:"ae06b5db04cb677cd2c91285db3c88eceb2250ff4a232c14eb42af5904206edd",
+  child_terminal_hash:"dd17b15402d2c3dec46ffb25381c89ee271a88f5348276b03944ab0de564c9e8",
+  command_sha256:"aad6eb02a03fc798001241de10218f9013d5c58d6baf9d9dc76e9a5913be825a",
+});
+export function isReviewedInterruptedLauncherReceipt(started,done,input) {
+  const p=REVIEWED_INTERRUPTED_LAUNCHER;
+  return input.operation_id===p.operation_id&&started?.event_hash===p.start_hash
+    &&input.expected_terminal_hash===p.terminal_hash&&done?.event_hash===p.child_terminal_hash
+    &&input.expected_child_terminal_hash===p.child_terminal_hash&&input.expected_command_sha256===p.command_sha256
+    &&done.result?.command_sha256===p.command_sha256&&done.result?.timed_out===true
+    &&done.result?.execution_ok===true&&done.result?.exit_code===0&&input.observed_exit_code===0;
+}
 export const INTEGRATION_PREFLIGHT_RESOLUTION = "integration_preflight_before_completion";
 const INTEGRATION_PREFLIGHT_SOURCE = "115451a8cfb65c097ff3db87c5618997e13bf3bb11463c447884c97e7e2233be";
 export const DEV_JOURNAL_SCHEMA_VERSION = 1;
@@ -826,7 +843,7 @@ export function createDevOperationJournalService({
       ||!sha256Pattern.test(input.expected_command_sha256??"")||!Number.isSafeInteger(input.observed_exit_code)
       ||child.result?.command_sha256!==input.expected_command_sha256||done.result?.command_sha256!==input.expected_command_sha256
       ||child.result?.cwd!==done.result?.cwd||child.result?.elevated!==expectedElevated||done.result?.elevated!==expectedElevated
-      ||child.result?.timeout_ms!==done.result?.timeout_ms||done.result?.execution_ok!==true||done.result?.timed_out!==false
+      ||child.result?.timeout_ms!==done.result?.timeout_ms||done.result?.execution_ok!==true||(done.result?.timed_out!==false&&!isReviewedInterruptedLauncherReceipt(started,done,input))
       ||done.result?.exit_code!==input.observed_exit_code
       ||events.some(e=>e.parent_operation_id===child.operation_id&&e.stage==="operation_started")
       ||input.decision_owner!=="GPT"||!/^gpt-[A-Za-z0-9._:-]{1,120}$/u.test(input.decision_id??"")
@@ -960,6 +977,29 @@ export function createDevOperationJournalService({
     if((await registry('integration','candidates',input.integration_registry_sha256)).some(c=>c.workstream_id===input.original_request.workstream_id))fail();
   }
 
+  async function inspectInterruptedLauncherEvidence(events,input) {
+    const fail=()=>{throw new Error("UNSAFE_INTERRUPTED_LAUNCHER_RESOLUTION");};
+    if(input.operation_id!==REVIEWED_INTERRUPTED_LAUNCHER.operation_id||isProcessRunning(7564)
+      ||events.some(e=>e.sequence>59601&&e.stage==="operation_started"&&e.diagnostic?.owner_pid===7564))fail();
+    const base=await realpath(resolutionEvidenceRoot);
+    const pins=[
+      ["data/outputs/logs/pi-upgrade-20261107/prepare-integration-f05ced8c3cbb.mjs","0744e4d8decc58d006536bac886eaae121d233b6f29aa0bee32e163895bdce85"],
+      ["data/outputs/logs/pi-upgrade-20261107/integration-f05ced8c3cbb.status.json","e03ce0af34c96fc4fc156c0a3c05f191066a812a0f5e657324c0e5b8dfb614cd"],
+      ["data/outputs/logs/development_runtime/workstream_registry.json","683622fb7f24c20e78d2f69e9188e16b61ee6e616970b4baa0084bd3f1a50879"],
+      ["data/outputs/logs/development_runtime/integration_registry.json","cba8a1d2f3e90e7bb6b7a0b11ded02b1a8b26297d5ecda6d9932dfaadd8e1a24"],
+    ];
+    for(const [relative,digest] of pins){
+      let current=base;const parts=relative.split('/');
+      for(const [i,part] of parts.entries()){
+        current=path.join(current,part);const info=await lstat(current);
+        if(info.isSymbolicLink()||(i<parts.length-1?!info.isDirectory():!info.isFile()||info.size>4*1024*1024))fail();
+      }
+      if(createHash('sha256').update(await readFile(current)).digest('hex')!==digest)fail();
+    }
+    const head=await execFileAsync(fixedGitExecutable,["rev-parse","HEAD"],{cwd:base,env:controlledProcessEnvironment(),timeout:10000,windowsHide:true});
+    if(head.stdout.trim()!=="570563664d351017d87dd0f13961ed5f7d34e4ab")fail();
+  }
+
   const validateResolution=(events,input)=>input?.resolution_kind===INTEGRATION_PREFLIGHT_RESOLUTION
     ?validateIntegrationPreflightResolution(events,input)
     :input?.resolution_kind===POWERSHELL_EFFECT_RESOLUTION
@@ -987,10 +1027,10 @@ export function createDevOperationJournalService({
       const proof=JSON.parse(event.result?.resolution_record??"null");
       const {started,terminal}=validateResolution(events,proof??{});
       const admission=events.find(e=>e.operation_id===event.operation_id&&e.stage==="operation_started");
-      if(["completed_git_commit", WORKSTREAM_STALE_RESOLUTION, WORKSTREAM_COMMITTED_RESOLUTION, WORKSTREAM_METADATA_LIMIT_RESOLUTION, ISOLATION_RESOLUTION, POWERSHELL_EFFECT_RESOLUTION, INTEGRATION_PREFLIGHT_RESOLUTION].includes(proof.resolution_kind) && (
+      if((["completed_git_commit", WORKSTREAM_STALE_RESOLUTION, WORKSTREAM_COMMITTED_RESOLUTION, WORKSTREAM_METADATA_LIMIT_RESOLUTION, ISOLATION_RESOLUTION, POWERSHELL_EFFECT_RESOLUTION, INTEGRATION_PREFLIGHT_RESOLUTION].includes(proof.resolution_kind) || proof.resolution_kind==="completed_powershell_observation"&&proof.operation_id===REVIEWED_INTERRUPTED_LAUNCHER.operation_id) && (
         admission?.reconciliation_key !== "resolution:" + started.operation_id
         || admission?.request_fingerprint_sha256 !== sha256Text(canonicalJson(proof))
-        || admission?.tool_name !== (proof.resolution_kind === INTEGRATION_PREFLIGHT_RESOLUTION ? "pi.journal.resolve_integration_preflight" : proof.resolution_kind === ISOLATION_RESOLUTION ? ISOLATION_RESOLUTION_TOOL : proof.resolution_kind === POWERSHELL_EFFECT_RESOLUTION ? "pi.journal.resolve_powershell_effect" : proof.resolution_kind === WORKSTREAM_COMMITTED_RESOLUTION
+        || admission?.tool_name !== (proof.resolution_kind === "completed_powershell_observation" ? "pi.journal.resolve_completed_powershell" : proof.resolution_kind === INTEGRATION_PREFLIGHT_RESOLUTION ? "pi.journal.resolve_integration_preflight" : proof.resolution_kind === ISOLATION_RESOLUTION ? ISOLATION_RESOLUTION_TOOL : proof.resolution_kind === POWERSHELL_EFFECT_RESOLUTION ? "pi.journal.resolve_powershell_effect" : proof.resolution_kind === WORKSTREAM_COMMITTED_RESOLUTION
           ? "pi.journal.resolve_workstream_committed" : proof.resolution_kind === WORKSTREAM_METADATA_LIMIT_RESOLUTION ? "pi.journal.resolve_workstream_metadata_limit" : proof.resolution_kind === WORKSTREAM_STALE_RESOLUTION
           ? "pi.journal.resolve_workstream_stale" : "pi.journal.resolve_completed_git_commit")
         || event.tool_name !== admission.tool_name || admission.sequence <= terminal.sequence || event.sequence <= admission.sequence
@@ -1719,7 +1759,8 @@ export function createDevOperationJournalService({
     const workstreamCommitted=resolutionKind===WORKSTREAM_COMMITTED_RESOLUTION;
     const powershellEffect=resolutionKind===POWERSHELL_EFFECT_RESOLUTION;
     const integrationPreflight=resolutionKind===INTEGRATION_PREFLIGHT_RESOLUTION;
-    const evidenceBound=completedGit||workstreamStale||workstreamCommitted||powershellEffect||integrationPreflight;
+    const interruptedLauncher=completedPowershell&&input.operation_id===REVIEWED_INTERRUPTED_LAUNCHER.operation_id;
+    const evidenceBound=completedGit||workstreamStale||workstreamCommitted||powershellEffect||integrationPreflight||interruptedLauncher;
     const resolutionFields=isolation?["resolution_kind","original_request","observation","observation_sha256","authority_receipt"]:completedChild?["resolution_kind","expected_child_terminal_hash","observed_sha256"]
       :completedPowershell?["resolution_kind","expected_child_terminal_hash","expected_command_sha256","observed_exit_code"]
         :powershellEffect?["resolution_kind","parent_operation_id","parent_terminal_hash","child_operation_id","child_terminal_hash",
@@ -1760,18 +1801,19 @@ export function createDevOperationJournalService({
     await checkIsolation(verification);
     if(terminal.diagnostic.hostname!==os.hostname()||isProcessRunning(terminal.diagnostic.owner_pid))
       throw new Error("RESOLUTION_OWNER_STILL_ACTIVE");
-    const checkPreflight=async snapshot=>{
-      if(!integrationPreflight)return;
-      validateIntegrationPreflightResolution(snapshot.events,input);
+    const checkRecoveryEvidence=async snapshot=>{
+      if(!integrationPreflight&&!interruptedLauncher)return;
+      validateResolution(snapshot.events,input);
       if(started.diagnostic.hostname!==os.hostname()||terminal.diagnostic.hostname!==os.hostname()
         ||isProcessRunning(started.diagnostic.owner_pid)||isProcessRunning(terminal.diagnostic.owner_pid)
         ||[...snapshot.active_operations,...snapshot.dangling_operations].some(id=>{
           const e=snapshot.events.find(e=>e.operation_id===id&&e.stage==="operation_started");
           return e?.operation_type!=="pi_terminal_resolution"||e.parent_operation_id!==started.operation_id
-            ||e.tool_name!=="pi.journal.resolve_integration_preflight"||e.result?.resolution_record!==canonicalJson(input)
+            ||e.tool_name!==(interruptedLauncher?"pi.journal.resolve_completed_powershell":"pi.journal.resolve_integration_preflight")||e.result?.resolution_record!==canonicalJson(input)
             ||e.diagnostic.hostname!==os.hostname()||e.diagnostic.owner_pid!==process.pid&&isProcessRunning(e.diagnostic.owner_pid);
         }))throw new Error("RESOLUTION_OWNER_STILL_ACTIVE");
-      await inspectIntegrationPreflightEvidence(input);
+      if(interruptedLauncher)await inspectInterruptedLauncherEvidence(snapshot.events,input);
+      else await inspectIntegrationPreflightEvidence(input);
     };
     const inspectShell=()=>inspectPowershellTarget(verification.events,input);
     const checkShell=async snapshot=>{
@@ -1788,7 +1830,7 @@ export function createDevOperationJournalService({
       if(started.diagnostic.hostname!==os.hostname()||isProcessRunning(started.diagnostic.owner_pid)
         ||unrelatedPending)
         throw new Error("RESOLUTION_OWNER_STILL_ACTIVE");
-      if(integrationPreflight)await checkPreflight(verification);
+      if(integrationPreflight||interruptedLauncher)await checkRecoveryEvidence(verification);
       else if(powershellEffect) await inspectShell();
       else if(completedGit) await inspectCompletedGitCommit(started,terminal,input);
       else if(workstreamCommitted) await inspectWorkstreamCommittedResolution(resolutionEvidenceRoot,started,terminal,input,verification.events);
@@ -1820,7 +1862,7 @@ export function createDevOperationJournalService({
               :workstreamCommitted?"pi.journal.resolve_workstream_committed"
               :workstreamMetadata?"pi.journal.resolve_workstream_metadata_limit":workstreamStale?"pi.journal.resolve_workstream_stale":"pi.journal.resolve_no_child_create",
         workspace_id:started.workspace_id,workstream_id:started.workstream_id,parent_operation_id:started.operation_id,
-        reconciliation_key:key,request_fingerprint_sha256:fingerprint,result:{resolution_record:canonicalJson(input)}}, {beforeAppend:integrationPreflight?checkPreflight:powershellEffect?checkShell:checkIsolation});
+        reconciliation_key:key,request_fingerprint_sha256:fingerprint,result:{resolution_record:canonicalJson(input)}}, {beforeAppend:(integrationPreflight||interruptedLauncher)?checkRecoveryEvidence:powershellEffect?checkShell:checkIsolation});
       if(isolation)await isolationResolutionPublicationHook?.("after_admission");
       if(powershellEffect)await powershellResolutionPublicationHook?.("after_admission");
     }catch(error){if(error.code!=="RECONCILIATION_EXISTING_OPERATION")throw error;
@@ -1832,14 +1874,14 @@ export function createDevOperationJournalService({
     validateResolution(verification.events,input);
     await checkIsolation(verification);
     if(completedGit)await inspectCompletedGitCommit(started,terminal,input);
-    if(workstreamStale || workstreamCommitted || powershellEffect || integrationPreflight) {
+    if(workstreamStale || workstreamCommitted || powershellEffect || integrationPreflight || interruptedLauncher) {
       if(isProcessRunning(started.diagnostic.owner_pid) || isProcessRunning(terminal.diagnostic.owner_pid)
         || [...verification.active_operations,...verification.dangling_operations].some(id => {
           const event=verification.events.find(e=>e.operation_id===id&&e.stage==="operation_started");
           return event?.operation_type!=="pi_terminal_resolution" || event.parent_operation_id!==started.operation_id
             || event.result?.resolution_record!==canonicalJson(input);
         })) throw new Error("RESOLUTION_OWNER_STILL_ACTIVE");
-      if(integrationPreflight)await checkPreflight(verification);
+      if(integrationPreflight||interruptedLauncher)await checkRecoveryEvidence(verification);
       else if(powershellEffect) await inspectShell();
       else if(workstreamCommitted) await inspectWorkstreamCommittedResolution(resolutionEvidenceRoot,started,terminal,input,verification.events);
       else await (workstreamMetadata?inspectWorkstreamMetadataLimitResolution:inspectWorkstreamStaleResolution)(resolutionEvidenceRoot,started,terminal,input);
@@ -1849,7 +1891,7 @@ export function createDevOperationJournalService({
       result:{outcome:(completedChild||completedPowershell||completedGit||workstreamCommitted||powershellEffect||isolation&&input.observation.classification==='completed')?"intended_effect_observed":"no_effect_observed",reconciliation_required:false,resolution_record:canonicalJson(input),
         ...(isolation&&input.observation.classification==='completed'?input.observation.witness.binding:{}),
         ...(powershellEffect?{observed_effect:"detached_all_gate_completed",shell_exit_code_observed:false}:{})},
-      ...(integrationPreflight?{beforeAppend:checkPreflight}:isolation?{beforeAppend:checkIsolation}:powershellEffect?{beforeAppend:checkShell}:{}),
+      ...((integrationPreflight||interruptedLauncher)?{beforeAppend:checkRecoveryEvidence}:isolation?{beforeAppend:checkIsolation}:powershellEffect?{beforeAppend:checkShell}:{}),
       ...(completedGit?{links:[{relation:"committed_by",commit:input.observed_commit}]}:{})});}
     catch(error){verification=await verify();event=resolvedTerminals(verification.events).get(started.operation_id);if(!event)throw error;}
     if(isolation)await isolationResolutionPublicationHook?.("after_completed");
@@ -1862,6 +1904,7 @@ export function createDevOperationJournalService({
   const resolveNoChildMutation=input=>resolveTerminalMutation(input);
   const resolveCompletedChildMutation=input=>resolveTerminalMutation(input,"completed_child_create");
   const resolveCompletedPowershellMutation=input=>resolveTerminalMutation(input,"completed_powershell_observation");
+  const inspectCompletedPowershellMutation=input=>resolveTerminalMutation(input,"completed_powershell_observation",{dryRun:true});
   const resolveCompletedGitCommitMutation=input=>resolveTerminalMutation(input,"completed_git_commit");
   const inspectCompletedGitCommitMutation=input=>resolveTerminalMutation(input,"completed_git_commit",{dryRun:true});
   const resolveWorkstreamStaleMutation=input=>resolveTerminalMutation(input,WORKSTREAM_STALE_RESOLUTION);
@@ -2347,6 +2390,7 @@ function verifiedMcpTestResult(events,started,terminal) {
     resolveNoChildMutation,
     resolveCompletedChildMutation,
     resolveCompletedPowershellMutation,
+    inspectCompletedPowershellMutation,
     resolveCompletedGitCommitMutation,
     inspectCompletedGitCommitMutation,
     resolveWorkstreamStaleMutation,
