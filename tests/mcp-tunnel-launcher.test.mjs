@@ -18,6 +18,28 @@ import { terminateProcessTree } from "../server/src/process-control.mjs";
 
 // Keep Secure Tunnel coverage in the existing focused tunnel/full gate entry.
 await import('./secure-tunnel-launcher.test.mjs');
+await runStartupReadinessRegressions();
+
+// Legacy launcher fixtures use spawnSync. Keep deadline-sensitive protocol
+// tests in a separate Node process so those calls cannot block their timers.
+function runStartupReadinessRegressions() {
+  const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['--test', '--test-concurrency=1',
+      'tests/mcp/probe-startup-budget.test.mjs', 'tests/mcp/tailscale-startup.test.mjs'],
+      { cwd: projectRoot, env: { ...process.env }, stdio: ['ignore', 'inherit', 'inherit'], windowsHide: true });
+    const timer = setTimeout(() => {
+      terminateProcessTree(child);
+      reject(new Error('Startup readiness regression child exceeded 180000ms.'));
+    }, 180_000);
+    child.once('error', error => { clearTimeout(timer); reject(error); });
+    child.once('close', code => {
+      clearTimeout(timer);
+      if (code === 0) resolve();
+      else reject(new Error('Startup readiness regressions exited with code ' + code));
+    });
+  });
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

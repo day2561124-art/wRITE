@@ -1,3 +1,4 @@
+import './mcp-startup-index-refresh-recovery.test.mjs';
 import {createHash} from 'node:crypto';
 import {promisify} from 'node:util';
 import {pathToFileURL} from 'node:url';

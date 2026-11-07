@@ -6,7 +6,7 @@ param(
   [switch]$EnsureMcpOnly,
   [string]$TailscalePath,
   [ValidateRange(1, 60)]
-  [int]$PublicReadyTimeoutSeconds = 30,
+  [int]$PublicReadyTimeoutSeconds = 60,
   [string]$LogDirectory
 )
 
@@ -20,36 +20,105 @@ $LogDir = if ($LogDirectory) {
   Join-Path $Root "data\outputs\logs"
 }
 $OriginUrl = "http://127.0.0.1:$McpPort"
-$FreshMcpProbeOperationTimeoutMilliseconds = 30000
+# Listener admission: 15s. Full protocol probe: at most 60s, including cleanup.
 
 function Invoke-McpProbe {
   param(
     [string]$Endpoint,
     [string]$Mode = "probe",
     [string]$ExpectedInstance = "",
-    [int]$OperationTimeoutMilliseconds = 0
+    [int]$BudgetMilliseconds = 60000
   )
-
+  $script:LastMcpProbeFailure = $null
   $probeScript = Join-Path $Root "scripts\probe-mcp.mjs"
-  $hadOperationTimeout = Test-Path Env:\PROBE_OP_TIMEOUT_MS
-  $originalOperationTimeout = $env:PROBE_OP_TIMEOUT_MS
+  $watch = [Diagnostics.Stopwatch]::StartNew()
+  $failure = [ordered]@{ code = "PROBE_PROCESS_FAILED"; phase = "spawn" }
+  $result = $null
+  $process = New-Object Diagnostics.Process
   try {
-    if ($OperationTimeoutMilliseconds -gt 0) {
-      $env:PROBE_OP_TIMEOUT_MS = [string]$OperationTimeoutMilliseconds
+    if ($BudgetMilliseconds -lt 2000) { throw "Insufficient probe budget" }
+    $start = New-Object Diagnostics.ProcessStartInfo
+    $start.FileName = (Get-Command node -ErrorAction Stop).Source
+    $start.Arguments = '"' + $probeScript + '" "' + $Endpoint + '" "' + $Mode + '" "' + $ExpectedInstance + '"'
+    $start.WorkingDirectory = $Root
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    # Child-local settings avoid leaking temporary probe deadlines into Pi or MCP.
+    $hard = [Math]::Min(60000, $BudgetMilliseconds - 1000)
+    $start.EnvironmentVariables['PROBE_OP_TIMEOUT_MS'] = '30000'
+    $start.EnvironmentVariables['PROBE_STARTUP_BUDGET_MS'] = [string][Math]::Min(45000, $hard - 1000)
+    $start.EnvironmentVariables['PROBE_HARD_DEADLINE_MS'] = [string]$hard
+    $process.StartInfo = $start
+    $null = $process.Start()
+    $output = $process.StandardOutput.ReadToEndAsync()
+    $errors = $process.StandardError.ReadToEndAsync()
+    if (-not $process.WaitForExit($BudgetMilliseconds)) {
+      $failure.code = 'PROBE_PROCESS_TIMEOUT'
+      $failure.phase = 'process'
+      # This process object is the probe we just created, never a port owner.
+      $process.Kill()
+      $null = $process.WaitForExit(1000)
+    } else {
+      $failure['exitCode'] = $process.ExitCode
+      $stderr = $errors.GetAwaiter().GetResult()
+      if ($process.ExitCode -eq 0) {
+        try {
+          $candidate = $output.GetAwaiter().GetResult() | ConvertFrom-Json
+          if (($Mode -eq 'identity' -and $candidate.service -eq 'writer-workbench-mcp' -and $candidate.pid -gt 0 -and $candidate.instanceId) -or
+              ($Mode -eq 'probe' -and $candidate.ok -eq $true -and $candidate.ready -eq $true -and $candidate.runtimeReadiness -eq 'ready' -and $candidate.toolCount -gt 0 -and $null -ne $candidate.resourceCount)) {
+            $result = $candidate
+          } else { $failure.code = 'INVALID_PROBE_RESULT'; $failure.phase = 'result' }
+        } catch { $failure.code = 'INVALID_PROBE_JSON'; $failure.phase = 'result' }
+      } else {
+        # Never log arbitrary native stderr or response bodies: they may contain
+        # credentials. Keep only the probe's structured, bounded diagnostic fields.
+        try {
+          $diagnostic = ($stderr.Trim() -split "\r?\n" | Select-Object -Last 1) | ConvertFrom-Json
+          if ($diagnostic.code -cmatch '^[A-Z][A-Z0-9_]{0,63}$') { $failure.code = $diagnostic.code }
+          if ($diagnostic.phase -cmatch '^[a-z/]{1,32}$') { $failure.phase = $diagnostic.phase }
+          foreach ($key in @('elapsedMs', 'startupBudgetMs', 'hardDeadlineMs', 'operationTimeoutMs', 'httpStatus')) {
+            if ($diagnostic.$key -is [ValueType] -and $diagnostic.$key -ge 0 -and $diagnostic.$key -le 120000) { $failure[$key] = $diagnostic.$key }
+          }
+          if ($diagnostic.runtimeState -cin @('idle','unverified','running','ready','failed','unknown')) { $failure['runtimeState'] = $diagnostic.runtimeState }
+          if ($diagnostic.runtimeStep -cin @('journal','checkpoint','transaction')) { $failure['runtimeStep'] = $diagnostic.runtimeStep }
+        } catch {}
+      }
     }
-    try {
-      $probeOutput = & node $probeScript $Endpoint $Mode $ExpectedInstance 2>$null
-      $probeExitCode = $LASTEXITCODE
-    } catch {
-      return $null
-    }
-  } finally {
-    if ($hadOperationTimeout) { $env:PROBE_OP_TIMEOUT_MS = $originalOperationTimeout }
-    else { Remove-Item Env:\PROBE_OP_TIMEOUT_MS -ErrorAction SilentlyContinue }
-  }
+  } catch {
+    # The error itself can contain command arguments. The stable code is enough
+    # to diagnose spawn/configuration failure without exposing environment data.
+  } finally { $process.Dispose() }
+  if ($result) { return $result }
+  $failure['wallMs'] = $watch.ElapsedMilliseconds
+  $script:LastMcpProbeFailure = [pscustomobject]$failure
+  New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+  $diagnosticPath = Join-Path $LogDir 'mcp-probe.failures.jsonl'
+  $failure | ConvertTo-Json -Compress | Add-Content -LiteralPath $diagnosticPath -Encoding UTF8
+  Write-Host "MCP_PROBE_FAILED=$($failure.code) PHASE=$($failure.phase) ELAPSED_MS=$($failure.wallMs) DIAGNOSTICS=$diagnosticPath"
+  return $null
+}
 
-  if ($probeExitCode -ne 0) { return $null }
-  try { return ($probeOutput | ConvertFrom-Json) } catch { return $null }
+function Get-McpProbeFailureSummary {
+  if ($script:LastMcpProbeFailure) {
+    return "$($script:LastMcpProbeFailure.code) phase=$($script:LastMcpProbeFailure.phase) elapsed_ms=$($script:LastMcpProbeFailure.wallMs)"
+  }
+  return 'IDENTITY_OR_OWNER_MISMATCH'
+}
+
+function Stop-CreatedMcpServer {
+  param($Process, $OriginalInfo, [string]$ScriptPath)
+  $Process.Refresh()
+  if ($Process.HasExited) { return }
+  $now = Get-CimInstance Win32_Process -Filter "ProcessId = $($Process.Id)" -ErrorAction SilentlyContinue
+  if (-not $OriginalInfo -or -not $now -or $now.CreationDate -ne $OriginalInfo.CreationDate -or
+      $now.Name -ne 'node.exe' -or -not $now.CommandLine -or
+      $now.CommandLine.Replace('/', '\').IndexOf($ScriptPath, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+    Write-Host 'MCP_CLEANUP_REFUSED=OWNER_CHANGED'
+    return
+  }
+  & taskkill.exe /PID $Process.Id /T /F | Out-Null
 }
 
 function Test-McpPortOpen {
@@ -114,7 +183,8 @@ function Get-TailscaleServiceState {
 function Get-FunnelStatusInfo {
   param(
     $Tailscale,
-    [string]$ExpectedInstance = ""
+    [string]$ExpectedInstance = "",
+    [int]$ProbeBudgetMilliseconds = 60000
   )
 
   $service = Get-TailscaleServiceState
@@ -149,7 +219,7 @@ function Get-FunnelStatusInfo {
 
   $publicHealthy = $false
   if ($service.Running -and $proxyMatches -and $mcpUrl -and $ExpectedInstance) {
-    $publicProbe = Invoke-McpProbe $mcpUrl "probe" $ExpectedInstance 8000
+    $publicProbe = Invoke-McpProbe $mcpUrl "probe" $ExpectedInstance $ProbeBudgetMilliseconds
     $publicHealthy = [bool]$publicProbe
   }
 
@@ -212,15 +282,19 @@ function Ensure-McpServer {
     }
 
     if ($identity.current) {
-      $current = if ($ListenerOnly) { $identity } else { Invoke-McpProbe "$OriginUrl/mcp" "probe" }
+      $current = if ($ListenerOnly) { $identity } else { Invoke-McpProbe "$OriginUrl/mcp" "probe" ([string]$identity.instanceId) }
     }
+
+    if ($current -and ([int]$current.pid -ne [int]$owner -or $current.instanceId -ne $identity.instanceId -or (Get-McpOwningProcess) -ne $owner)) { throw "MCP owner changed during protocol verification; listener left running." }
 
     if ($current) {
       if ($ListenerOnly) { Write-Host "Verified current repository MCP listener identity." }
-      else { Write-Host "Verified current repository MCP server; initialize and tools/list passed." }
+      else { Write-Host "Verified current repository MCP server; initialize, tools/list, resources/list, readiness and ping passed." }
       Write-Host "MCP_OWNING_PROCESS=$owner"
       return $current
     }
+
+    if ($identity.current -and -not $current) { throw "Existing MCP protocol verification failed: $(Get-McpProbeFailureSummary); listener left running." }
 
     if ($NoRestart) { throw "Existing MCP listener was not restarted; explicit operator review is required." }
 
@@ -289,6 +363,8 @@ function Ensure-McpServer {
   Write-Host "MCP_HTTP_ERR_LOG=$mcpErr"
   Write-Host "MCP_TOOL_PROFILE=$effectiveMcpToolProfile"
 
+  $createdInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $($mcpProcess.Id)" -ErrorAction SilentlyContinue
+  $listenerWatch = [Diagnostics.Stopwatch]::StartNew()
   $deadline = (Get-Date).AddSeconds(15)
   do {
     Start-Sleep -Milliseconds 250
@@ -299,16 +375,19 @@ function Ensure-McpServer {
     if (Test-McpPortOpen) { break }
   } while ((Get-Date) -lt $deadline)
 
+  if (-not (Test-McpPortOpen)) {
+    Stop-CreatedMcpServer $mcpProcess $createdInfo $mcpScript
+    throw "MCP_LISTENER_TIMEOUT after $($listenerWatch.ElapsedMilliseconds)ms; see $mcpErr"
+  }
+
   $current = if ($ListenerOnly) {
     Invoke-McpProbe "$OriginUrl/mcp" "identity"
   } else {
-    Invoke-McpProbe "$OriginUrl/mcp" "probe" "" $FreshMcpProbeOperationTimeoutMilliseconds
+    Invoke-McpProbe "$OriginUrl/mcp" "probe" "" 60000
   }
   if (-not $current -or [int]$current.pid -ne $mcpProcess.Id -or (Get-McpOwningProcess) -ne $mcpProcess.Id) {
-    if (-not $mcpProcess.HasExited) {
-      & taskkill.exe /PID $mcpProcess.Id /T /F | Out-Null
-    }
-    throw "MCP failed identity / protocol readiness; see $mcpErr"
+    Stop-CreatedMcpServer $mcpProcess $createdInfo $mcpScript
+    throw "MCP failed identity / protocol readiness: $(Get-McpProbeFailureSummary); see $mcpErr"
   }
 
   if ($ListenerOnly) { Write-Host "MCP HTTP listener started and identity verified." -ForegroundColor Green }
@@ -399,13 +478,15 @@ if ($LASTEXITCODE -ne 0) {
   throw "tailscale funnel failed with exit code $LASTEXITCODE."
 }
 
-$deadline = (Get-Date).AddSeconds($PublicReadyTimeoutSeconds)
+$publicWatch = [Diagnostics.Stopwatch]::StartNew()
 $funnel = $null
 do {
-  $funnel = Get-FunnelStatusInfo $tailscale ([string]$current.instanceId)
+  $remainingMs = [int]($PublicReadyTimeoutSeconds * 1000 - $publicWatch.ElapsedMilliseconds)
+  if ($remainingMs -lt 2000) { break }
+  $funnel = Get-FunnelStatusInfo $tailscale ([string]$current.instanceId) $remainingMs
   if ($funnel.Status -eq "registered / healthy") { break }
   Start-Sleep -Milliseconds 1000
-} while ((Get-Date) -lt $deadline)
+} while ($publicWatch.ElapsedMilliseconds -lt ($PublicReadyTimeoutSeconds * 1000))
 
 if (-not $funnel -or -not $funnel.McpUrl) {
   throw "Tailscale Funnel started, but no public ts.net URL was reported."
@@ -415,9 +496,9 @@ Write-Host "ChatGPT MCP URL:" -ForegroundColor Green
 Write-Host $funnel.McpUrl -ForegroundColor Cyan
 
 if ($funnel.Status -ne "registered / healthy") {
-  Write-Host "Funnel is configured, but the public MCP probe is not healthy yet." -ForegroundColor Yellow
+  Write-Host "Funnel is configured, but public protocol verification failed: $(Get-McpProbeFailureSummary)." -ForegroundColor Yellow
   exit 1
 }
 
-Write-Host "Tailscale Funnel registered / healthy; public initialize, tools/list and ping passed." -ForegroundColor Green
+Write-Host "Tailscale Funnel registered / healthy; public initialize, tools/list, resources/list, readiness and ping passed." -ForegroundColor Green
 exit 0

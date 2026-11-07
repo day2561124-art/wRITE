@@ -1,244 +1,153 @@
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import http from 'node:http';
-import { getMcpIdentity } from '../../server/src/mcp-http-identity.mjs';
-import { runMcpProbe, DEFAULT_OP_TIMEOUT, normalizeOperationTimeout } from '../../scripts/probe-mcp.mjs';
-import { createProbeClient } from './probe-fake-client.mjs';
+import {runMcpProbe, normalizeTimings, normalizeOperationTimeout, formatProbeFailure} from '../../scripts/probe-mcp.mjs';
+import {getMcpIdentity} from '../../server/src/mcp-http-identity.mjs';
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-async function runProbe(port, extraEnv = {}) {
-  const endpoint = `http://127.0.0.1:${port}/mcp`;
-  // create client via test helper and inject into runMcpProbe
-  const createClientFactory = async ({ endpointUrl, boundedFetch }) => {
-    return await createProbeClient({ endpointUrl, boundedFetch });
-  };
-  try {
-    const result = await runMcpProbe({ endpoint, mode: 'probe', expectedInstance: 'fixture-instance', createClientFactory });
-    return { code: 0, output: JSON.stringify(result) };
-  } catch (err) {
-    return { code: 1, output: `MCP probe failed [${err?.code ?? 'UNKNOWN'}]: ${err?.message ?? String(err)}` };
-  }
-}
-
-async function listenFixture(handler) {
-  const server = http.createServer(handler);
-  await new Promise((r, rej) => server.listen(0, '127.0.0.1', (err) => err ? rej(err) : r()));
-  return server;
-}
-
-// 1) Slow cold-start but eventually ready: probe should wait (within budget) and succeed
-{
-  let readyState = false;
-  const server = await listenFixture((req, res) => {
+async function fixture(t, options = {}) {
+  const counts = {health: 0, resources: 0, ready: 0, ping: 0, closed: 0};
+  const identity = {...getMcpIdentity(), pid: process.pid, instanceId: 'startup-fixture', ...options.identity};
+  const ready = () => ({ready: true, child: {generation: 1, runtime_readiness: {state: 'ready'}}, ...options.readiness});
+  const server = http.createServer((req, res) => {
+    res.setHeader('Content-Type', 'application/json');
     if (req.url === '/health') {
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ ...getMcpIdentity(), pid: process.pid, instanceId: 'fixture-instance' }));
-    } else if (req.url === '/tools') {
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ tools: [{ name: 't1' }] }));
-    } else if (req.url === '/resources') {
-      // simulate a runtime that is not ready yet
-      res.writeHead(503); res.end('not ready');
+      counts.health++;
+      res.end(JSON.stringify({...identity, ...(options.changePid && counts.health > 1 ? {pid: identity.pid + 1} : {})}));
     } else if (req.url === '/ready') {
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ ready: readyState }));
-    } else if (req.url === '/ping') {
-      res.end('pong');
-    } else {
-      res.writeHead(404); res.end();
-    }
+      counts.ready++;
+      assert.equal(req.headers['mcp-session-id'], 'fixture-session');
+      const payload = options.ready?.() ?? ready();
+      res.writeHead(payload.ready ? 200 : 503);
+      res.end(JSON.stringify(payload));
+    } else {res.writeHead(404);res.end();}
   });
-  try {
-    // Flip to ready after 12s (longer than per-op 10s but within startup budget 20s)
-    setTimeout(() => { readyState = true; }, 12000);
-    // Use production defaults (no env override) to validate default behavior.
-    const result = await runProbe(server.address().port);
-    assert.equal(result.code, 0, `probe should succeed for slow cold start; output=${result.output}`);
-    assert.match(result.output, /"ready":true/);
-    console.log('probe-startup-budget: slow cold-start success passed');
-  } finally {
-    await new Promise(r => server.close(r));
-  }
-}
-
-// 2) Truly hung runtime: /ready never becomes true -> probe should fail within budget
-{
-  let readyHits = 0;
-  const server = await listenFixture((req, res) => {
-    if (req.url === '/health') {
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ ...getMcpIdentity(), pid: process.pid, instanceId: 'fixture-instance' }));
-    } else if (req.url === '/tools') {
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ tools: [{ name: 't1' }] }));
-    } else if (req.url === '/resources') {
-      // hang /resources by never responding -> simulate long timeout
-      // to emulate hanging, simply do not write response and keep socket open
-      // but to avoid test suite hanging forever, we will respond with 503 after a short delay
-      setTimeout(() => {
-        try { res.writeHead(503); res.end('hung'); } catch (e) {}
-      }, 10000);
-    } else if (req.url === '/ready') {
-      readyHits++;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ ready: false }));
-    } else if (req.url === '/ping') {
-      res.end('pong');
-    } else {
-      res.writeHead(404); res.end();
-    }
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => {server.closeAllConnections();server.close();});
+  const factory = async () => ({
+    transport: {sessionId: 'fixture-session', async terminateSession() {counts.closed++;}},
+    client: {
+      async connect() {await options.connect?.();},
+      getServerVersion: () => ({name: options.serverName ?? 'armed-academy-fiction-engine'}),
+      async listTools() {return options.tools ?? {tools: [{name: 'fixture'}]};},
+      async listResources() {counts.resources++; return options.resources ? options.resources(counts.resources) : {resources: []};},
+      async ping() {counts.ping++;}, async close() {},
+    },
   });
-  try {
-    // Run with a small startup budget by overriding env for this test only
-    process.env.PROBE_STARTUP_BUDGET_MS = '3000';
-    process.env.PROBE_HARD_DEADLINE_MS = '5000';
-    const result = await runProbe(server.address().port);
-    delete process.env.PROBE_STARTUP_BUDGET_MS; delete process.env.PROBE_HARD_DEADLINE_MS;
-    assert.notEqual(result.code, 0, 'probe should fail for truly hung runtime');
-    // limited retry count: should have polled /ready only a few times within 3s
-    assert(readyHits <= 10, `expected limited readiness polls, got ${readyHits}`);
-    console.log('probe-startup-budget: hung-runtime fail + limited retries passed');
-  } finally {
-    await new Promise(r => server.close(r));
-  }
+  return {counts, run: extra => runMcpProbe({endpoint: `http://127.0.0.1:${server.address().port}/mcp`,
+    expectedInstance: 'startup-fixture', createClientFactory: factory, startupBudgetMs: 2000,
+    hardDeadlineMs: 4000, operationTimeoutMs: 500, ...extra})};
 }
 
-// 3) Non-transient listResources error should fail immediately (no readiness polling)
-{
-  let readyHits = 0;
-  const server = await listenFixture((req, res) => {
-    if (req.url === '/health') {
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ ...getMcpIdentity(), pid: process.pid, instanceId: 'fixture-instance' }));
-    } else if (req.url === '/tools') {
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ tools: [{ name: 't1' }] }));
-    } else if (req.url === '/resources') {
-      // non-transient client/protocol error: return 400 Bad Request
-      res.writeHead(400); res.end('bad request');
-    } else if (req.url === '/ready') {
-      readyHits++;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ ready: false }));
-    } else if (req.url === '/ping') {
-      res.end('pong');
-    } else {
-      res.writeHead(404); res.end();
-    }
+test('cold protocol and reuse require tools, resources, ready, ping and stable identity', async t => {
+  const f = await fixture(t);
+  for (let i = 0; i < 2; i++) {
+    const result = await f.run();
+    assert.equal(result.ok, true);assert.equal(result.runtimeReadiness, 'ready');
+    assert.equal(result.resourceCount, 0);assert.equal(result.toolCount, 1);
+    assert.ok(Object.hasOwn(result.phaseTimingsMs, 'resources/list'));
+  }
+  assert.equal(f.counts.resources, 2);assert.equal(f.counts.ping, 2);assert.equal(f.counts.closed, 2);
+});
+
+test('slow initialize within the operation deadline succeeds', async t => {
+  const f = await fixture(t, {connect: () => sleep(150)});
+  assert.equal((await f.run()).ready, true);
+});
+
+test('startup operation headroom permits initialize beyond the steady-state 10s default', async t => {
+  const f = await fixture(t, {connect: () => sleep(11_000)});
+  assert.equal((await f.run({operationTimeoutMs:30_000,startupBudgetMs:45_000,hardDeadlineMs:60_000})).ready,true);
+});
+
+test('real SDK HTTP 503 retains safe origin diagnostics without echoing the body', async t => {
+  const identity={...getMcpIdentity(),pid:process.pid,instanceId:'sdk-503-fixture'};
+  const server=http.createServer((req,res)=>{
+    if(req.url==='/health'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify(identity));}
+    else {res.writeHead(503);res.end('origin not ready Bearer PRIVATE_SECRET');}
   });
-  try {
-    process.env.PROBE_STARTUP_BUDGET_MS = '10000';
-    process.env.PROBE_HARD_DEADLINE_MS = '15000';
-    const result = await runProbe(server.address().port);
-    delete process.env.PROBE_STARTUP_BUDGET_MS; delete process.env.PROBE_HARD_DEADLINE_MS;
-    assert.notEqual(result.code, 0, 'probe should fail immediately on non-transient resources error');
-    assert.equal(readyHits, 0, 'should not have polled /ready when resources error is non-transient');
-    console.log('probe-startup-budget: non-transient resources error immediate fail passed');
-  } finally {
-    await new Promise(r => server.close(r));
-  }
-}
-
-// 4) Fast success path: resources available immediately and all checks pass
-{
-  const server = await listenFixture((req, res) => {
-    if (req.url === '/health') {
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ ...getMcpIdentity(), pid: process.pid, instanceId: 'fixture-instance' }));
-    } else if (req.url === '/tools') {
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ tools: [{ name: 't1' }, { name: 't2' }] }));
-    } else if (req.url === '/resources') {
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ resources: [{ id: 'r1' }] }));
-    } else if (req.url === '/ready') {
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ ready: true, child: { runtime_readiness: { state: 'ready' }, generation: 1 } }));
-    } else if (req.url === '/ping') {
-      res.end('pong');
-    } else {
-      res.writeHead(404); res.end();
-    }
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(()=>{server.closeAllConnections();server.close();});
+  await assert.rejects(runMcpProbe({endpoint:`http://127.0.0.1:${server.address().port}/mcp`}),e=>{
+    assert.equal(e.code,'MCP_HANDSHAKE_FAILED');assert.equal(e.details.httpStatus,503);assert.match(e.message,/origin not ready/);
+    assert.ok(!formatProbeFailure(e).includes('PRIVATE_SECRET'));return true;
   });
-  try {
-    // Verify production defaults also pass for fast path
-    const result = await runProbe(server.address().port);
-    assert.equal(result.code, 0, `fast success path should exit 0; output=${result.output}`);
-    assert.match(result.output, /"toolCount":2/);
-    assert.match(result.output, /"runtimeReadiness":"ready"/);
-    console.log('probe-startup-budget: fast success path passed');
-  } finally {
-    await new Promise(r => server.close(r));
-  }
-}
+});
 
-// 5) Verify timings: global hard deadline is greater than startup budget (production defaults)
-{
-  const { startup, hard } = await (async () => {
-    // call runMcpProbe in timings mode
-    const endpoint = 'http://127.0.0.1:0/mcp';
-    try {
-      const res = await runMcpProbe({ endpoint, mode: 'identity' });
-      // identity mode shouldn't reach timing print; use normalize logic via requiring module timings
-    } catch (e) {}
-    // Instead compute using normalizeTimings via process env defaults
-    const mod = await import('../../scripts/probe-mcp.mjs');
-    const normalized = mod.normalizeTimings?.(undefined, undefined);
-    return { startup: normalized.startup, hard: normalized.hard };
-  })();
-  if (!(hard > startup)) throw new Error('global hard deadline should exceed startup budget');
-  console.log('probe-startup-budget: timings verification passed');
-}
-
-// 6) Startup callers may opt into bounded per-operation headroom while the
-// steady-state default remains fast and the override is capped.
-{
-  assert.equal(normalizeOperationTimeout(undefined), DEFAULT_OP_TIMEOUT);
-  assert.equal(normalizeOperationTimeout(30_000), 30_000);
-  assert.equal(normalizeOperationTimeout(60_000), 30_000);
-  assert.throws(() => normalizeOperationTimeout(0), /Invalid PROBE_OP_TIMEOUT_MS/);
-  assert.throws(() => normalizeOperationTimeout(0.5), /Invalid PROBE_OP_TIMEOUT_MS/);
-
-  const observedTimeouts = [];
-  const server = await listenFixture((req, res) => {
-    if (req.url === '/health') {
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ ...getMcpIdentity(), pid: process.pid, instanceId: 'fixture-instance' }));
-    } else if (req.url === '/ready') {
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ ready: true, child: { runtime_readiness: { state: 'ready' }, generation: 1 } }));
-    } else {
-      res.writeHead(404); res.end();
-    }
+test('cold recovery beyond 30 seconds succeeds and resources discovery is retried', async t => {
+  let begin;
+  const f = await fixture(t, {
+    resources: async n => {begin ??= Date.now(); if (n === 1) await sleep(32_000);return {resources: [{uri: 'fixture://ready'}]};},
+    ready: () => ({ready: Date.now() - begin >= 32_000,
+      child: {generation: 1, runtime_readiness: {state: Date.now() - begin >= 32_000 ? 'ready' : 'running', current_step: 'journal'}}}),
   });
-  try {
-    const endpoint = `http://127.0.0.1:${server.address().port}/mcp`;
-    const createClientFactory = async () => ({
-      transport: { sessionId: 'startup-timeout-contract-session' },
-      client: {
-        async connect(_transport, options = {}) { observedTimeouts.push(options.timeout); },
-        getServerVersion() { return { name: 'armed-academy-fiction-engine' }; },
-        async listTools(_params = {}, options = {}) {
-          observedTimeouts.push(options.timeout);
-          return { tools: [{ name: 't1' }] };
-        },
-        async listResources(_params = {}, options = {}) {
-          observedTimeouts.push(options.timeout);
-          return { resources: [] };
-        },
-        async ping(options = {}) { observedTimeouts.push(options.timeout); },
-        async close() {},
-      },
-    });
-    const result = await runMcpProbe({
-      endpoint,
-      mode: 'probe',
-      expectedInstance: 'fixture-instance',
-      operationTimeoutMs: 30_000,
-      createClientFactory,
-    });
-    assert.equal(result.ok, true);
-    assert.deepEqual(observedTimeouts, [30_000, 30_000, 30_000, 30_000]);
-    console.log('probe-startup-budget: startup operation timeout override passed');
-  } finally {
-    await new Promise(r => server.close(r));
-  }
-}
+  const result = await f.run({operationTimeoutMs: 10_000, startupBudgetMs: 45_000, hardDeadlineMs: 60_000});
+  assert.equal(result.resourceCount, 1);assert.equal(f.counts.resources, 2);assert.equal(f.counts.ping, 1);
+  assert.ok(result.discoveryMs >= 32_000 && result.discoveryMs < 45_000);
+});
+
+test('ready never substitutes for failed resources/list', async t => {
+  const f = await fixture(t, {resources: async () => {throw Object.assign(new Error('HTTP 503 private token'), {status: 503});}});
+  await assert.rejects(f.run(), e => e.code === 'RESOURCES_DISCOVERY_FAILED');
+  assert.equal(f.counts.resources, 3);assert.equal(f.counts.ping, 0);assert.equal(f.counts.closed, 1);
+});
+
+test('nontransient resources errors fail immediately and omit secrets', async t => {
+  const secret = 'Bearer SECRET_KEY_123 https://user:password@example.invalid/?token=private';
+  const f = await fixture(t, {resources: async () => {throw Object.assign(new Error(secret), {status: 401});}});
+  await assert.rejects(f.run(), e => {
+    const diagnostic = formatProbeFailure(e);
+    assert.match(diagnostic, /RESOURCES_DISCOVERY_FAILED/);assert.match(diagnostic, /resources\/list/);
+    assert.ok(!diagnostic.includes('SECRET') && !diagnostic.includes('password'));
+    return true;
+  });
+  assert.equal(f.counts.ready, 0);assert.equal(f.counts.resources, 1);
+});
+
+test('hung runtime is bounded, reports runtime phase, and closes session', async t => {
+  const f = await fixture(t, {resources: async () => {throw new Error('timeout');},
+    readiness: {ready: false, child: {runtime_readiness: {state: 'running', current_step: 'journal'}}}});
+  const begin = Date.now();
+  await assert.rejects(f.run({startupBudgetMs: 600, hardDeadlineMs: 2000}), e => {
+    assert.equal(e.code, 'RUNTIME_NOT_READY');assert.equal(e.details.runtimeStep, 'journal');return true;
+  });
+  assert.ok(Date.now() - begin < 2000);assert.equal(f.counts.closed, 1);
+});
+
+test('failed runtime fails immediately with safe readiness diagnostics', async t => {
+  const f = await fixture(t, {resources: async () => {throw new Error('timeout');},
+    readiness: {ready: false, child: {runtime_readiness: {state: 'failed', current_step: 'checkpoint', last_error: 'SECRET'}}}});
+  await assert.rejects(f.run(), e => e.code === 'RUNTIME_NOT_READY' && e.details.runtimeState === 'failed'
+    && e.details.runtimeStep === 'checkpoint' && !formatProbeFailure(e).includes('SECRET'));
+  assert.equal(f.counts.ready, 1);
+});
+
+for (const [name, options, code] of [
+  ['foreign identity', {identity: {repositoryId: 'foreign'}}, 'MCP_HANDSHAKE_FAILED'],
+  ['invalid PID', {identity: {pid: 0}}, 'MCP_HANDSHAKE_FAILED'],
+  ['stale revision', {identity: {revision: 'stale'}}, 'STALE_REVISION'],
+  ['wrong instance', {identity: {instanceId: 'other'}}, 'INSTANCE_CHANGED'],
+  ['wrong serverInfo', {serverName: 'other'}, 'MCP_HANDSHAKE_FAILED'],
+  ['empty tools', {tools: {tools: []}}, 'TOOLS_DISCOVERY_FAILED'],
+  ['invalid resources', {resources: async () => ({})}, 'RESOURCES_DISCOVERY_FAILED'],
+  ['unready runtime', {readiness: {ready: false}}, 'RUNTIME_NOT_READY'],
+  ['PID change after protocol', {changePid: true}, 'INSTANCE_CHANGED'],
+]) test(name + ' safely fails', async t => {
+  const f = await fixture(t, options);await assert.rejects(f.run(), e => e.code === code);
+});
+
+test('hung initialize obeys deadline even with an uncooperative client', async t => {
+  const f = await fixture(t, {connect: () => new Promise(() => {})});
+  const begin = Date.now();
+  await assert.rejects(f.run({operationTimeoutMs: 100}), e => e.code === 'HTTP_TIMEOUT' && e.details.phase === 'initialize');
+  assert.ok(Date.now() - begin < 1500);assert.equal(f.counts.closed, 1);
+});
+
+test('timing normalization is bounded and preserves headroom', () => {
+  assert.equal(normalizeOperationTimeout(), 10_000);assert.equal(normalizeOperationTimeout(100_000), 30_000);
+  assert.throws(() => normalizeOperationTimeout(0.5));assert.throws(() => normalizeOperationTimeout(Infinity));
+  assert.deepEqual(normalizeTimings(), {startup: 45_000, hard: 60_000});
+  assert.deepEqual(normalizeTimings(100_000, 100_000), {startup: 59_000, hard: 60_000});
+  assert.throws(() => normalizeTimings(3000, 1000));
+  assert.ok(normalizeTimings(3000, 2000).startup < normalizeTimings(3000, 2000).hard);
+});

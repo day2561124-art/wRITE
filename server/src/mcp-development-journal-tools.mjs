@@ -1,3 +1,4 @@
+import {REVIEWED_INDEX_REFRESH,validateIndexRefreshRecovery} from './mcp-startup-index-refresh-recovery.mjs';
 import {decodeGitOutputStrict,parseGitPorcelainV1Z} from './git-status-porcelain.mjs';
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -648,6 +649,7 @@ export function createDevOperationJournalService({
   isolationResolutionPublicationHook,
   powershellResolutionPublicationHook,
   powershellEffectProfile = REVIEWED_POWERSHELL_EFFECT_PROFILE,
+  indexRefreshRecoveryProfile = REVIEWED_INDEX_REFRESH,
 } = {}) {
   if (!Number.isSafeInteger(lockAcquireTimeoutMs) || lockAcquireTimeoutMs < 1) {
     throw new Error("lockAcquireTimeoutMs must be a positive safe integer.");
@@ -1054,6 +1056,7 @@ export function createDevOperationJournalService({
   }
 
   function classifyVerifiedSnapshot({ head, events }) {
+    for (const event of events) validateIndexRefreshRecovery(events,event,indexRefreshRecoveryProfile);
     const byOperation = new Map();
     const keys = new Set();
     for (const event of events) {
