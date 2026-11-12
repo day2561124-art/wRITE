@@ -2091,7 +2091,7 @@ const toolDefinitions = [
   },
   {
     name: "dev_pi_execute_intent",
-    description: "Default engineering execution ingress when Pi production routing is enabled. Accepts the exact GPT-authored ExecutionIntent JSON contract, or request_kind=authorized_engineering for ordinary authorized work. request_kind=reconcile_only requires only exact operation_id, context, expected_revision and expected_owner; it recognizes completed MCP receipts without admission, dispatch, retry or pending-action continuation. High-risk capabilities retain the full contract. Duplicate intents return durable state.",
+    description: "Default engineering ingress. For routine work, request_kind=autonomous_engineering accepts intent_id, goal, registered isolated workspace_id and either a command (non-elevated host PowerShell) or requested_actions; Pi derives mechanical contract fields and permissions while retaining durable authorization, audit and risk checks. request_kind=authorized_engineering and the full ExecutionIntent contract remain supported. request_kind=reconcile_only needs the exact operation identity and context. High-risk capabilities retain the full contract. Duplicate intents return durable state.",
     risk: "high-risk-write",
     annotations: { readOnlyHint: false },
     inputSchema: baseSchema({ intent_json: { type: "string", minLength: 1, maxLength: 524288 } }, ["intent_json"]),

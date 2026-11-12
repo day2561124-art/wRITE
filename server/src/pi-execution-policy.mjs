@@ -35,6 +35,43 @@ export async function admitPiLightweightRead({ tool, mutation, params, resolveWo
 // GPT supplies scope, exact actions and permissions. Only mechanical fields are
 // derived here; Pi receives the unchanged strict ExecutionIntent contract.
 export async function adaptAuthorizedPiRequest(source, { resolveWorkspace } = {}) {
+  // Short-form autonomous mode is mechanically lowered into the same durable
+  // Pi intent; no direct dispatch, elevation, or permission bypass is added.
+  if (source?.request_kind === "autonomous_engineering") {
+    hashExecutionInput(source);
+    exact(source, ["request_kind", "intent_id", "goal", "workspace_id"],
+      ["schema_version", "constraints", "completion_conditions", "permissions",
+        "requested_actions", "command", "timeoutMs"]);
+    if (source.schema_version !== undefined && source.schema_version !== 1) fail("UNSUPPORTED_INTENT_VERSION");
+    const usesCommand = source.command !== undefined;
+    if (usesCommand === (source.requested_actions !== undefined)
+      || (!usesCommand && source.timeoutMs !== undefined)) fail("INVALID_AUTONOMOUS_ACTIONS");
+    const requested_actions = usesCommand
+      ? [{ step_id: "run", capability: "host.powershell",
+        input: { command: source.command,
+          ...(source.timeoutMs === undefined ? {} : { timeoutMs: source.timeoutMs }) } }]
+      : source.requested_actions;
+    if (!Array.isArray(requested_actions) || !requested_actions.length
+      || requested_actions.length > 100) fail("INVALID_ACTIONS");
+    const inferred = { read: false, write: false, tests: false, commit: false };
+    for (const action of requested_actions) {
+      if (!ordinaryCapabilities.has(action?.capability)) fail("STRICT_EXECUTION_INTENT_REQUIRED");
+      inferred[capabilityDefinition(action.capability).permission] = true;
+    }
+    if (source.permissions !== undefined) {
+      exact(source.permissions, [], Object.keys(inferred));
+      if (Object.entries(source.permissions).some(([name, value]) =>
+        typeof value !== "boolean" || (inferred[name] && value === false))) fail("PERMISSION_DENIED");
+    }
+    return adaptAuthorizedPiRequest({
+      schema_version: 1, request_kind: "authorized_engineering",
+      intent_id: source.intent_id, goal: source.goal, workspace_id: source.workspace_id,
+      constraints: source.constraints ?? [],
+      requested_actions, permissions: inferred,
+      completion_conditions: source.completion_conditions ?? [
+        "Report exact step outcomes, exit codes and any pending review."],
+    }, { resolveWorkspace });
+  }
   if (source?.request_kind !== "authorized_engineering") return createExecutionIntent(source);
   hashExecutionInput(source); // Existing bounded, accessor-free JSON validation.
   exact(source, ["schema_version", "request_kind", "intent_id", "goal", "workspace_id",
