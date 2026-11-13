@@ -29,6 +29,31 @@ export const isPowerShellOperation=e=>['powershell_run','powershell_admin_run'].
 export const isUnprovenPowerShellRecovery=e=>isPowerShellOperation(e)&&e.stage==='operation_recovered'
  &&e.result?.outcome==='no_effect_observed';
 
+// Compatibility for the append-only repair already published on 2026-11-13.
+// This recognizes that exact receipt on cold verification. It is not a route
+// for authoring a new historical resolution or inferring non-dispatch today.
+const cwdRepair = Object.freeze({
+  operationId: "dev_operation_c32926abce154831b6c82bbfe39ebd8f",
+  started: "3949f1ed54f034c7666284359d692efdf1735695bfd3a3ca8bbacc24f3a75c42",
+  terminal: "a129bd92e458b6a48857b529e0ae99abf186f462580f9e75ed2c94f00c4b729e",
+  claim: "569653dd13d2fd74cf8bbb57fba4ee992b2a3b811e65797c2d7db25d08c1409e",
+  admission: "110922a6197665215c193c83fccd5c17bf69778581dced6bdb90cdee117db7e5",
+  receipt: "cfa7f64d5efcd70b0f32065ff3103c06ecc977240f793c19976972f28fcc2d06",
+});
+
+export function archivedPowerShellCwdResolution(events, started, terminal) {
+  if (started?.operation_id !== cwdRepair.operationId
+    || started.event_hash !== cwdRepair.started || terminal?.event_hash !== cwdRepair.terminal) return null;
+  const claim = events.find(e => e.event_hash === cwdRepair.claim);
+  const admission = events.find(e => e.event_hash === cwdRepair.admission);
+  const receipt = events.find(e => e.event_hash === cwdRepair.receipt);
+  return claim?.stage === "operation_completed" && claim.operation_type === "pi_execution_projection"
+    && claim.sequence < started.sequence && started.sequence < terminal.sequence
+    && admission?.stage === "operation_started" && terminal.sequence < admission.sequence
+    && receipt?.stage === "operation_completed" && admission.sequence < receipt.sequence
+    ? { admission, receipt } : null;
+}
+
 export function validatePowershellEffectResolution(events,input,profile=REVIEWED_POWERSHELL_EFFECT_PROFILE) {
  const one=(id,stage)=>{const matches=events.filter(e=>e.operation_id===id&&(stage?e.stage===stage:e.stage!=='operation_started'));if(matches.length!==1)fail();return matches[0];};
  const parent=one(input.parent_operation_id,'operation_started'),parentTerminal=one(input.parent_operation_id);

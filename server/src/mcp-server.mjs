@@ -5,6 +5,7 @@ import {REQUEST_TRACE_META_KEY,attachTraceIpc,publishTrace,runRequestTrace,trace
 if(process.env.MCP_REQUEST_TRACING==='1')attachTraceIpc();
 import { createRuntimeReadiness } from "./mcp-runtime-readiness.mjs";
 import { preserveWorkstreamPrewriteFailure } from "./mcp-workstream-prewrite-failure.mjs";
+import { markPowerShellPreDispatchFailure, preservePowerShellPreDispatchFailure } from "./mcp-powershell-predispatch-failure.mjs";
 import { chatgpt_bridge_save_settlement_report } from "./mcp-direct-pasted-chapter-settlement-wrapper.mjs";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -1165,7 +1166,8 @@ function devAdditionalFilesystemAuditChanges(tool, result) {
 
 async function auditedToolCall(tool, args, actor) {
   const {markIsolationBeforeDispatch}=await import('./mcp-workstream-prewrite-failure.mjs');
-  let before;try{before=await auditSnapshotMap();}catch(error){throw markIsolationBeforeDispatch(error);}
+  const markBeforeHandler = error => markIsolationBeforeDispatch(markPowerShellPreDispatchFailure(error, tool.name));
+  let before;try{before=await auditSnapshotMap();}catch(error){throw markBeforeHandler(error);}
   const calledAt = new Date();
   const auditId = `MCP-AUDIT-${calledAt.toISOString().replace(/[-:.]/g, "").replace("T", "-").replace("Z", "")}-${hashText(`${tool.name}:${JSON.stringify(args)}:${calledAt.toISOString()}`).slice(0, 8).toUpperCase()}`;
   const auditIntentPath = path.join(mcpAuditIntentDir, `${auditId}.json`);
@@ -1183,8 +1185,9 @@ async function auditedToolCall(tool, args, actor) {
   }, null, 2)}\n`, {
     tool: "mcp-audit-intent",
     audit_id: auditId,
-  });}catch(error){throw markIsolationBeforeDispatch(error);}
+  });}catch(error){throw markBeforeHandler(error);}
 
+  let handlerInvoked = false;
   try {
     effectiveArgs = prepareToolArguments(tool, args);
     const guardError = confirmationGuardError(tool, effectiveArgs);
@@ -1195,8 +1198,12 @@ async function auditedToolCall(tool, args, actor) {
       await assertDevJournalMutationAllowed();
     }
     await assertPiManagedMcpCall();
-    result = await traceSpan("capability.execution",()=>tool.handler(effectiveArgs));
+    result = await traceSpan("capability.execution",()=>{
+      handlerInvoked = true;
+      return tool.handler(effectiveArgs);
+    });
   } catch (error) {
+    if (!handlerInvoked) markPowerShellPreDispatchFailure(error, tool.name);
     result = {
       isError: true,
       content: [
@@ -1207,6 +1214,7 @@ async function auditedToolCall(tool, args, actor) {
       ],
     };
     preserveWorkstreamPrewriteFailure(error, result);
+    preservePowerShellPreDispatchFailure(error, result);
   }
 
   const after = await auditSnapshotMap();
@@ -2020,7 +2028,7 @@ const toolDefinitions = [
   },
   {
     name: "powershell_run",
-    description: "Run bounded non-elevated Windows PowerShell for Pi-approved host maintenance or isolated-workspace engineering. cwd stays within the selected workspace, but command file access is not an OS sandbox. Timeout/output are capped and destructive system commands are rejected.",
+    description: "Run bounded non-elevated Windows PowerShell for Pi-approved host maintenance or isolated-workspace engineering. Host-maintenance scope permits an existing local absolute-drive cwd (for example C:, D: or E:), while isolated workspace-shell and elevated scopes remain confined. Commands use the Windows user account; cwd is not an OS sandbox. Timeout/output caps, audit and destructive system-command guards remain.",
     risk: "low-risk-write",
     annotations: { readOnlyHint: false },
     inputSchema: baseSchema({
@@ -2091,7 +2099,7 @@ const toolDefinitions = [
   },
   {
     name: "dev_pi_execute_intent",
-    description: "Default engineering execution ingress when Pi production routing is enabled. Accepts the exact GPT-authored ExecutionIntent JSON contract, or request_kind=authorized_engineering for ordinary authorized work. request_kind=reconcile_only requires only exact operation_id, context, expected_revision and expected_owner; it recognizes completed MCP receipts without admission, dispatch, retry or pending-action continuation. High-risk capabilities retain the full contract. Duplicate intents return durable state.",
+    description: "Default engineering ingress. For routine work, request_kind=autonomous_engineering accepts intent_id, goal, registered isolated workspace_id and either a command (non-elevated host PowerShell) or requested_actions; Pi derives mechanical contract fields and permissions while retaining durable authorization, audit and risk checks. request_kind=authorized_engineering and the full ExecutionIntent contract remain supported. request_kind=reconcile_only needs the exact operation identity and context. High-risk capabilities retain the full contract. Duplicate intents return durable state.",
     risk: "high-risk-write",
     annotations: { readOnlyHint: false },
     inputSchema: baseSchema({ intent_json: { type: "string", minLength: 1, maxLength: 524288 } }, ["intent_json"]),

@@ -12,6 +12,7 @@ import {
 } from "./process-control.mjs";
 import { workspaceExecutionProvenance } from "./mcp-development-readonly-tools.mjs";
 import { resolveDevWorkspaceExecutionContext } from "./mcp-development-workstream-tools.mjs";
+import { markPowerShellPreDispatchFailure } from "./mcp-powershell-predispatch-failure.mjs";
 import {
   beginDevJournalOperation,
   completeDevJournalOperation,
@@ -113,20 +114,25 @@ function isPathInside(candidate, root) {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-async function resolveMaintenanceCwd(root, requestedCwd = ".") {
+async function resolveMaintenanceCwd(root, requestedCwd = ".", { hostAbsoluteCwd = false } = {}) {
   if (typeof requestedCwd !== "string" || !requestedCwd.trim()) {
-    throw new Error("cwd must be a non-blank workspace-relative path.");
+    throw new Error("cwd must be a non-blank path.");
   }
-  if (path.isAbsolute(requestedCwd)) {
+  const absolute = path.isAbsolute(requestedCwd);
+  if (absolute && !hostAbsoluteCwd) {
     throw new Error("cwd must be workspace-relative; absolute paths are not accepted.");
   }
+  if (absolute && hostAbsoluteCwd && process.platform === "win32"
+    && !/^[a-z]:[\\/]/iu.test(requestedCwd)) {
+    throw new Error("host cwd must be a local absolute drive path.");
+  }
   const resolvedRoot = await realpath(root);
-  const candidate = path.resolve(resolvedRoot, requestedCwd);
-  if (!isPathInside(candidate, resolvedRoot)) {
+  const candidate = absolute ? path.resolve(requestedCwd) : path.resolve(resolvedRoot, requestedCwd);
+  if (!absolute && !isPathInside(candidate, resolvedRoot)) {
     throw new Error("cwd must stay inside the selected Writer Workbench workspace.");
   }
   const resolvedCandidate = await realpath(candidate);
-  if (!isPathInside(resolvedCandidate, resolvedRoot)) {
+  if (!absolute && !isPathInside(resolvedCandidate, resolvedRoot)) {
     throw new Error("cwd resolves through a symlink/junction outside the selected Writer Workbench workspace.");
   }
   const info = await lstat(resolvedCandidate);
@@ -410,17 +416,21 @@ export function createPowerShellMaintenanceTool({
   const operationType = elevated ? "powershell_admin_maintenance" : "powershell_maintenance";
 
   return async function powershellMaintenance(input = {}) {
-    if (platform !== "win32") {
-      throw new Error(`${toolName} is only available on Windows.`);
+    let timeoutMs, context, cwd;
+    try {
+      if (platform !== "win32") throw new Error(`${toolName} is only available on Windows.`);
+      assertPowerShellMaintenanceCommandAllowed(input.command);
+      timeoutMs = normalizeTimeoutMs(input.timeoutMs);
+      context = await workspaceContextResolver(
+        { workspace_id: input.workspace_id },
+        { mutation: true },
+      );
+      cwd = await resolveMaintenanceCwd(context.root, input.cwd ?? ".", {
+        hostAbsoluteCwd: !elevated && context.workspace_type === "shared",
+      });
+    } catch (error) {
+      throw markPowerShellPreDispatchFailure(error, toolName);
     }
-
-    assertPowerShellMaintenanceCommandAllowed(input.command);
-    const timeoutMs = normalizeTimeoutMs(input.timeoutMs);
-    const context = await workspaceContextResolver(
-      { workspace_id: input.workspace_id },
-      { mutation: true },
-    );
-    const cwd = await resolveMaintenanceCwd(context.root, input.cwd ?? ".");
     const commandHash = sha256(input.command);
 
     const operation = await journalApi.begin({
