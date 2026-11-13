@@ -72,6 +72,7 @@ export const mcpPiPostSealScripts=Object.freeze([
   "tests/mcp/pi-workstream-metadata-limit-resolution.test.mjs",
   "tests/mcp/pi-workstream-committed-resolution.test.mjs",
   "tests/mcp/pi-powershell-recovery-resolution.test.mjs",
+  "tests/mcp/mcp-powershell-predispatch-failure.test.mjs",
   "tests/mcp/pi-bootstrap-binding.test.mjs",
   "tests/mcp/pi-bootstrap-physical.test.mjs",
   "tests/mcp/pi-bootstrap-cold.test.mjs",

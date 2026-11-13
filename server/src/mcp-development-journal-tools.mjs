@@ -24,7 +24,8 @@ import { isWorkstreamPrewriteFailure } from "./mcp-workstream-prewrite-failure.m
 import { WORKSTREAM_STALE_RESOLUTION, validateWorkstreamStaleResolution, inspectWorkstreamStaleResolution } from "./mcp-workstream-stale-resolution.mjs";
 import { WORKSTREAM_METADATA_LIMIT_RESOLUTION, validateWorkstreamMetadataLimitResolution, inspectWorkstreamMetadataLimitResolution } from "./mcp-workstream-metadata-limit-resolution.mjs";
 import { WORKSTREAM_COMMITTED_RESOLUTION, validateWorkstreamCommittedResolution, inspectWorkstreamCommittedResolution } from "./mcp-workstream-committed-resolution.mjs";
-import { POWERSHELL_EFFECT_RESOLUTION, REVIEWED_POWERSHELL_EFFECT_PROFILE, isPowerShellOperation, isUnprovenPowerShellRecovery, validatePowershellEffectResolution, inspectPowershellEffectResolution } from "./mcp-powershell-recovery-resolution.mjs";
+import { POWERSHELL_EFFECT_RESOLUTION, REVIEWED_POWERSHELL_EFFECT_PROFILE, isPowerShellOperation, isUnprovenPowerShellRecovery, validatePowershellEffectResolution, inspectPowershellEffectResolution, archivedPowerShellCwdResolution } from "./mcp-powershell-recovery-resolution.mjs";
+import { isPowerShellPreDispatchFailure } from "./mcp-powershell-predispatch-failure.mjs";
 import { projectPaths, projectRoot } from "./project-paths.mjs";
 import { createWorkspaceSnapshotAuthorityIpcClient } from "./mcp-workspace-snapshot-authority-ipc.mjs";
 import { normalizeExactWorkspaceSnapshot } from "./mcp-workspace-snapshot-authority.mjs";
@@ -783,12 +784,14 @@ export function createDevOperationJournalService({
   }
 
 
-  // Host-only repair: a create callback cannot write before its child STARTED.
-  // Keep the failed terminal immutable; a separate verified pair records resolution.
+  // Host-only repair for create/patch. Also recognize the single PowerShell
+  // receipt already published by the November 13 host repair.
   function validateNoChildResolution(events, input) {
     const started=events.find(e=>e.operation_id===input.operation_id&&e.stage==="operation_started");
     const terminal=events.find(e=>e.operation_id===input.operation_id&&terminalStageSet.has(e.stage));
-    if (!started || !terminal || started.operation_type!=="mcp_mutation" || !["dev_create_file","dev_apply_patch"].includes(started.tool_name)
+    const archived = archivedPowerShellCwdResolution(events, started, terminal);
+    if (!started || !terminal || started.operation_type!=="mcp_mutation"
+      || (!["dev_create_file","dev_apply_patch"].includes(started.tool_name) && !archived)
       || started.targets.length || terminal.targets.length || terminal.stage!=="operation_failed"
       || terminal.result?.outcome!=="ambiguous_effect" || terminal.result?.reconciliation_required!==true
       || terminal.event_hash!==input.expected_terminal_hash
@@ -799,7 +802,7 @@ export function createDevOperationJournalService({
       || typeof input.reason!=="string" || !input.reason.trim() || input.reason.length>1024) {
       throw Object.assign(new Error("UNSAFE_TERMINAL_RESOLUTION"),{code:"UNSAFE_TERMINAL_RESOLUTION"});
     }
-    return {started,terminal};
+    return {started,terminal,archived};
   }
 
   function validateCompletedChildResolution(events, input) {
@@ -1027,8 +1030,10 @@ export function createDevOperationJournalService({
       if(event.operation_type!=="pi_terminal_resolution"||!terminalStageSet.has(event.stage))continue;
       if(event.stage!=="operation_completed")continue;
       const proof=JSON.parse(event.result?.resolution_record??"null");
-      const {started,terminal}=validateResolution(events,proof??{});
+      const {started,terminal,archived}=validateResolution(events,proof??{});
       const admission=events.find(e=>e.operation_id===event.operation_id&&e.stage==="operation_started");
+      if (archived && (event !== archived.receipt || admission !== archived.admission))
+        throw new Error("INVALID_TERMINAL_RESOLUTION");
       if((["completed_git_commit", WORKSTREAM_STALE_RESOLUTION, WORKSTREAM_COMMITTED_RESOLUTION, WORKSTREAM_METADATA_LIMIT_RESOLUTION, ISOLATION_RESOLUTION, POWERSHELL_EFFECT_RESOLUTION, INTEGRATION_PREFLIGHT_RESOLUTION].includes(proof.resolution_kind) || proof.resolution_kind==="completed_powershell_observation"&&proof.operation_id===REVIEWED_INTERRUPTED_LAUNCHER.operation_id) && (
         admission?.reconciliation_key !== "resolution:" + started.operation_id
         || admission?.request_fingerprint_sha256 !== sha256Text(canonicalJson(proof))
@@ -2155,6 +2160,25 @@ function verifiedMcpTestResult(events,started,terminal) {
         return { reconciled: true, operation: await getOperation({ operation_id: error.operation_id }) };
       }
       let value;
+      const shell = isPowerShellOperation({tool_name: context.tool_name, operation_type: "mcp_mutation"});
+      const childStarts = events => events.filter(event => event.parent_operation_id === admission.operation_id
+        && event.stage === "operation_started");
+      const dispatchEvidenceChanged = new Error("POWERSHELL_DISPATCH_EVIDENCE_CHANGED");
+      const recordFailure = async noEffect => {
+        try {
+          return await fail(admission.operation_id, {
+            result: { outcome: noEffect ? "failed_no_effect" : "ambiguous_effect", reconciliation_required: !noEffect },
+            beforeAppend: shell && noEffect ? snapshot => {
+              if (childStarts(snapshot.events).length) throw dispatchEvidenceChanged;
+            } : undefined,
+          });
+        } catch (error) {
+          if (error !== dispatchEvidenceChanged) throw error;
+          return fail(admission.operation_id, {
+            result: { outcome: "ambiguous_effect", reconciliation_required: true },
+          });
+        }
+      };
       try {
         value = await callback();
       } catch (error) {
@@ -2165,30 +2189,32 @@ function verifiedMcpTestResult(events,started,terminal) {
           await complete(child.operation_id,{result:{pre_dispatch_record:canonicalJson(barrier),outcome:'no_effect_observed'}});
         }
         const verification = await verify();
+        if (shell) {
+          await recordFailure(isPowerShellPreDispatchFailure(error, admission) && !childStarts(verification.events).length);
+          throw error;
+        }
         const beforeChild = ["dev_create_file", "dev_apply_patch"].includes(context.tool_name) && !verification.events.some(event =>
           event.parent_operation_id === admission.operation_id && event.stage === "operation_started");
         const registryPrewrite = isWorkstreamPrewriteFailure(error, {tool_name: context.tool_name, operation_id: admission.operation_id})
           && !verification.events.some(event => event.parent_operation_id === admission.operation_id && event.stage === "operation_started");
         const noEffect = beforeChild || registryPrewrite || !!barrier;
-        await fail(admission.operation_id, { result: { outcome: noEffect ? "failed_no_effect" : "ambiguous_effect", reconciliation_required: !noEffect } });
+        await recordFailure(noEffect);
         throw error;
       }
       let payload;
       try { payload = JSON.parse(value?.content?.[0]?.text ?? "{}"); } catch { payload = {}; }
-      const completedCommandObservation=["powershell_run","powershell_admin_run"].includes(context.tool_name)
+      const completedCommandObservation=shell
         && payload?.execution_ok===true&&payload?.timed_out===false&&Number.isSafeInteger(payload?.exit_code);
       if (value?.isError === true || (!completedCommandObservation && (payload?.ok === false || payload?.execution_ok === false))) {
         const verification = await verify();
-        const children = verification.events.filter((event) => event.parent_operation_id === admission.operation_id
-          && event.stage === "operation_started");
-        const noEffect = (children.length === 0 && ["dev_create_file", "dev_apply_patch"].includes(context.tool_name))
+        const children = childStarts(verification.events);
+        const noEffect = shell ? children.length === 0 && isPowerShellPreDispatchFailure(value, admission)
+          : (children.length === 0 && ["dev_create_file", "dev_apply_patch"].includes(context.tool_name))
           || (children.length === 0 && isWorkstreamPrewriteFailure(value, {tool_name: context.tool_name, operation_id: admission.operation_id}))
           || children.length > 0 && children.every((child) => verification.events.some((event) =>
           event.operation_id === child.operation_id && terminalStageSet.has(event.stage)
           && ["failed_no_effect", "no_effect_observed"].includes(event.result?.outcome)));
-        await fail(admission.operation_id, { result: {
-          outcome: noEffect ? "failed_no_effect" : "ambiguous_effect", reconciliation_required: !noEffect,
-        } });
+        await recordFailure(noEffect);
       } else {
         const verification = await verify();
         const children = verification.events.filter((event) => event.parent_operation_id === admission.operation_id

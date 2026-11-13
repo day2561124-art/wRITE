@@ -6,6 +6,18 @@ Future owner-loss recovery records `ambiguous_effect` for both the maintenance
 child and outer MCP boundary before generic child/no-effect inference runs.
 Unknown effects are never automatically replayed.
 
+An immediate PowerShell rejection is different from owner loss. The outer
+MCP operation can record `failed_no_effect` only when the local execution
+boundary witnesses a rejection before dispatch and the append snapshot still
+has no child admission. The witness is bound to that operation and never
+serialized. No child by itself, an executor error, or a timed-out result is
+not proof that the command did not run.
+
+The November 13, 2026 cwd repair at sequences 62034–62038 is recognized by
+its exact published Pi claim, outer start/failure, and resolution pair. This
+compatibility rule recognizes existing history and cannot admit a new
+no-child PowerShell resolution.
+
 Legal legacy `operation_recovered/no_effect_observed` events remain immutable
 valid history. They do not become freshly verified physical evidence. An
 unresolved legacy shell query returns `recovery_required`, refuses reinitiation,
