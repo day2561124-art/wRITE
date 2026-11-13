@@ -41,14 +41,18 @@ export async function adaptAuthorizedPiRequest(source, { resolveWorkspace } = {}
     hashExecutionInput(source);
     exact(source, ["request_kind", "intent_id", "goal", "workspace_id"],
       ["schema_version", "constraints", "completion_conditions", "permissions",
-        "requested_actions", "command", "timeoutMs"]);
+        "requested_actions", "command", "cwd", "timeoutMs"]);
     if (source.schema_version !== undefined && source.schema_version !== 1) fail("UNSUPPORTED_INTENT_VERSION");
     const usesCommand = source.command !== undefined;
     if (usesCommand === (source.requested_actions !== undefined)
-      || (!usesCommand && source.timeoutMs !== undefined)) fail("INVALID_AUTONOMOUS_ACTIONS");
+      || (!usesCommand && (source.timeoutMs !== undefined || source.cwd !== undefined))) fail("INVALID_AUTONOMOUS_ACTIONS");
+    if (source.cwd !== undefined
+      && (typeof source.cwd !== "string" || !source.cwd.trim() || source.cwd.length > 4096))
+      fail("INVALID_HOST_CWD");
     const requested_actions = usesCommand
       ? [{ step_id: "run", capability: "host.powershell",
         input: { command: source.command,
+          ...(source.cwd === undefined ? {} : { cwd: source.cwd }),
           ...(source.timeoutMs === undefined ? {} : { timeoutMs: source.timeoutMs }) } }]
       : source.requested_actions;
     if (!Array.isArray(requested_actions) || !requested_actions.length

@@ -2020,7 +2020,7 @@ const toolDefinitions = [
   },
   {
     name: "powershell_run",
-    description: "Run bounded non-elevated Windows PowerShell for Pi-approved host maintenance or isolated-workspace engineering. cwd stays within the selected workspace, but command file access is not an OS sandbox. Timeout/output are capped and destructive system commands are rejected.",
+    description: "Run bounded non-elevated Windows PowerShell for Pi-approved host maintenance or isolated-workspace engineering. Host-maintenance scope permits an existing local absolute-drive cwd (for example C:, D: or E:), while isolated workspace-shell and elevated scopes remain confined. Commands use the Windows user account; cwd is not an OS sandbox. Timeout/output caps, audit and destructive system-command guards remain.",
     risk: "low-risk-write",
     annotations: { readOnlyHint: false },
     inputSchema: baseSchema({

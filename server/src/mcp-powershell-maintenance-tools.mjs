@@ -113,20 +113,25 @@ function isPathInside(candidate, root) {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-async function resolveMaintenanceCwd(root, requestedCwd = ".") {
+async function resolveMaintenanceCwd(root, requestedCwd = ".", { hostAbsoluteCwd = false } = {}) {
   if (typeof requestedCwd !== "string" || !requestedCwd.trim()) {
-    throw new Error("cwd must be a non-blank workspace-relative path.");
+    throw new Error("cwd must be a non-blank path.");
   }
-  if (path.isAbsolute(requestedCwd)) {
+  const absolute = path.isAbsolute(requestedCwd);
+  if (absolute && !hostAbsoluteCwd) {
     throw new Error("cwd must be workspace-relative; absolute paths are not accepted.");
   }
+  if (absolute && hostAbsoluteCwd && process.platform === "win32"
+    && !/^[a-z]:[\\/]/iu.test(requestedCwd)) {
+    throw new Error("host cwd must be a local absolute drive path.");
+  }
   const resolvedRoot = await realpath(root);
-  const candidate = path.resolve(resolvedRoot, requestedCwd);
-  if (!isPathInside(candidate, resolvedRoot)) {
+  const candidate = absolute ? path.resolve(requestedCwd) : path.resolve(resolvedRoot, requestedCwd);
+  if (!absolute && !isPathInside(candidate, resolvedRoot)) {
     throw new Error("cwd must stay inside the selected Writer Workbench workspace.");
   }
   const resolvedCandidate = await realpath(candidate);
-  if (!isPathInside(resolvedCandidate, resolvedRoot)) {
+  if (!absolute && !isPathInside(resolvedCandidate, resolvedRoot)) {
     throw new Error("cwd resolves through a symlink/junction outside the selected Writer Workbench workspace.");
   }
   const info = await lstat(resolvedCandidate);
@@ -420,7 +425,9 @@ export function createPowerShellMaintenanceTool({
       { workspace_id: input.workspace_id },
       { mutation: true },
     );
-    const cwd = await resolveMaintenanceCwd(context.root, input.cwd ?? ".");
+    const cwd = await resolveMaintenanceCwd(context.root, input.cwd ?? ".", {
+      hostAbsoluteCwd: !elevated && context.workspace_type === "shared",
+    });
     const commandHash = sha256(input.command);
 
     const operation = await journalApi.begin({
