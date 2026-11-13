@@ -12,6 +12,7 @@ import {
 } from "./process-control.mjs";
 import { workspaceExecutionProvenance } from "./mcp-development-readonly-tools.mjs";
 import { resolveDevWorkspaceExecutionContext } from "./mcp-development-workstream-tools.mjs";
+import { markPowerShellPreDispatchFailure } from "./mcp-powershell-predispatch-failure.mjs";
 import {
   beginDevJournalOperation,
   completeDevJournalOperation,
@@ -410,17 +411,19 @@ export function createPowerShellMaintenanceTool({
   const operationType = elevated ? "powershell_admin_maintenance" : "powershell_maintenance";
 
   return async function powershellMaintenance(input = {}) {
-    if (platform !== "win32") {
-      throw new Error(`${toolName} is only available on Windows.`);
+    let timeoutMs, context, cwd;
+    try {
+      if (platform !== "win32") throw new Error(`${toolName} is only available on Windows.`);
+      assertPowerShellMaintenanceCommandAllowed(input.command);
+      timeoutMs = normalizeTimeoutMs(input.timeoutMs);
+      context = await workspaceContextResolver(
+        { workspace_id: input.workspace_id },
+        { mutation: true },
+      );
+      cwd = await resolveMaintenanceCwd(context.root, input.cwd ?? ".");
+    } catch (error) {
+      throw markPowerShellPreDispatchFailure(error, toolName);
     }
-
-    assertPowerShellMaintenanceCommandAllowed(input.command);
-    const timeoutMs = normalizeTimeoutMs(input.timeoutMs);
-    const context = await workspaceContextResolver(
-      { workspace_id: input.workspace_id },
-      { mutation: true },
-    );
-    const cwd = await resolveMaintenanceCwd(context.root, input.cwd ?? ".");
     const commandHash = sha256(input.command);
 
     const operation = await journalApi.begin({

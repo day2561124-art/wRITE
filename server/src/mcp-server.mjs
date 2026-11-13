@@ -5,6 +5,7 @@ import {REQUEST_TRACE_META_KEY,attachTraceIpc,publishTrace,runRequestTrace,trace
 if(process.env.MCP_REQUEST_TRACING==='1')attachTraceIpc();
 import { createRuntimeReadiness } from "./mcp-runtime-readiness.mjs";
 import { preserveWorkstreamPrewriteFailure } from "./mcp-workstream-prewrite-failure.mjs";
+import { markPowerShellPreDispatchFailure, preservePowerShellPreDispatchFailure } from "./mcp-powershell-predispatch-failure.mjs";
 import { chatgpt_bridge_save_settlement_report } from "./mcp-direct-pasted-chapter-settlement-wrapper.mjs";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -1165,7 +1166,8 @@ function devAdditionalFilesystemAuditChanges(tool, result) {
 
 async function auditedToolCall(tool, args, actor) {
   const {markIsolationBeforeDispatch}=await import('./mcp-workstream-prewrite-failure.mjs');
-  let before;try{before=await auditSnapshotMap();}catch(error){throw markIsolationBeforeDispatch(error);}
+  const markBeforeHandler = error => markIsolationBeforeDispatch(markPowerShellPreDispatchFailure(error, tool.name));
+  let before;try{before=await auditSnapshotMap();}catch(error){throw markBeforeHandler(error);}
   const calledAt = new Date();
   const auditId = `MCP-AUDIT-${calledAt.toISOString().replace(/[-:.]/g, "").replace("T", "-").replace("Z", "")}-${hashText(`${tool.name}:${JSON.stringify(args)}:${calledAt.toISOString()}`).slice(0, 8).toUpperCase()}`;
   const auditIntentPath = path.join(mcpAuditIntentDir, `${auditId}.json`);
@@ -1183,8 +1185,9 @@ async function auditedToolCall(tool, args, actor) {
   }, null, 2)}\n`, {
     tool: "mcp-audit-intent",
     audit_id: auditId,
-  });}catch(error){throw markIsolationBeforeDispatch(error);}
+  });}catch(error){throw markBeforeHandler(error);}
 
+  let handlerInvoked = false;
   try {
     effectiveArgs = prepareToolArguments(tool, args);
     const guardError = confirmationGuardError(tool, effectiveArgs);
@@ -1195,8 +1198,12 @@ async function auditedToolCall(tool, args, actor) {
       await assertDevJournalMutationAllowed();
     }
     await assertPiManagedMcpCall();
-    result = await traceSpan("capability.execution",()=>tool.handler(effectiveArgs));
+    result = await traceSpan("capability.execution",()=>{
+      handlerInvoked = true;
+      return tool.handler(effectiveArgs);
+    });
   } catch (error) {
+    if (!handlerInvoked) markPowerShellPreDispatchFailure(error, tool.name);
     result = {
       isError: true,
       content: [
@@ -1207,6 +1214,7 @@ async function auditedToolCall(tool, args, actor) {
       ],
     };
     preserveWorkstreamPrewriteFailure(error, result);
+    preservePowerShellPreDispatchFailure(error, result);
   }
 
   const after = await auditSnapshotMap();
