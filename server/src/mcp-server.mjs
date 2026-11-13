@@ -2028,7 +2028,7 @@ const toolDefinitions = [
   },
   {
     name: "powershell_run",
-    description: "Run bounded non-elevated Windows PowerShell for Pi-approved host maintenance or isolated-workspace engineering. cwd stays within the selected workspace, but command file access is not an OS sandbox. Timeout/output are capped and destructive system commands are rejected.",
+    description: "Run bounded non-elevated Windows PowerShell for Pi-approved host maintenance or isolated-workspace engineering. Host-maintenance scope permits an existing local absolute-drive cwd (for example C:, D: or E:), while isolated workspace-shell and elevated scopes remain confined. Commands use the Windows user account; cwd is not an OS sandbox. Timeout/output caps, audit and destructive system-command guards remain.",
     risk: "low-risk-write",
     annotations: { readOnlyHint: false },
     inputSchema: baseSchema({
@@ -2099,7 +2099,7 @@ const toolDefinitions = [
   },
   {
     name: "dev_pi_execute_intent",
-    description: "Default engineering execution ingress when Pi production routing is enabled. Accepts the exact GPT-authored ExecutionIntent JSON contract, or request_kind=authorized_engineering for ordinary authorized work. request_kind=reconcile_only requires only exact operation_id, context, expected_revision and expected_owner; it recognizes completed MCP receipts without admission, dispatch, retry or pending-action continuation. High-risk capabilities retain the full contract. Duplicate intents return durable state.",
+    description: "Default engineering ingress. For routine work, request_kind=autonomous_engineering accepts intent_id, goal, registered isolated workspace_id and either a command (non-elevated host PowerShell) or requested_actions; Pi derives mechanical contract fields and permissions while retaining durable authorization, audit and risk checks. request_kind=authorized_engineering and the full ExecutionIntent contract remain supported. request_kind=reconcile_only needs the exact operation identity and context. High-risk capabilities retain the full contract. Duplicate intents return durable state.",
     risk: "high-risk-write",
     annotations: { readOnlyHint: false },
     inputSchema: baseSchema({ intent_json: { type: "string", minLength: 1, maxLength: 524288 } }, ["intent_json"]),
