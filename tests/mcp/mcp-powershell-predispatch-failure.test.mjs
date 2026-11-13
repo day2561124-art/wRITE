@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -82,6 +82,39 @@ test("a timed-out PowerShell result with a recorded child remains ambiguous", as
   }));
   assert.equal(result.operation.reconciliation_state, "recovery_required");
   assert.equal((await f.journal.status()).health, "degraded");
+});
+
+test("only non-elevated shared PowerShell accepts an absolute cwd", async t => {
+  const f = await fixture(t);
+  const cwd = await realpath(process.platform === "win32" ? process.env.SystemRoot || "C:\\Windows" : os.tmpdir());
+  const input = { command: "[Environment]::CurrentDirectory", cwd };
+  let dispatched = 0;
+  const shell = (elevated, workspace_type) => createPowerShellMaintenanceTool({
+    elevated, platform: "win32", journalApi: { ...f.journal, degrade: f.journal.markDegraded },
+    workspaceContextResolver: async () => ({ root: path.dirname(f.storageRoot), workspace_type,
+      workspace_id: "dev_workspace_shared_repository_v1", workstream_id: null }),
+    ...(process.platform === "win32" ? {} : { executor: ({ cwd }) => {
+      dispatched++;
+      return { cwd, execution_ok: true, ok: true, timed_out: false, exit_code: 0, stdout: cwd };
+    } }),
+  });
+  for (const [elevated, workspace_type] of [[true, "shared"], [false, "isolated_worktree"]]) {
+    const tool_name = elevated ? "powershell_admin_run" : "powershell_run";
+    const context = { tool_name, reconciliation_key: `nexa-cwd-denied-${workspace_type}`,
+      request_fingerprint_sha256: fingerprintMcpMutationRequest(tool_name, input) };
+    const rejected = await f.journal.executeReconciled(context, () => shell(elevated, workspace_type)(input).catch(errorResponse));
+    assert.match(rejected.value.content[0].text, /absolute paths are not accepted/);
+    assert.equal(rejected.operation.reconciliation_state, "no_effect");
+  }
+  assert.equal(dispatched, 0);
+  const accepted = await f.journal.executeReconciled(f.context("nexa-cwd-shared-allowed", input), async () => ({
+    content: [{ type: "text", text: JSON.stringify(await shell(false, "shared")(input)) }],
+  }));
+  const result = JSON.parse(accepted.value.content[0].text);
+  assert.equal(result.exit_code, 0, result.stderr);
+  assert.equal(result.stdout.trim().toLowerCase(), cwd.toLowerCase());
+  assert.equal(accepted.operation.reconciliation_state, "completed");
+  assert.equal((await createDevOperationJournalService({ storageRoot: f.storageRoot }).status()).health, "healthy");
 });
 
 test("missing child or serialized proof is not enough to clear an unknown PowerShell error", async t => {
