@@ -1585,7 +1585,7 @@ for (const filePath of publicReadPaths) {
 
 const originalAdapterProfile = process.env.MCP_TOOL_PROFILE;
 delete process.env.MCP_TOOL_PROFILE;
-const adapterSession = createStdioSession();
+const adapterSession = createStdioSession({trustedLocalOwner:true});
 try {
   const adapterList = await adapterCall(adapterSession, {
     jsonrpc: "2.0",
@@ -1624,7 +1624,7 @@ publicToolNames.push(...checkpointToolNames);
 publicToolNames.push(...transactionToolNames);
 publicToolNames.push(...cleanupToolNames);
 process.env.MCP_TOOL_PROFILE = "chatgpt_developer";
-const developerAdapterSession = createStdioSession();
+const developerAdapterSession = createStdioSession({trustedLocalOwner:true});
 try {
   const adapterList = await adapterCall(developerAdapterSession, {
     jsonrpc: "2.0",

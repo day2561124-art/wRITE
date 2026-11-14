@@ -8,6 +8,7 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createStdioSession} from '../../server/src/mcp-http-stdio-adapter.mjs';
+import {createTestOAuthCredentials,testOAuthEnvironment} from './fixtures/workbench-http-test-security.mjs';
 
 // Match the actual headless launcher's DETACHED_PROCESS parent. CREATE_NO_WINDOW
 // alone does not reproduce the Windows child-console inheritance difference.
@@ -26,6 +27,8 @@ if(process.argv[2]==='--detached-parent'){
 
 // Run under the interactive Windows observer, with a console-free Node parent.
 // Fault injection only targets ChildProcess objects created by this test.
+const {proof,publicJwk}=createTestOAuthCredentials();
+const _meta={workbench_http_access_token:proof};
 const sessions=[];
 const spawned=[];
 const report={platform:process.platform,startedAt:new Date().toISOString(),spawned};
@@ -66,7 +69,7 @@ function verifyLoginIdentityContract(){
   }
 }
 const rpc=(session,method,params={})=>new Promise((resolve,reject)=>session.call(
-  {jsonrpc:'2.0',id:randomUUID(),method,params},(error,response)=>{
+  {jsonrpc:'2.0',id:randomUUID(),method,params:{...params,_meta}},(error,response)=>{
     if(error)reject(error);else if(response.error)reject(Error(JSON.stringify(response.error)));else resolve(response.result);
   }));
 async function until(predicate){const deadline=Date.now()+120000;while(!predicate()){
@@ -77,7 +80,7 @@ function makeSession(){
     assert.equal(options.windowsHide,true);
     assert.deepEqual(options.stdio,['pipe','pipe','pipe','ipc']);
     const child=spawn(exe,['--import','data:text/javascript,process.stderr.write("windows-console-stderr-probe\\n")',...args],{
-      ...options,env:{...options.env,MCP_TOOL_PROFILE:'chatgpt_public'},
+      ...options,env:{...options.env,MCP_TOOL_PROFILE:'chatgpt_public',...testOAuthEnvironment(publicJwk)},
     });
     const row={pid:child.pid,windowsHide:options.windowsHide,ipcMessages:0,stdoutBytes:0,stderrBytes:0};spawned.push(row);
     child.on('message',()=>row.ipcMessages++);
@@ -89,7 +92,7 @@ function makeSession(){
 }
 async function initialize(session){
   await rpc(session,'initialize',{protocolVersion:'2025-03-26',capabilities:{},clientInfo:{name:'windows-console-acceptance',version:'1'}});
-  session.send({jsonrpc:'2.0',method:'notifications/initialized'});
+  session.send({jsonrpc:'2.0',method:'notifications/initialized',params:{_meta}});
   const catalog=await rpc(session,'tools/list');
   assert(catalog.tools.some(t=>t.name==='get_engine_components_status'));
   return catalog.tools.length;

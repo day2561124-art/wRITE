@@ -1,3 +1,4 @@
+import {loadProbeCredentials,authenticateProbeRequest,ProbeCredentialError} from './probe-mcp-credentials.mjs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { getMcpIdentity } from '../server/src/mcp-http-identity.mjs';
@@ -41,7 +42,14 @@ function httpStatus(error) {
   return Number.isInteger(status) && status >= 100 && status < 600 ? status : null;
 }
 
+function authenticationFailure(error) {
+  const allowed=['AUTHENTICATION_REQUIRED','INVALID_TOKEN','AUTHENTICATION_UNAVAILABLE','MCP_SESSION_OWNER_MISMATCH'];
+  if([401,403].includes(httpStatus(error)))return true;
+  if(allowed.includes(error?.data?.code)||allowed.includes(error?.data?.error?.code))return true;
+  return allowed.some(code=>error?.message===code||error?.message==='MCP error -32001: '+code);
+}
 function transient(error) {
+  if(authenticationFailure(error))return false;
   if (error instanceof ProbeError) return error.code === 'HTTP_TIMEOUT';
   const status = httpStatus(error);
   if (status !== null) return status >= 500;
@@ -59,7 +67,7 @@ function readinessFacts(payload) {
 }
 
 export async function runMcpProbe({ endpoint, mode = 'probe', expectedInstance,
-  startupBudgetMs, hardDeadlineMs, operationTimeoutMs, createClientFactory = null } = {}) {
+  startupBudgetMs, hardDeadlineMs, operationTimeoutMs, createClientFactory = null, credentialFile = process.env.WRITER_WORKBENCH_PROBE_CREDENTIAL_FILE } = {}) {
   if (!endpoint) throw new ProbeError('INVALID_ARGS', 'endpoint is required');
   let endpointUrl, operation, startup, hard;
   try {
@@ -68,11 +76,15 @@ export async function runMcpProbe({ endpoint, mode = 'probe', expectedInstance,
     ({ startup, hard } = normalizeTimings(startupBudgetMs ?? process.env.PROBE_STARTUP_BUDGET_MS,
       hardDeadlineMs ?? process.env.PROBE_HARD_DEADLINE_MS));
   } catch { throw new ProbeError('INVALID_TIMING_CONFIG', 'Invalid endpoint or probe timing configuration'); }
+  if (mode === 'local-health' && (endpointUrl.protocol !== 'http:' || endpointUrl.username || endpointUrl.password
+    || !['127.0.0.1', 'localhost', '[::1]'].includes(endpointUrl.hostname))) {
+    throw new ProbeError('LOCAL_HEALTH_LOOPBACK_REQUIRED', 'Local health requires a loopback HTTP endpoint');
+  }
   const started = performance.now();
   const deadlineAt = started + startup;
   const controller = new AbortController();
   const phases = {};
-  let phase = 'identity', transport, client, lastReadiness = {}, closing = false;
+  let phase = 'identity', transport, client, lastReadiness = {}, closing = false, credentials = null;
   const remaining = () => closing ? 400 : Math.max(1, Math.min(operation, deadlineAt - performance.now()));
   const failure = (code, message, cause) => new ProbeError(code, message, {
     phase, elapsedMs: Math.round(performance.now() - started), startupBudgetMs: startup,
@@ -81,10 +93,11 @@ export async function runMcpProbe({ endpoint, mode = 'probe', expectedInstance,
   });
   const boundedFetch = async (url, init = {}) => {
     try {
-      return await fetch(url, { ...init, redirect: 'error', signal: AbortSignal.any([
+      return await fetch(url, { ...authenticateProbeRequest(url,init,credentials), redirect: 'error', signal: AbortSignal.any([
         ...(!closing ? [controller.signal] : []), ...(init.signal ? [init.signal] : []), AbortSignal.timeout(Math.ceil(remaining())),
       ]) });
     } catch (error) {
+      if(error instanceof ProbeCredentialError)throw failure(error.code,'Probe authentication configuration rejected');
       if (controller.signal.aborted || ['TimeoutError', 'AbortError'].includes(error?.name)) {
         throw failure('HTTP_TIMEOUT', 'HTTP operation exceeded its bounded deadline');
       }
@@ -119,8 +132,11 @@ export async function runMcpProbe({ endpoint, mode = 'probe', expectedInstance,
   });
   try {
     return await Promise.race([hardDeadline, (async () => {
+      // Local listener admission remains independent of end-user OAuth. Only
+      // the separate full protocol probe reads a private, explicitly pinned credential.
+      if(mode==='probe'&&credentialFile){try{credentials=await stage('credentials',()=>loadProbeCredentials(credentialFile,endpointUrl));}catch(error){throw failure(error instanceof ProbeCredentialError?error.code:'MCP_AUTH_CONFIGURATION_INVALID','Probe authentication configuration rejected');}}
       const { response: health, payload: identity } = await stage('identity', () => json('/health'));
-      if (health.status !== 200) throw failure('HTTP_HEALTH_FAILED', 'Identity endpoint did not return HTTP 200', {status:health.status});
+      if (health.status !== 200) throw failure([401,403].includes(health.status)?'MCP_AUTHENTICATION_FAILED':'HTTP_HEALTH_FAILED', 'Identity endpoint did not return HTTP 200', {status:health.status});
       const expected = getMcpIdentity();
       if (identity?.service !== expected.service || identity?.repositoryId !== expected.repositoryId
         || !Number.isSafeInteger(identity?.pid) || identity.pid < 1 || typeof identity?.instanceId !== 'string' || !identity.instanceId) {
@@ -128,8 +144,28 @@ export async function runMcpProbe({ endpoint, mode = 'probe', expectedInstance,
       }
       if (expectedInstance && identity.instanceId !== expectedInstance) throw failure('INSTANCE_CHANGED', 'Tunnel points to another MCP instance');
       if (mode === 'identity') return { identity: { ...identity, current: identity.revision === expected.revision } };
-      if (mode !== 'probe') throw failure('INVALID_MODE', 'Unknown probe mode');
+      if (!['probe', 'local-health'].includes(mode)) throw failure('INVALID_MODE', 'Unknown probe mode');
       if (identity.revision !== expected.revision) throw failure('STALE_REVISION', 'Stale MCP server revision');
+      if (mode === 'local-health') {
+        // Launch readiness checks the local listener and Pi without opening a session.
+        let current = identity;
+        for (;;) {
+          const worker = current.pi_durable_worker;
+          const ready = ['ready', 'idle', 'executing'].includes(worker?.state)
+            && Number.isSafeInteger(worker?.pid) && worker.pid > 0;
+          const disabled = worker?.state === 'disabled' && current.profile !== 'chatgpt_developer';
+          if (ready || disabled) return { ...current, current: true, ok: true, ready: true, probeKind:'local-health', protocolVerified:false };
+          if (performance.now() >= deadlineAt) throw failure('RUNTIME_NOT_READY', 'Local Pi worker is not ready');
+          await new Promise(resolve => setTimeout(resolve, Math.min(250, Math.max(1, deadlineAt - performance.now()))));
+          const { response, payload } = await stage('local/health', () => json('/health'));
+          if (response.status !== 200 || payload?.pid !== identity.pid || payload.instanceId !== identity.instanceId
+            || payload.service !== expected.service || payload.repositoryId !== expected.repositoryId
+            || payload.revision !== expected.revision) {
+            throw failure('INSTANCE_CHANGED', 'Local MCP identity changed while waiting for readiness');
+          }
+          current = payload;
+        }
+      }
       const discoveryStarted = performance.now();
       if (createClientFactory) ({ client, transport } = await stage('client', () => createClientFactory({ endpointUrl, boundedFetch })));
       else {
@@ -137,12 +173,12 @@ export async function runMcpProbe({ endpoint, mode = 'probe', expectedInstance,
         transport = new StreamableHTTPClientTransport(endpointUrl, { fetch: boundedFetch });
       }
       try { await stage('initialize', () => client.connect(transport, { timeout: Math.ceil(remaining()) })); }
-      catch (e) { if (e instanceof ProbeError) throw e; throw failure('MCP_HANDSHAKE_FAILED', transient(e) ? 'MCP initialize failed: origin not ready' : 'MCP initialize failed', e); }
+      catch (e) { if (e instanceof ProbeError) throw e; if(authenticationFailure(e))throw failure('MCP_AUTHENTICATION_FAILED','MCP authentication required or rejected',e); throw failure('MCP_HANDSHAKE_FAILED', transient(e) ? 'MCP initialize failed: origin not ready' : 'MCP initialize failed', e); }
       if (client.getServerVersion?.()?.name !== 'armed-academy-fiction-engine') throw failure('MCP_HANDSHAKE_FAILED', 'Unexpected MCP serverInfo');
       if (!transport?.sessionId) throw failure('SESSION_NOT_FOUND', 'MCP initialize did not establish a session');
       let tools;
       try { tools = await stage('tools/list', () => client.listTools({}, { timeout: Math.ceil(remaining()) })); }
-      catch (e) { if (e instanceof ProbeError) throw e; throw failure('TOOLS_DISCOVERY_FAILED', 'MCP tools/list failed', e); }
+      catch (e) { if (e instanceof ProbeError) throw e; if(authenticationFailure(e))throw failure('MCP_AUTHENTICATION_FAILED','MCP authentication required or rejected',e); throw failure('TOOLS_DISCOVERY_FAILED', 'MCP tools/list failed', e); }
       if (!Array.isArray(tools?.tools) || !tools.tools.length) throw failure('TOOLS_DISCOVERY_FAILED', 'MCP tools/list is empty or invalid');
       let resources;
       for (let attempt = 0; attempt < 3; attempt++) {
@@ -150,6 +186,7 @@ export async function runMcpProbe({ endpoint, mode = 'probe', expectedInstance,
           resources = await stage('resources/list', () => client.listResources({}, { timeout: Math.ceil(remaining()) }));
           break;
         } catch (error) {
+          if (authenticationFailure(error))throw failure('MCP_AUTHENTICATION_FAILED','MCP authentication required or rejected',error);
           if (!transient(error)) throw failure('RESOURCES_DISCOVERY_FAILED', 'MCP resources/list failed', error);
           if (attempt === 2) throw failure('RESOURCES_DISCOVERY_FAILED', 'MCP resources/list retry limit reached', error);
           let ready = false;
@@ -173,13 +210,13 @@ export async function runMcpProbe({ endpoint, mode = 'probe', expectedInstance,
         throw failure(readyResponse.status === 404 ? 'SESSION_NOT_FOUND' : 'RUNTIME_NOT_READY', 'Session runtime readiness validation failed');
       }
       try { await stage('ping', () => client.ping({ timeout: Math.ceil(remaining()) })); }
-      catch (e) { if (e instanceof ProbeError) throw e; throw failure('MCP_PING_FAILED', 'MCP ping failed', e); }
+      catch (e) { if (e instanceof ProbeError) throw e; if(authenticationFailure(e))throw failure('MCP_AUTHENTICATION_FAILED','MCP authentication required or rejected',e); throw failure('MCP_PING_FAILED', 'MCP ping failed', e); }
       const { response: afterResponse, payload: after } = await stage('identity/recheck', () => json('/health'));
       if (afterResponse.status !== 200 || after?.instanceId !== identity.instanceId || after?.pid !== identity.pid
         || after?.service !== expected.service || after?.repositoryId !== expected.repositoryId || after?.revision !== expected.revision) {
         throw failure('INSTANCE_CHANGED', 'MCP identity changed during protocol verification');
       }
-      return { ...identity, current: true, ok: true, ready: true, toolCount: tools.tools.length,
+      return { ...identity, current: true, ok: true, ready: true, probeKind:'protocol', protocolVerified:true, authenticated:!!credentials, toolCount: tools.tools.length,
         resourceCount: resources.resources.length, runtimeReadiness: lastReadiness.runtimeState,
         childGeneration: readiness.child?.generation ?? null,
         discoveryMs: Math.round(performance.now() - discoveryStarted), phaseTimingsMs: phases };
@@ -212,9 +249,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const [endpoint, mode = 'probe', expectedInstance] = process.argv.slice(2);
     const result = await runMcpProbe({ endpoint, mode, expectedInstance });
     console.log(JSON.stringify(mode === 'identity' ? result.identity : result));
-    process.exit(0);
+    // Let fetch/SDK handles drain: forced exit can abort in Windows libuv.
+    process.exitCode = 0;
   } catch (error) {
     console.error(formatProbeFailure(error));
-    process.exit(1);
+    process.exitCode = 1;
   }
 }

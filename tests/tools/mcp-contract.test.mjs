@@ -101,6 +101,9 @@ function runTestScript(scriptPath) {
 try {
   // VA-4 additive safety contract: prove all original MCP scripts remain covered.
   await runTestScript("tests/tools/mcp-suite-groups.test.mjs");
+  // Additive TRPG coverage preserves the reviewed legacy 24-script inventory.
+  await runTestScript("tests/mcp/trpg-gm-bridge.test.mjs");
+  await runTestScript("tests/mcp/trpg-gm-http-auth.test.mjs");
   for (const scriptPath of [...testScripts, ...piTestScripts, ...(await import("./mcp-suite-groups.mjs")).mcpPiPostSealScripts, "tests/mcp/pi-bootstrap-wire.test.mjs"]) {
     await runTestScript(scriptPath);
   }

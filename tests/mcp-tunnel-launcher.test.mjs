@@ -15,6 +15,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { terminateProcessTree } from "../server/src/process-control.mjs";
+import {createTestOAuthCredentials,testOAuthEnvironment,createTestProbeCredentialFile} from './mcp/fixtures/workbench-http-test-security.mjs';
+import {authenticateProbeRequest} from '../scripts/probe-mcp-credentials.mjs';
 
 // Keep Secure Tunnel coverage in the existing focused tunnel/full gate entry.
 await import('./secure-tunnel-launcher.test.mjs');
@@ -26,7 +28,7 @@ function runStartupReadinessRegressions() {
   const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['--test', '--test-concurrency=1',
-      'tests/mcp/probe-startup-budget.test.mjs', 'tests/mcp/tailscale-startup.test.mjs'],
+      'tests/mcp/probe-credentials.test.mjs', 'tests/mcp/probe-startup-budget.test.mjs', 'tests/mcp/tailscale-startup.test.mjs'],
       { cwd: projectRoot, env: { ...process.env }, stdio: ['ignore', 'inherit', 'inherit'], windowsHide: true });
     const timer = setTimeout(() => {
       terminateProcessTree(child);
@@ -46,6 +48,19 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..");
 const tunnelScript = path.join(rootDir, "scripts", "start-mcp-tunnel.ps1");
 const serviceManagerScript = path.join(rootDir, "scripts", "manage-mcp-service.ps1");
+
+// Explicit synthetic grants for the fake tunnel resources. Production pinning
+// and per-request ES256 verification remain active on every HTTP child.
+const fakeResources=['https://fresh-quic.trycloudflare.com/mcp','https://fresh-http2.trycloudflare.com/mcp','https://stale-auto.trycloudflare.com/mcp','https://stable-mcp.example.test/mcp','https://cloudflared-death.service.example.test/mcp','https://mcp-death.service.example.test/mcp'];
+const httpCredentials=createTestOAuthCredentials(fakeResources),probeRegistry={},privateProbeFiles=new Set();
+let credentialDirectory;
+const withHttpProof=message=>({...message,params:{...(message.params??{}),_meta:{...(message.params?._meta??{}),workbench_http_access_token:httpCredentials.proof}}});
+async function fixtureProofFetch(input,init={}){const url=new URL(input instanceof Request?input.url:input);assert(url.protocol==='http:'&&url.hostname==='127.0.0.1'&&url.pathname==='/mcp','Fixture proof target must be an owned loopback MCP');return fetch(input,authenticateProbeRequest(url,init,{accessToken:httpCredentials.proof,origin:url.origin,bearer:false}));}
+async function prepareProbeFiles(port){
+ const origin='http://127.0.0.1:'+port;if(probeRegistry[origin])return;const entries={};
+ for(const resource of [null,...fakeResources]){const file=await createTestProbeCredentialFile(credentialDirectory,origin+'/mcp',httpCredentials);privateProbeFiles.add(file);if(resource){const data=JSON.parse(await readFile(file,'utf8'));data.resource=resource;await writeFile(file,JSON.stringify(data));}entries[resource??origin+'/mcp']=file;}
+ probeRegistry[origin]=entries;process.env.WRITER_WORKBENCH_TEST_PROBE_REGISTRY=JSON.stringify(probeRegistry);
+}
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -234,6 +249,11 @@ setInterval(() => {}, 1000);
   );
   const preload = path.join(fixtureDir, "fake-tunnel-fetch.mjs");
   await writeFile(preload, `const realFetch = globalThis.fetch;
+// Choose a separate private credential pinned to the exact probe destination.
+if(process.argv[1]&&process.argv[1].endsWith('probe-mcp.mjs')&&process.argv[2]){
+ const entries=JSON.parse(process.env.WRITER_WORKBENCH_TEST_PROBE_REGISTRY??'{}')[process.env.FAKE_MCP_ORIGIN]??{};
+ const selected=entries[process.argv[2]];if(selected)process.env.WRITER_WORKBENCH_PROBE_CREDENTIAL_FILE=selected;
+}
 globalThis.fetch = (input, init) => {
   const url = new URL(input instanceof Request ? input.url : input);
   if (
@@ -436,6 +456,7 @@ async function launchServiceHost({ fixtureDir, fakeScript, tokenFile, label }) {
   await mkdir(logDir, { recursive: true });
   await writeFile(argsLog, "", "utf8");
   const hostname = `${label}.service.example.test`;
+  await prepareProbeFiles(port);
   const child = spawn(
     "powershell.exe",
     [
@@ -565,7 +586,7 @@ function postMcpHttpRequest({
   protocolVersion,
   message,
 }) {
-  const payload = JSON.stringify(message);
+  const payload = JSON.stringify(withHttpProof(message));
   const headers = {
     "Content-Type": "application/json",
     Accept: "application/json, text/event-stream",
@@ -620,7 +641,7 @@ function beginSlowMcpHttpRequest({ port, sessionId, protocolVersion }) {
   });
   request.on("error", () => {});
   request.flushHeaders();
-  request.write('{"jsonrpc":"2.0","id":"slow-active-request","method":"tools/list","params":{}');
+  request.write(JSON.stringify(withHttpProof({jsonrpc:'2.0',id:'slow-active-request',method:'tools/list',params:{}})).slice(0,-1));
   return request;
 }
 
@@ -1066,6 +1087,7 @@ async function verifyLauncherMcpProfile({
   const preferredPort = 8787;
   const port = await isPortAvailable(preferredPort) ? preferredPort : await freePort();
   const logDir = path.join(fixtureDir, `${label}-profile-logs`);
+  await prepareProbeFiles(port);
   process.env.FAKE_MCP_ORIGIN = `http://127.0.0.1:${port}`;
   let mcpProcess;
   let tunnelStarted = false;
@@ -1099,7 +1121,7 @@ async function verifyLauncherMcpProfile({
       { capabilities: {} },
     );
     await client.connect(
-      new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`)),
+      new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`),{fetch:fixtureProofFetch}),
     );
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name);
@@ -1262,6 +1284,9 @@ async function verifyLauncherMcpProfile({
 }
 
 async function main() {
+  const security=testOAuthEnvironment(httpCredentials.publicJwk);
+  process.env.NODE_OPTIONS=[process.env.NODE_OPTIONS,security.NODE_OPTIONS].filter(Boolean).join(' ');
+  process.env.WRITER_WORKBENCH_TEST_HTTP_OAUTH_PUBLIC_JWK=httpCredentials.publicJwk;
   if (process.platform !== "win32") {
     console.log("MCP tunnel launcher integration test skipped (Windows only).");
     return;
@@ -1270,6 +1295,7 @@ async function main() {
   const tempParent = path.join(rootDir, "tests", ".tmp");
   await mkdir(tempParent, { recursive: true });
   const fixtureDir = await mkdtemp(path.join(tempParent, "mcp-tunnel-"));
+  credentialDirectory=fixtureDir;
   const serviceFixtureDir = await mkdtemp(path.join(os.tmpdir(), "writer-mcp-service-"));
   const serviceTokenFile = path.join(serviceFixtureDir, "tunnel-token.txt");
   const serviceSecret = "service-test-secret-that-must-not-enter-xml";
@@ -1327,6 +1353,7 @@ async function main() {
   const server = { listening: true, close(done) { terminateProcessTree(fixtureMcp.serverProcess); this.listening = false; done(); } };
   let serverClosed = false;
   const port = fixtureMcp.port;
+  await prepareProbeFiles(port);
   process.env.FAKE_MCP_ORIGIN = `http://127.0.0.1:${port}`;
 
   try {
@@ -1618,6 +1645,7 @@ async function main() {
       label: "external-public-override",
     });
 
+    for(const dir of [fixtureDir,serviceFixtureDir]){for(const file of await readdir(dir,{recursive:true})){const full=path.join(dir,file);if(!/\.(?:log|json)$/u.test(file)||privateProbeFiles.has(full))continue;const text=await readFile(full,'utf8');assert(!text.includes(httpCredentials.proof),'Synthetic OAuth proof leaked to launcher logs/state');}}
     console.log("MCP tunnel launcher integration tests passed.");
     console.log("- Launcher default MCP HTTP profile: chatgpt_developer (107 tools: 106 child-owned plus parent-owned dev_mcp_reload)");
     console.log("- External MCP_TOOL_PROFILE override: chatgpt_public (40 tools, development write/test/PowerShell tools absent)");

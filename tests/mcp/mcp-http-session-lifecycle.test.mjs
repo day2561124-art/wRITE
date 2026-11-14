@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { terminateProcessTree } from '../../server/src/process-control.mjs';
+import { createTestOAuthCredentials, testOAuthEnvironment } from './fixtures/workbench-http-test-security.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -114,7 +115,8 @@ function postMcp({ port, sessionId, protocolVersion, message }) {
   });
 }
 
-async function initializeSession(port, clientName) {
+async function initializeSession(port, clientName, proof) {
+  const meta = proof ? { _meta: { workbench_http_access_token: proof } } : {};
   const initialize = await postMcp({
     port,
     message: {
@@ -125,6 +127,7 @@ async function initializeSession(port, clientName) {
         protocolVersion: '2025-03-26',
         capabilities: {},
         clientInfo: { name: clientName, version: '1.0.0' },
+        ...meta,
       },
     },
   });
@@ -137,7 +140,8 @@ async function initializeSession(port, clientName) {
     port,
     sessionId,
     protocolVersion,
-    message: { jsonrpc: '2.0', method: 'notifications/initialized' },
+    message: { jsonrpc: '2.0', method: 'notifications/initialized',
+      ...(proof ? { params: meta } : {}) },
   });
   assert.ok([200, 202].includes(initialized.statusCode), initialized.text);
   return { sessionId, protocolVersion };
@@ -305,6 +309,7 @@ console.log('MCP HTTP session lifecycle SSE regression tests passed.');
 
 async function verifyCrossSessionReconciliation() {
   const group = randomUUID();
+  const { proof, invalidProof, publicJwk } = createTestOAuthCredentials();
   const artifact = 'tests/r5-reconciliation-' + group + '.txt';
   const journalRoot = path.join(os.tmpdir(), 'writer-workbench-operation-journal-test-' + group);
   try {
@@ -312,22 +317,38 @@ async function verifyCrossSessionReconciliation() {
       WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL: '1', WRITER_WORKBENCH_TEST_JOURNAL_GROUP: group,
       WRITER_WORKBENCH_ISOLATED_TEST_CHECKPOINT: '1', WRITER_WORKBENCH_ISOLATED_TEST_TRANSACTION: '1',
       MCP_HTTP_SESSION_IDLE_TIMEOUT_MS: '60000', MCP_HTTP_CHILD_CALL_TIMEOUT_MS: '120000',
+      ...testOAuthEnvironment(publicJwk),
     }, async ({ port, stderr }) => {
-      const sessions = await Promise.all([initializeSession(port, 'r5-first'), initializeSession(port, 'r5-second')]);
+      const anonymous = await initializeSession(port, 'r5-anonymous');
+      const sessions = await Promise.all(['r5-first', 'r5-second']
+        .map((name) => initializeSession(port, name, proof)));
       let id = 0;
-      const call = async (session, name, args) => {
+      const call = async (session, name, args, accessToken = proof) => {
         const { reconciliation_key, ...mutationArgs } = args;
         const lookup = name === 'dev_workspace_get_operation';
         const response = await postMcp({ port, ...session, message: { jsonrpc: '2.0', id: ++id,
           method: 'tools/call', params: { name, arguments: lookup ? args : mutationArgs,
-            ...(!lookup && reconciliation_key ? { _meta: { reconciliation_key } } : {}) } } });
+            _meta: { ...(!lookup && reconciliation_key ? { reconciliation_key } : {}),
+              ...(accessToken ? { workbench_http_access_token: accessToken } : {}) } } } });
         assert.equal(response.statusCode, 200, response.text);
         return response.payload;
       };
-      const payload = (reply) => JSON.parse(reply.result.content[0].text);
-      await Promise.all(sessions.map((session) => call(session, 'dev_workspace_journal_status', {})));
+      const payload = (reply) => {
+        assert.ok(!reply?.error, `MCP error: ${reply?.error?.code} ${reply?.error?.message}`);
+        assert.ok(reply?.result?.content?.[0]?.text, 'Missing MCP result content.');
+        return JSON.parse(reply.result.content[0].text);
+      };
       const key = 'r5-session-' + group;
       const args = { path: artifact, content: 'exactly one mutation\n', reconciliation_key: key };
+      const unauthenticated = await call(anonymous, 'dev_create_file', args, null);
+      assert.equal(unauthenticated?.error?.code, -32001);
+      assert.match(unauthenticated.error.message, /AUTHENTICATION_REQUIRED/u);
+      const forged = await call(anonymous, 'dev_create_file', args, invalidProof);
+      assert.equal(forged?.error?.code, -32001);
+      assert.match(forged.error.message, /INVALID_TOKEN/u);
+      await assert.rejects(readFile(path.join(rootDir, artifact), 'utf8'), { code: 'ENOENT' });
+      const absent = payload(await call(sessions[0], 'dev_workspace_get_operation', { reconciliation_key: key }));
+      assert.equal(absent.reconciliation_state, 'not_admitted');
       const replies = await Promise.all(sessions.map((session) => call(session, 'dev_create_file', args)));
       assert.equal(replies.filter((reply) => payload(reply).created === true).length, 1);
       assert.equal(replies.filter((reply) => payload(reply).reconciled === true).length, 1);

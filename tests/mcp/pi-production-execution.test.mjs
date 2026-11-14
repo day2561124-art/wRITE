@@ -194,10 +194,15 @@ test("real MCP production ingress and explicit direct diagnostic share durable r
  const reconcileRequest={request_kind:"reconcile_only",operation_id:claim.state.operation_id,context,
   expected_revision:claim.revision,expected_owner:claim.runtime.owner};
  const sessionUrl=new URL("../../server/src/mcp-http-stdio-adapter.mjs",import.meta.url).href;
+ const oauthUrl=new URL("./fixtures/workbench-http-test-security.mjs",import.meta.url).href;
  const code=`import {createStdioSession} from ${JSON.stringify(sessionUrl)};
- const s=createStdioSession({readonlyRetryMaxAttempts:0});const call=m=>new Promise((r,j)=>s.call(m,(e,v)=>e?j(e):r(v)));
+ import {createTestOAuthCredentials,testOAuthEnvironment} from ${JSON.stringify(oauthUrl)};
+ import {spawn} from 'node:child_process';
+ const {proof,publicJwk}=createTestOAuthCredentials();
+ const s=createStdioSession({readonlyRetryMaxAttempts:0,spawnProcess:(exe,args,options)=>spawn(exe,args,{...options,env:{...options.env,...testOAuthEnvironment(publicJwk)}})});
+ const call=m=>new Promise((r,j)=>s.call({...m,params:{...m.params,_meta:{...m.params?._meta,workbench_http_access_token:proof}}},(e,v)=>e?j(e):r(v)));
  try{await call({jsonrpc:'2.0',id:'init',method:'initialize',params:{protocolVersion:'2024-11-05',capabilities:{},clientInfo:{name:'pi-wire',version:'1'}}});
- s.send({jsonrpc:'2.0',method:'notifications/initialized',params:{}});
+ s.send({jsonrpc:'2.0',method:'notifications/initialized',params:{_meta:{workbench_http_access_token:proof}}});
  const status=await call({jsonrpc:'2.0',id:'status',method:'tools/call',params:{name:'dev_pi_execution_status',arguments:{}}});
  const direct=await call({jsonrpc:'2.0',id:'direct',method:'tools/call',params:{name:'dev_read_file',arguments:{path:'package.json'}}});
  const directPowerShell=await call({jsonrpc:'2.0',id:'direct-powershell',method:'tools/call',params:{name:'powershell_run',arguments:{command:"Write-Output 'must-not-run'",workspace_id:'dev_workspace_shared_repository_v1'}}});
@@ -248,10 +253,15 @@ test("production engineering cutover preserves public product reads and profile 
  const journal=createDevOperationJournalService({storageRoot:path.join(root,"operation-journal")});
  await createPiProductionRouteStore({journal}).change({...decision,expected_revision:0},{validateGate:async()=>true});
  const sessionUrl=new URL("../../server/src/mcp-http-stdio-adapter.mjs",import.meta.url).href;
+ const oauthUrl=new URL("./fixtures/workbench-http-test-security.mjs",import.meta.url).href;
  const code=`import {createStdioSession} from ${JSON.stringify(sessionUrl)};
- const s=createStdioSession({readonlyRetryMaxAttempts:0});const call=m=>new Promise((r,j)=>s.call(m,(e,v)=>e?j(e):r(v)));
+ import {createTestOAuthCredentials,testOAuthEnvironment} from ${JSON.stringify(oauthUrl)};
+ import {spawn} from 'node:child_process';
+ const {proof,publicJwk}=createTestOAuthCredentials();
+ const s=createStdioSession({readonlyRetryMaxAttempts:0,spawnProcess:(exe,args,options)=>spawn(exe,args,{...options,env:{...options.env,...testOAuthEnvironment(publicJwk)}})});
+ const call=m=>new Promise((r,j)=>s.call({...m,params:{...m.params,_meta:{...m.params?._meta,workbench_http_access_token:proof}}},(e,v)=>e?j(e):r(v)));
  try{await call({jsonrpc:'2.0',id:'init',method:'initialize',params:{protocolVersion:'2024-11-05',capabilities:{},clientInfo:{name:'pi-public-product',version:'1'}}});
- s.send({jsonrpc:'2.0',method:'notifications/initialized',params:{}});
+ s.send({jsonrpc:'2.0',method:'notifications/initialized',params:{_meta:{workbench_http_access_token:proof}}});
  const read=await call({jsonrpc:'2.0',id:'read',method:'tools/call',params:{name:'dev_read_file',arguments:{path:'config/engine-components.json'}}});
  const intent=await call({jsonrpc:'2.0',id:'intent',method:'tools/call',params:{name:'dev_pi_execute_intent',arguments:{intent_json:'{}'}}});
  const write=await call({jsonrpc:'2.0',id:'write',method:'tools/call',params:{name:'dev_create_file',arguments:{path:'scripts/forbidden.mjs',content:'forbidden'}}});

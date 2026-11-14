@@ -20,7 +20,7 @@ $LogDir = if ($LogDirectory) {
   Join-Path $Root "data\outputs\logs"
 }
 $OriginUrl = "http://127.0.0.1:$McpPort"
-# Listener admission: 15s. Full protocol probe: at most 60s, including cleanup.
+# Listener admission: 15s. Local health and separate protocol probes are bounded.
 
 function Invoke-McpProbe {
   param(
@@ -67,6 +67,8 @@ function Invoke-McpProbe {
         try {
           $candidate = $output.GetAwaiter().GetResult() | ConvertFrom-Json
           if (($Mode -eq 'identity' -and $candidate.service -eq 'writer-workbench-mcp' -and $candidate.pid -gt 0 -and $candidate.instanceId) -or
+              ($Mode -eq 'local-health' -and $candidate.current -eq $true -and $candidate.ok -eq $true -and
+                $candidate.ready -eq $true -and $candidate.pid -gt 0 -and $candidate.instanceId) -or
               ($Mode -eq 'probe' -and $candidate.ok -eq $true -and $candidate.ready -eq $true -and $candidate.runtimeReadiness -eq 'ready' -and $candidate.toolCount -gt 0 -and $null -ne $candidate.resourceCount)) {
             $result = $candidate
           } else { $failure.code = 'INVALID_PROBE_RESULT'; $failure.phase = 'result' }
@@ -282,19 +284,19 @@ function Ensure-McpServer {
     }
 
     if ($identity.current) {
-      $current = if ($ListenerOnly) { $identity } else { Invoke-McpProbe "$OriginUrl/mcp" "probe" ([string]$identity.instanceId) }
+      $current = if ($ListenerOnly) { $identity } else { Invoke-McpProbe "$OriginUrl/mcp" "local-health" ([string]$identity.instanceId) }
     }
 
-    if ($current -and ([int]$current.pid -ne [int]$owner -or $current.instanceId -ne $identity.instanceId -or (Get-McpOwningProcess) -ne $owner)) { throw "MCP owner changed during protocol verification; listener left running." }
+    if ($current -and ([int]$current.pid -ne [int]$owner -or $current.instanceId -ne $identity.instanceId -or (Get-McpOwningProcess) -ne $owner)) { throw "MCP owner changed during health verification; listener left running." }
 
     if ($current) {
       if ($ListenerOnly) { Write-Host "Verified current repository MCP listener identity." }
-      else { Write-Host "Verified current repository MCP server; initialize, tools/list, resources/list, readiness and ping passed." }
+      else { Write-Host "Verified current repository MCP listener health." }
       Write-Host "MCP_OWNING_PROCESS=$owner"
       return $current
     }
 
-    if ($identity.current -and -not $current) { throw "Existing MCP protocol verification failed: $(Get-McpProbeFailureSummary); listener left running." }
+    if ($identity.current -and -not $current) { throw "Existing MCP health verification failed: $(Get-McpProbeFailureSummary); listener left running." }
 
     if ($NoRestart) { throw "Existing MCP listener was not restarted; explicit operator review is required." }
 
@@ -363,15 +365,15 @@ function Ensure-McpServer {
   $current = if ($ListenerOnly) {
     Invoke-McpProbe "$OriginUrl/mcp" "identity"
   } else {
-    Invoke-McpProbe "$OriginUrl/mcp" "probe" "" 60000
+    Invoke-McpProbe "$OriginUrl/mcp" "local-health" "" 60000
   }
-  if (-not $current -or [int]$current.pid -ne $mcpProcess.Id -or (Get-McpOwningProcess) -ne $mcpProcess.Id) {
+  if (-not $current -or -not $current.current -or [int]$current.pid -ne $mcpProcess.Id -or (Get-McpOwningProcess) -ne $mcpProcess.Id) {
     Stop-CreatedMcpServer $mcpProcess $createdInfo $mcpScript
-    throw "MCP failed identity / protocol readiness: $(Get-McpProbeFailureSummary); see $mcpErr"
+    throw "MCP failed identity / local health: $(Get-McpProbeFailureSummary); see $mcpErr"
   }
 
   if ($ListenerOnly) { Write-Host "MCP HTTP listener started and identity verified." -ForegroundColor Green }
-  else { Write-Host "MCP HTTP server started and protocol verified." -ForegroundColor Green }
+  else { Write-Host "MCP HTTP listener started and health verified." -ForegroundColor Green }
   return $current
 }
 

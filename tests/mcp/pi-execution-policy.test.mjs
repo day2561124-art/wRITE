@@ -208,12 +208,16 @@ test("real MCP permits explicit scoped reads without mutation transactions and b
   const journal = createDevOperationJournalService({ storageRoot: path.join(root, "operation-journal") });
   await createPiProductionRouteStore({ journal }).change({ mode: "pi_default", decision_id: "gpt-policy-wire", gate_hash: "a".repeat(64), expected_revision: 0 }, { validateGate: async () => true });
   const adapterUrl = new URL("../../server/src/mcp-http-stdio-adapter.mjs", import.meta.url).href;
+  const oauthUrl=new URL("./fixtures/workbench-http-test-security.mjs",import.meta.url).href;
   const code = `import {createStdioSession} from ${JSON.stringify(adapterUrl)};
-    const session=createStdioSession({readonlyRetryMaxAttempts:0});
-    const call=m=>new Promise((r,j)=>session.call(m,(e,v)=>e?j(e):r(v)));
+    import {createTestOAuthCredentials,testOAuthEnvironment} from ${JSON.stringify(oauthUrl)};
+    import {spawn} from 'node:child_process';
+    const {proof,publicJwk}=createTestOAuthCredentials();
+    const session=createStdioSession({readonlyRetryMaxAttempts:0,spawnProcess:(exe,args,options)=>spawn(exe,args,{...options,env:{...options.env,...testOAuthEnvironment(publicJwk)}})});
+    const call=m=>new Promise((r,j)=>session.call({...m,params:{...m.params,_meta:{...m.params?._meta,workbench_http_access_token:proof}}},(e,v)=>e?j(e):r(v)));
     try {
       await call({jsonrpc:'2.0',id:'init',method:'initialize',params:{protocolVersion:'2024-11-05',capabilities:{},clientInfo:{name:'policy-wire',version:'1'}}});
-      session.send({jsonrpc:'2.0',method:'notifications/initialized',params:{}});
+      session.send({jsonrpc:'2.0',method:'notifications/initialized',params:{_meta:{workbench_http_access_token:proof}}});
       const results={};
       for(const [name,args] of [
         ['dev_read_file',{path:'package.json',maxBytes:8192}],

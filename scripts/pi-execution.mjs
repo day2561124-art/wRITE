@@ -5,7 +5,7 @@ const transient=new Set(["CHILD_HUNG","CHILD_CALL_TIMEOUT","CHILD_EXITED","CHILD
 const done=new Set(["COMPLETED","FAILED","CANCELLED","DECISION_REQUIRED","BLOCKED"]);
 function fail(code){throw Object.assign(new Error(code),{code});}
 function connect(){if(!process.env.MCP_TOOL_PROFILE)process.env.MCP_TOOL_PROFILE="chatgpt_developer";
- return createStdioSession({readonlyRetryMaxAttempts:0});}
+ return createStdioSession({readonlyRetryMaxAttempts:0,trustedLocalOwner:true});}
 function rpc(session,message){return new Promise((resolve,reject)=>session.call(message,(error,response)=>{
  if(error){reject(error);return;}if(response?.error){reject(Object.assign(new Error("PI_REQUEST_REJECTED"),{code:"PI_REQUEST_REJECTED"}));return;}
  resolve(response?.result);

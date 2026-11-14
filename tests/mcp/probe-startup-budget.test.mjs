@@ -97,7 +97,7 @@ test('nontransient resources errors fail immediately and omit secrets', async t 
   const f = await fixture(t, {resources: async () => {throw Object.assign(new Error(secret), {status: 401});}});
   await assert.rejects(f.run(), e => {
     const diagnostic = formatProbeFailure(e);
-    assert.match(diagnostic, /RESOURCES_DISCOVERY_FAILED/);assert.match(diagnostic, /resources\/list/);
+    assert.equal(e.code,'MCP_AUTHENTICATION_FAILED');assert.equal(e.details.httpStatus,401);assert.match(diagnostic, /resources\/list/);
     assert.ok(!diagnostic.includes('SECRET') && !diagnostic.includes('password'));
     return true;
   });
@@ -150,4 +150,11 @@ test('timing normalization is bounded and preserves headroom', () => {
   assert.deepEqual(normalizeTimings(100_000, 100_000), {startup: 59_000, hard: 60_000});
   assert.throws(() => normalizeTimings(3000, 1000));
   assert.ok(normalizeTimings(3000, 2000).startup < normalizeTimings(3000, 2000).hard);
+});
+
+
+test('non-authentication 404 discovery errors remain terminal and never substitute readiness',async t=>{
+ const f=await fixture(t,{resources:async()=>{throw Object.assign(new Error('SYNTHETIC_PRIVATE_BODY'),{status:404});}});
+ await assert.rejects(f.run(),e=>{assert.equal(e.code,'RESOURCES_DISCOVERY_FAILED');assert.equal(e.details.httpStatus,404);assert.ok(!formatProbeFailure(e).includes('SYNTHETIC_PRIVATE_BODY'));return true;});
+ assert.equal(f.counts.resources,1);assert.equal(f.counts.ready,0);assert.equal(f.counts.ping,0);assert.equal(f.counts.closed,1);
 });

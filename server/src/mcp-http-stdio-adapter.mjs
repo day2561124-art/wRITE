@@ -75,7 +75,17 @@ export function createReadonlyRetryBudget({ maxRetries = 16, maxConcurrent = 2,
   };
 }
 
+/** Memory-only context for lifecycle replay. The child still verifies each proof. */
+export function createWorkbenchTransportContext(){
+ let proof=null,gm=false;
+ return Object.freeze({
+  capture(message){const meta=message?.params?._meta;if(typeof meta?.workbench_http_access_token==='string'&&meta.workbench_http_access_token.length<=8192)proof=meta.workbench_http_access_token;if(meta?.workbench_purpose==='GM')gm=true;},
+  apply(message){if(proof===null)return message;return {...message,params:{...message.params,_meta:{...message.params?._meta,workbench_http_access_token:proof,workbench_purpose:gm?'GM':'WORKBENCH'}}};},
+ });
+}
+
 export function createStdioSession(options = {}) {
+  const workbenchTransportContext=createWorkbenchTransportContext();
   const listeners = new Map();
   const requestTraces=createTraceBuffer();
   const logicalCalls = new Set();
@@ -440,7 +450,7 @@ export function createStdioSession(options = {}) {
   function spawnChild() {
     readOnlyTools.clear();
     stdoutBuffer = Buffer.alloc(0);
-    const nextChild = spawnProcess(process.execPath, ['server/src/mcp-server.mjs'], {
+    const nextChild = spawnProcess(process.execPath, ['server/src/mcp-server.mjs',...(options.trustedLocalOwner===true?['--trusted-local-owner']:[])], {
       // fd 3 is Node's internal IPC channel for the world-simulation prepared-turn
       // broker. stdout remains exclusively MCP JSON-RPC framing.
       // Session startup, reload and recovery are background operations on Windows.
@@ -520,6 +530,7 @@ export function createStdioSession(options = {}) {
   }
 
   function writeLifecycleNotification(nextChild, message) {
+    message=workbenchTransportContext.apply(message);
     const childGeneration = generation;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(reliabilityError(
@@ -673,6 +684,7 @@ export function createStdioSession(options = {}) {
   }
 
   function send(message) {
+    workbenchTransportContext.capture(message);
     captureLifecycleMessage(message);
     const frame = encodeMessage(message, 'line');
     const activeChild = child;
@@ -795,6 +807,7 @@ export function createStdioSession(options = {}) {
   }
 
   function internalCall(message, options = {}) {
+    message=workbenchTransportContext.apply(message);
     return new Promise((resolve, reject) => {
       const id = message.id ?? randomUUID();
       message.id = id;

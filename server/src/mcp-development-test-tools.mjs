@@ -65,7 +65,9 @@ const productionSuiteDefinitions = Object.freeze({
     executable: process.execPath,
     argv: Object.freeze(["tests/mcp-tunnel-launcher.test.mjs"]),
     timeoutMs: 600_000,
-    cleanupPort: 8787,
+    // Tunnel fixtures own dynamic ports and verify their own listener identities.
+    // Never reap a new unrelated listener on the operator's shared8787 port.
+    fixedEnvironment: Object.freeze({WRITER_WORKBENCH_PROBE_CREDENTIAL_FILE:''}),
   }),
   affected: Object.freeze({
     executable: process.execPath,

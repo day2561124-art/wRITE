@@ -10,6 +10,7 @@ import {mkdtemp,mkdir,readFile,writeFile,cp,symlink,realpath,rm} from 'node:fs/p
 import {fileURLToPath} from 'node:url';
 import {REQUIRED_DECISION_BOUNDARIES} from '../../server/src/pi-execution-contract.mjs';
 import {controlledProcessEnvironment} from '../../server/src/process-control.mjs';
+import {createTestOAuthCredentials,testOAuthEnvironment} from './fixtures/workbench-http-test-security.mjs';
 const exec=promisify(execFile),source=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const shared='dev_workspace_shared_repository_v1';
@@ -40,7 +41,9 @@ async function fixture(t,environment={},seed=false){
  await writeFile(path.join(repo,'server/src/mcp-server.mjs'),"import './session-memory-fixture-hooks.mjs';await import('./mcp-server-memory-original.mjs');\n");
  await writeFile(path.join(repo,'server/src/session-memory-http-fixture.mjs'),"import './session-memory-fixture-hooks.mjs';await import('./mcp-http-server.mjs');process.on('message',m=>{if(m==='fixture-shutdown')process.emit('SIGTERM');});\n");
  await writeFile(path.join(repo,'.gitignore'),'node_modules/\ndata/outputs/\ntest-control/\n');
- const env={...cleanEnvironment(),MCP_TOOL_PROFILE:'chatgpt_developer',...environment};
+ const {proof,publicJwk}=createTestOAuthCredentials();
+ const _meta={workbench_http_access_token:proof};
+ const env={...cleanEnvironment(),MCP_TOOL_PROFILE:'chatgpt_developer',...environment,...testOAuthEnvironment(publicJwk)};
  const git=async(...args)=>exec('git',args,{cwd:repo,env,windowsHide:true,timeout:30000,maxBuffer:1024*1024});
  await git('init','-q','-b','main');await git('config','core.longpaths','true');await git('config','core.autocrlf','false');await git('add','.');
  await git('-c','user.name=Session fixture','-c','user.email=session@example.invalid','commit','-qm','Exact disposable session fixture');
@@ -66,13 +69,13 @@ async function fixture(t,environment={},seed=false){
  });
  const get=async(url,session)=>(await request('GET',url,{session})).payload;
  const post=(session,message)=>request('POST','/mcp',{session,body:{jsonrpc:'2.0',...message}});
- const call=async(session,name,args={})=>{const response=await post(session,{id:++sequence,method:'tools/call',params:{name,arguments:args}});assert.equal(response.status,200,response.text);return facts(response.payload);};
+ const call=async(session,name,args={})=>{const response=await post(session,{id:++sequence,method:'tools/call',params:{name,arguments:args,_meta}});assert.equal(response.status,200,response.text);return facts(response.payload);};
  const initialize=async()=>{
-  const started=performance.now(),r=await post(null,{id:++sequence,method:'initialize',params:{protocolVersion:'2025-03-26',capabilities:{},clientInfo:{name:'session-memory-fixture',version:'1'}}});
+  const started=performance.now(),r=await post(null,{id:++sequence,method:'initialize',params:{protocolVersion:'2025-03-26',capabilities:{},clientInfo:{name:'session-memory-fixture',version:'1'},_meta}});
   assert.equal(r.status,200,r.text);assert(!r.payload.error,r.text);
   const session={id:r.headers['mcp-session-id'],protocol:r.payload.result.protocolVersion};assert(session.id);
-  const notified=await post(session,{method:'notifications/initialized'});assert([200,202].includes(notified.status));
-  const tools=await post(session,{id:++sequence,method:'tools/list',params:{}});assert.equal(tools.status,200,tools.text);assert(tools.payload.result.tools.length>0);
+  const notified=await post(session,{method:'notifications/initialized',params:{_meta}});assert([200,202].includes(notified.status));
+  const tools=await post(session,{id:++sequence,method:'tools/list',params:{_meta}});assert.equal(tools.status,200,tools.text);assert(tools.payload.result.tools.length>0);
   session.cold_ms=performance.now()-started;return session;
  };
  const pid=session=>{const line=stderr.split(/\r?\n/).find(l=>l.includes('session initialized id='+session.id+' '));return Number(line?.match(/child_pid=(\d+)/)?.[1]);};

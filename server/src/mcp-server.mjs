@@ -1,3 +1,4 @@
+import {loadTRPGGMBridge,trpgPublicToolDefinition,createWorkbenchTransportBoundary} from './mcp-trpg-gm-bridge.mjs';
 import { fingerprintMcpMutationRequest, normalizeMcpReconciliationKey, MCP_RECONCILIATION_KEY_PATTERN_SOURCE } from "./mcp-operation-reconciliation-context.mjs";
 import "./mcp-stdio-guard.mjs";
 import {performance} from "node:perf_hooks";
@@ -4680,6 +4681,11 @@ for (const definition of toolDefinitions) {
   };
 }
 
+const workbenchTransportBoundary=createWorkbenchTransportBoundary();
+process.once('exit',()=>workbenchTransportBoundary.close());
+let trpgGMBridge = await loadTRPGGMBridge();
+const trpgGMToolNames = new Set(trpgGMBridge.tools.map(tool => tool.name));
+toolDefinitions.push(...trpgGMBridge.tools);
 const toolRegistry = new Map(toolDefinitions.map((tool) => [tool.name, tool]));
 
 const chatgptPublicToolNames = new Set([
@@ -4795,6 +4801,8 @@ const chatgptDeveloperToolNames = new Set([
   "dev_git_push",
 ]);
 
+for (const name of trpgGMToolNames) chatgptDeveloperToolNames.add(name);
+
 const toolProfiles = new Map([
   ["full", null],
   ["chatgpt_public", chatgptPublicToolNames],
@@ -4808,8 +4816,13 @@ if (!toolProfiles.has(activeToolProfileName)) {
   throw new Error(`Unknown MCP tool profile: ${activeToolProfileName}`);
 }
 
+async function ensureTRPGGMBridge(){
+  if(trpgGMBridge.tools.length||activeToolProfileName==='chatgpt_public'||process.argv.includes('--pi-worker')||process.env.WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL==='1')return;
+  trpgGMBridge=await loadTRPGGMBridge({disabled:false});
+  for(const tool of trpgGMBridge.tools){if(toolRegistry.has(tool.name))continue;toolDefinitions.push(tool);toolRegistry.set(tool.name,tool);trpgGMToolNames.add(tool.name);chatgptDeveloperToolNames.add(tool.name);}
+}
 function isToolAllowed(toolName) {
-  return activeToolProfile === null || activeToolProfile.has(toolName);
+  return workbenchTransportBoundary.isToolAllowed(toolName)&&(activeToolProfile === null || activeToolProfile.has(toolName));
 }
 
 const permissionSources = {
@@ -5466,6 +5479,7 @@ function visualReferenceConsumerGuardFinalClosureIndexAndOperatorHandoffSealMeta
 }
 
 function publicToolDefinition(tool) {
+  if (trpgGMToolNames.has(tool.name)) return trpgPublicToolDefinition(tool);
   const permission = permissionMetadata(tool);
   const actionSurface = chatgptActionSurfaceMetadata(tool, permission);
   const visualReferenceGuardFinalClosure = visualReferenceGuardPublicActionE2eFinalClosureMetadata(
@@ -5818,6 +5832,7 @@ const piProductionController = createPiProductionExecutionController({ transport
 } });
 async function callTool(params) {
   const name = params?.name;
+  if(!workbenchTransportBoundary.isToolAllowed(name))throw new Error("GM_CONNECTION_TOOL_DENIED");
   if (workspaceRoutingEnabledForProfile && (workspaceAwareDeveloperToolNames.has(name) || ["dev_workspace_begin_workstream","dev_workspace_update_workstream","dev_workspace_end_workstream","dev_workspace_create_isolated","dev_workspace_create_checkpoint","dev_workspace_integrate","dev_git_push","dev_pi_execute_readonly"].includes(name))) {
     await guardPiDirectExecution({ route: piProductionRoute, tool: name, mutation: toolRegistry.get(name)?.risk !== "read", params, auditFallback: auditPiFallback, resolveWorkspace: resolveDevWorkspaceExecutionContext });
   }
@@ -5843,6 +5858,8 @@ async function callToolDirect(params) {
   }
 
   const args = isObject(params.arguments) ? params.arguments : {};
+  // TRPG owns its authorization and atomic audit. Keep confidential game payloads out of Writer journals.
+  if (trpgGMToolNames.has(name)) return trpgGMBridge.callTool(name, args);
   const actor = isObject(params._meta) && typeof params._meta.actor === "string"
     ? params._meta.actor
     : "mcp-client";
@@ -5907,6 +5924,15 @@ async function dispatch(message) {
     return makeError(message?.id ?? null, -32600, "Invalid Request");
   }
 
+  const authentication=await workbenchTransportBoundary.authorize(message);
+  if(!authentication.ok)return Object.hasOwn(message,'id')?makeError(message.id??null,-32001,authentication.code):null;
+  if(isObject(message.params)){
+    const meta=isObject(message.params._meta)?message.params._meta:{};
+    const {workbench_http_access_token:discardedProof,workbench_purpose:discardedPurpose,...safeMeta}=meta;
+    message={...message,params:{...message.params,_meta:{...safeMeta,...authentication.local?{}:{actor:authentication.principal}}}};
+  }
+  if(['initialize','tools/list'].includes(message.method)||message.method==='tools/call'&&typeof message.params?.name==='string'&&message.params.name.startsWith('trpg.gm.'))await ensureTRPGGMBridge();
+
   if (!("id" in message)) {
     if (message.method === "notifications/initialized" || message.method.startsWith("notifications/")) {
       return null;
@@ -5928,7 +5954,7 @@ async function dispatch(message) {
         },
       },
       serverInfo,
-      instructions: "Use tools/list and tools/call. Engineering routing is governed by dev_pi_execution_status. When pi_default is active, submit exact GPT-authored ExecutionIntent JSON through dev_pi_execute_intent; GPT decides, Pi schedules and records, MCP executes. Direct engineering tools are explicit diagnostic/emergency fallback only and require params._meta.pi_fallback with purpose, reason and GPT decision_id; mutations also require a reconciliation_key. Never infer success or automatically fall back after a Pi failure. High-risk writes retain their explicit confirmation guards.",
+      instructions: "Use tools/list and tools/call. Engineering routing is governed by dev_pi_execution_status. When pi_default is active, submit exact GPT-authored ExecutionIntent JSON through dev_pi_execute_intent; GPT decides, Pi schedules and records, MCP executes. Direct engineering tools are explicit diagnostic/emergency fallback only and require params._meta.pi_fallback with purpose, reason and GPT decision_id; mutations also require a reconciliation_key. Never infer success or automatically fall back after a Pi failure. High-risk writes retain their explicit confirmation guards." + (trpgGMBridge.instruction ? " TRPG GM: " + trpgGMBridge.instruction : ""),
     });
   }
 
@@ -5944,7 +5970,9 @@ async function dispatch(message) {
     });
   }
 
-  await traceSpan("runtime.readiness",()=>ensureRuntimeReady());
+  if (!(message.method === "tools/call" && trpgGMToolNames.has(message.params?.name))) {
+    await traceSpan("runtime.readiness",()=>ensureRuntimeReady());
+  }
 
   if (message.method === "tools/call") {
     try {
