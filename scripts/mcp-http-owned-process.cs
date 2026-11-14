@@ -38,10 +38,20 @@ namespace WriterWorkbench {
             if(handle==Invalid) throw new Win32Exception(Marshal.GetLastWin32Error()); return handle;
         }
         public static int Start(string node,string root,int port,string stdout,string stderr) {
-            if(port<1||port>65535||!Path.IsPathRooted(node)||!File.Exists(node)||!String.Equals(Path.GetFileName(node),"node.exe",StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("Expected Node executable and valid MCP port.");
-            root=Path.GetFullPath(root); stdout=Path.GetFullPath(stdout); stderr=Path.GetFullPath(stderr);
+            if(port<1||port>65535) throw new ArgumentException("Expected a valid MCP port.");
+            root=Path.GetFullPath(root);
             string script=Path.Combine(root,"server","src","mcp-http-server.mjs"),config=Path.Combine(root,"config","mcp-http.example.json");
-            if(!Directory.Exists(root)||!File.Exists(script)||!File.Exists(config)) throw new ArgumentException("Expected Writer Workbench MCP files.");
+            if(!File.Exists(config)) throw new ArgumentException("Expected Writer Workbench MCP config.");
+            return StartNode(node,root,script," --config "+Quote(config)+" --port "+port.ToString(System.Globalization.CultureInfo.InvariantCulture),stdout,stderr);
+        }
+        public static int StartWorkbenchOAuth(string node,string root,string stdout,string stderr) {
+            root=Path.GetFullPath(root);
+            return StartNode(node,root,Path.Combine(root,"apps","gm-adapter","security-main.mjs"),"",stdout,stderr);
+        }
+        static int StartNode(string node,string root,string script,string arguments,string stdout,string stderr) {
+            if(!Path.IsPathRooted(node)||!File.Exists(node)||!String.Equals(Path.GetFileName(node),"node.exe",StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("Expected Node executable.");
+            if(!Directory.Exists(root)||!File.Exists(script)) throw new ArgumentException("Expected Node service entry point.");
+            stdout=Path.GetFullPath(stdout); stderr=Path.GetFullPath(stderr);
             IntPtr input=IntPtr.Zero,output=IntPtr.Zero,error=IntPtr.Zero,list=IntPtr.Zero,handles=IntPtr.Zero; bool initialized=false;
             PROCESS_INFORMATION process=new PROCESS_INFORMATION();
             try {
@@ -56,7 +66,7 @@ namespace WriterWorkbench {
                 if(!UpdateProcThreadAttribute(list,0,new IntPtr(0x20002),handles,new IntPtr(3*IntPtr.Size),IntPtr.Zero,IntPtr.Zero)) throw new Win32Exception(Marshal.GetLastWin32Error());
                 STARTUPINFOEX startup=new STARTUPINFOEX(); startup.StartupInfo.cb=Marshal.SizeOf(typeof(STARTUPINFOEX)); startup.StartupInfo.dwFlags=0x101;
                 startup.StartupInfo.hStdInput=input; startup.StartupInfo.hStdOutput=output; startup.StartupInfo.hStdError=error; startup.lpAttributeList=list;
-                StringBuilder command=new StringBuilder(Quote(node)+" "+Quote(script)+" --config "+Quote(config)+" --port "+port.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                StringBuilder command=new StringBuilder(Quote(node)+" "+Quote(script)+arguments);
                 // Environment=null preserves the caller's existing scoped environment.
                 if(!CreateProcessW(node,command,IntPtr.Zero,IntPtr.Zero,true,0x08080200,IntPtr.Zero,root,ref startup,out process)) throw new Win32Exception(Marshal.GetLastWin32Error());
                 return checked((int)process.dwProcessId);

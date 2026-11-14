@@ -10,6 +10,8 @@
   [switch]$McpTunnelStatus,
   [switch]$StartMcpTailscale,
   [switch]$McpTailscaleStatus,
+  [switch]$StartWorkbenchOAuth,
+  [string]$WorkbenchOAuthRoot = "E:\TRPG",
   [switch]$StartSecureTunnel,
   [switch]$RestartSecureTunnel,
   [switch]$SecureTunnelStatus,
@@ -29,6 +31,7 @@ $LogStem = if ($Port -eq 4173) { "ui-server" } else { "ui-server.$Port" }
 $StdoutLog = Join-Path $LogDir "$LogStem.stdout.log"
 $StderrLog = Join-Path $LogDir "$LogStem.stderr.log"
 $PidFile = Join-Path $LogDir "$LogStem.pid"
+$WorkbenchOAuthHealthUrl = "http://127.0.0.1:8788/health"
 
 function Write-Title {
   Clear-Host
@@ -379,30 +382,64 @@ function Show-McpTailscaleStatus {
   return (Invoke-McpTunnelLauncher $script -QueryStatus)
 }
 
-function Show-CloudflareBackupQuickStatus {
-  $statePath = Join-Path $LogDir "cloudflared-tunnel.state.json"
-  $state = $null
-  if (Test-Path -LiteralPath $statePath -PathType Leaf) {
-    try { $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json } catch { $state = $null }
+function Test-WorkbenchOAuthHealth {
+  try {
+    $response = Invoke-WebRequest -UseBasicParsing -Uri $WorkbenchOAuthHealthUrl -TimeoutSec 2 -MaximumRedirection 0
+    $health = $response.Content | ConvertFrom-Json
+    return ($response.StatusCode -eq 200 -and
+      $response.Headers["x-workbench-security-protocol"] -eq "trpg-workbench-security/1.0" -and
+      $health.service -eq "workbench-mcp-security" -and
+      $health.protocol -eq "trpg-workbench-security/1.0" -and $health.mode -ne "shield")
+  } catch {
+    return $false
+  }
+}
+
+function Start-WorkbenchOAuth {
+  if (Test-WorkbenchOAuthHealth) {
+    Write-Host "Writer Workbench OAuth is already running." -ForegroundColor Green
+    return $true
   }
 
-  $process = $null
-  if ($state -and $state.pid) {
-    $candidate = Get-Process -Id ([int]$state.pid) -ErrorAction SilentlyContinue
-    if ($candidate -and $candidate.ProcessName -eq "cloudflared") { $process = $candidate }
+  $oauthRoot = [IO.Path]::GetFullPath($WorkbenchOAuthRoot)
+  $entry = Join-Path $oauthRoot "apps\gm-adapter\security-main.mjs"
+  if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) {
+    Write-Host "Writer Workbench OAuth entry point was not found: $entry" -ForegroundColor Red
+    return $false
   }
-  if (-not $process) {
-    $process = Get-Process cloudflared -ErrorAction SilentlyContinue | Select-Object -First 1
+  $node = Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+  if (-not $node) {
+    Write-Host "Node.js was not found. Writer Workbench OAuth needs Node.js 22.13 or newer." -ForegroundColor Red
+    return $false
   }
 
-  Write-Host "Cloudflare process: $(if ($process) { "running (PID $($process.Id))" } else { "stopped" })"
-  if ($state -and $state.mode) { Write-Host "Tunnel mode: $($state.mode)" }
-  if ($state -and $state.mcpUrl) {
-    Write-Host "Backup MCP URL:"
-    Write-Host ([string]$state.mcpUrl) -ForegroundColor DarkCyan
+  $stdout = $null
+  $stderr = $null
+  try {
+    New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+    $stamp = [Guid]::NewGuid().ToString("N")
+    $stdout = Join-Path $LogDir "workbench-oauth.$stamp.stdout.log"
+    $stderr = Join-Path $LogDir "workbench-oauth.$stamp.stderr.log"
+    if (-not ('WriterWorkbench.McpHttpOwnedProcessV1' -as [type])) {
+      Add-Type -Path (Join-Path $Root 'scripts\mcp-http-owned-process.cs')
+    }
+    $childId = [WriterWorkbench.McpHttpOwnedProcessV1]::StartWorkbenchOAuth($node.Source, $oauthRoot, $stdout, $stderr)
+    $deadline = (Get-Date).AddSeconds(15)
+    do {
+      if (Test-WorkbenchOAuthHealth) {
+        Write-Host "Writer Workbench OAuth is running in the background." -ForegroundColor Green
+        return $true
+      }
+      if (-not (Get-Process -Id $childId -ErrorAction SilentlyContinue)) { break }
+      Start-Sleep -Milliseconds 200
+    } while ((Get-Date) -lt $deadline)
+    Write-Host "Writer Workbench OAuth did not become ready at $WorkbenchOAuthHealthUrl." -ForegroundColor Red
+  } catch {
+    Write-Host "Could not start Writer Workbench OAuth: $($_.Exception.Message)" -ForegroundColor Red
   }
-  Write-Host "Backup validation: on demand (option 8)" -ForegroundColor DarkGray
-  return [bool]$process
+  if ($stderr) { Write-Host "OAuth error log: $stderr" -ForegroundColor DarkGray }
+  if ($stdout) { Write-Host "OAuth output log: $stdout" -ForegroundColor DarkGray }
+  return $false
 }
 
 function Invoke-SecureTunnelLauncher {
@@ -423,8 +460,7 @@ function Show-AllStatus {
   Write-Host "MCP / Tailscale Funnel (primary):"
   Show-McpTailscaleStatus | Out-Null
   Write-Host ""
-  Write-Host "Cloudflare Quick Tunnel (backup):"
-  Show-CloudflareBackupQuickStatus | Out-Null
+  Write-Host "Writer Workbench OAuth: $(if (Test-WorkbenchOAuthHealth) { "ready" } else { "not ready" })"
   Write-Host ""
   Write-Host "Writer Workbench Secure Tunnel:"
   Invoke-SecureTunnelLauncher | Out-Null
@@ -443,7 +479,7 @@ function Show-Menu {
     Write-Host "  5. Create desktop shortcut"
     Write-Host "  6. Stop UI"
     Write-Host "  7. Start MCP + Tailscale Funnel (primary)"
-    Write-Host "  8. Start / restart Cloudflare Quick Tunnel (backup)"
+    Write-Host "  8. Start Writer Workbench OAuth (background)"
     Write-Host "  9. Start / Restart Writer Workbench Secure Tunnel"
     Write-Host "  10. Show Writer Workbench Secure Tunnel Status"
     Write-Host "  11. Stop Writer Workbench Secure Tunnel"
@@ -460,7 +496,7 @@ function Show-Menu {
       "5" { New-DesktopShortcut | Out-Null }
       "6" { Stop-Workbench | Out-Null }
       "7" { Start-McpTailscale }
-      "8" { Start-McpTunnel }
+      "8" { Start-WorkbenchOAuth | Out-Null }
       "9" { Invoke-SecureTunnelLauncher -Action "Restart" | Out-Null }
       "10" { Invoke-SecureTunnelLauncher -ProbeSession | Out-Null }
       "11" { Invoke-SecureTunnelLauncher -Action "Stop" | Out-Null }
@@ -484,6 +520,7 @@ try {
   if ($McpTunnelStatus) { if (Show-McpTunnelStatus) { exit 0 } else { exit 1 } }
   if ($StartMcpTailscale) { if (Start-McpTailscale) { exit 0 } else { exit 1 } }
   if ($McpTailscaleStatus) { if (Show-McpTailscaleStatus) { exit 0 } else { exit 1 } }
+  if ($StartWorkbenchOAuth) { if (Start-WorkbenchOAuth) { exit 0 } else { exit 1 } }
   if ($StartSecureTunnel) { if (Invoke-SecureTunnelLauncher -Action "Start") { exit 0 } else { exit 1 } }
   if ($RestartSecureTunnel) { if (Invoke-SecureTunnelLauncher -Action "Restart") { exit 0 } else { exit 1 } }
   if ($SecureTunnelStatus) { if (Invoke-SecureTunnelLauncher -ProbeSession) { exit 0 } else { exit 1 } }
