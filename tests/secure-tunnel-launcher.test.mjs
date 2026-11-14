@@ -9,6 +9,14 @@ const managerPath = path.join(root, 'scripts/manage-secure-tunnel.ps1');
 const manager = await readFile(managerPath, 'utf8');
 const launcher = await readFile(path.join(root, 'launcher.ps1'), 'utf8');
 const credential = await readFile(path.join(root, 'scripts/set-secure-tunnel-credential.ps1'), 'utf8');
+const ownedProcess = await readFile(path.join(root, 'scripts/mcp-http-owned-process.cs'), 'utf8');
+assert(launcher.includes('8. Start Writer Workbench OAuth (background)'));
+assert(launcher.includes('"8" { Start-WorkbenchOAuth | Out-Null }'));
+assert(!launcher.includes('8. Start / restart Cloudflare Quick Tunnel'));
+assert(launcher.includes('http://127.0.0.1:8788/health'));
+assert(launcher.includes('$health.mode -ne "shield"'));
+assert(ownedProcess.includes('Path.Combine(root,"apps","gm-adapter","security-main.mjs"),""'));
+assert(ownedProcess.includes('true,0x08080200'), 'OAuth must use the console-free native spawn');
 for (const [choice, label] of [[9,'Start / Restart'],[10,'Show'],[11,'Stop']]) {
   assert(launcher.includes(`${choice}. ${label} Writer Workbench Secure Tunnel`));
   assert(launcher.includes(`"${choice}" { Invoke-SecureTunnelLauncher`));
@@ -32,6 +40,57 @@ if (process.platform !== 'win32') {
   const temp = path.join(root, 'tests/.tmp', `secure-tunnel-${process.pid}`);
   await mkdir(temp, { recursive: true });
   const q = value => `'${value.replaceAll("'", "''")}'`;
+  const oauthRoot = path.join(temp, "OAuth fixture 中文 & '");
+  const oauthAdapter = path.join(oauthRoot, 'apps/gm-adapter');
+  await mkdir(oauthAdapter, { recursive: true });
+  await writeFile(path.join(oauthAdapter, 'security-main.mjs'), `
+    import assert from 'node:assert/strict';
+    assert.equal(process.argv.length, 2);
+    console.log('OAUTH_FIXTURE_READY');
+    setInterval(() => {}, 1000);
+  `);
+  const oauthOut = path.join(temp, 'oauth.stdout.log');
+  const oauthErr = path.join(temp, 'oauth.stderr.log');
+  const oauthHarness = path.join(temp, 'oauth.ps1');
+  await writeFile(oauthHarness, '\ufeff' + `
+$ErrorActionPreference='Stop'
+$parseErrors=$null
+$ast=[Management.Automation.Language.Parser]::ParseFile(${q(path.join(root, 'launcher.ps1'))},[ref]$null,[ref]$parseErrors)
+if ($parseErrors) { throw ($parseErrors | Out-String) }
+$healthFunction=$ast.Find({param($a) $a -is [Management.Automation.Language.FunctionDefinitionAst] -and $a.Name -eq 'Test-WorkbenchOAuthHealth'},$false)
+Invoke-Expression $healthFunction.Extent.Text
+function Invoke-WebRequest { param([switch]$UseBasicParsing,$Uri,$TimeoutSec,$MaximumRedirection)
+  return @{StatusCode=200;Headers=@{'x-workbench-security-protocol'='trpg-workbench-security/1.0'};Content=$script:healthBody}
+}
+$script:healthBody='{"service":"workbench-mcp-security","mode":"shield"}'
+if (Test-WorkbenchOAuthHealth) { throw 'Shield must not count as OAuth ready' }
+$script:healthBody='{"service":"another-listener","protocol":"trpg-workbench-security/1.0"}'
+if (Test-WorkbenchOAuthHealth) { throw 'Unrelated listener must not count as OAuth ready' }
+$script:healthBody='{"service":"workbench-mcp-security","protocol":"trpg-workbench-security/1.0"}'
+if (-not (Test-WorkbenchOAuthHealth)) { throw 'Healthy OAuth listener must be reusable' }
+Add-Type -Path ${q(path.join(root, 'scripts/mcp-http-owned-process.cs'))}
+[WriterWorkbench.McpHttpOwnedProcessV1]::StartWorkbenchOAuth(${q(process.execPath)},${q(oauthRoot)},${q(oauthOut)},${q(oauthErr)})
+`);
+  let oauthPid;
+  try {
+    const result = spawnSync('powershell.exe', ['-NoProfile','-ExecutionPolicy','Bypass','-File',oauthHarness], {
+      cwd: root, encoding: 'utf8', windowsHide: true, timeout: 25_000,
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout || result.error?.message);
+    oauthPid = Number(result.stdout.trim());
+    assert(Number.isSafeInteger(oauthPid) && oauthPid > 0);
+    let output = '';
+    for (let i = 0; i < 50 && !output.includes('OAUTH_FIXTURE_READY'); i++) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      output = await readFile(oauthOut, 'utf8');
+    }
+    assert(output.includes('OAUTH_FIXTURE_READY'), await readFile(oauthErr, 'utf8'));
+    process.kill(oauthPid, 0);
+  } finally {
+    if (Number.isSafeInteger(oauthPid) && oauthPid > 0) {
+      try { process.kill(oauthPid); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+    }
+  }
   const harness = `
 $ErrorActionPreference='Stop'
 $ast=[Management.Automation.Language.Parser]::ParseFile(${q(managerPath)},[ref]$null,[ref]$null)

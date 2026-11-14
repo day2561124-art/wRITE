@@ -76,6 +76,9 @@ jobs:
       - run: node tests/ci-selection-audit.test.mjs
       - run: node tests/verification-telemetry.test.mjs
       - run: node tests/cache-telemetry.test.mjs
+      - name: Verify Windows Launcher and background OAuth startup
+        if: runner.os == 'Windows'
+        run: node tests/secure-tunnel-launcher.test.mjs
 
   main-regression:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

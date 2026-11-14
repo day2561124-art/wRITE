@@ -2,11 +2,11 @@
 
 ## Operator interface
 
-`launcher.cmd` retains the existing UI, Tailscale Funnel (7), and Cloudflare
-Quick Tunnel (8) actions. It adds:
+`launcher.cmd` retains the existing UI and Tailscale Funnel (7) actions.
 
 | Choice | Action |
 | --- | --- |
+| 8 | Start the existing Writer Workbench OAuth service in the background |
 | 9 | Start / Restart Writer Workbench Secure Tunnel |
 | 10 | Detailed Secure Tunnel status, including a fresh local MCP session probe |
 | 11 | Stop only the Writer Workbench Secure Tunnel and disable its recovery |
@@ -18,11 +18,23 @@ recovery configuration. A PID alone never establishes connection success.
 Noninteractive entry points:
 
 ```powershell
+.\launcher.ps1 -StartWorkbenchOAuth
 .\launcher.ps1 -StartSecureTunnel
 .\launcher.ps1 -RestartSecureTunnel
 .\launcher.ps1 -SecureTunnelStatus
 .\launcher.ps1 -StopSecureTunnel
 ```
+
+Option 8 reuses a healthy OAuth listener on `127.0.0.1:8788` or starts the
+existing service from `E:\TRPG` without opening another console. It uses the
+TRPG checkout's existing build and private OAuth configuration. Closing the
+Launcher does not stop the OAuth process. Option 8 does not start or change the
+tunnel in option 9. The legacy Quick Tunnel command-line switches remain
+available, but no longer appear in the interactive menu.
+
+If OAuth is still running in the old foreground console, option 8 reports it
+as already running. Close that console first, then choose 8 to move OAuth to
+the background.
 
 `StartSecureTunnel` safely reuses a verified existing native Runtime. Choice 9
 and `RestartSecureTunnel` explicitly restart the exact verified alias.
