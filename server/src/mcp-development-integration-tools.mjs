@@ -7,6 +7,7 @@ import {
   open,
   readFile,
   readlink,
+  realpath,
   readdir,
   rmdir,
   rename,
@@ -947,13 +948,27 @@ export function createDevIntegrationService({
     }
   }
 
+  async function integrationCleanupStatus(integrationPath) {
+    const raw = (await gitRunner(["status", "--porcelain=v1", "--untracked-files=all"], { cwd: integrationPath })).stdout;
+    const status = parseStatus(raw);
+    if (!status.lines.includes("?? node_modules")) return status;
+    // A POSIX symlink is not matched by Git's directory-only ignore rule.
+    // Treat only the runner's exact dependency link as disposable.
+    const bridge = path.join(integrationPath, "node_modules");
+    const info = await lstat(bridge);
+    if (!info.isSymbolicLink()
+      || await realpath(bridge) !== await realpath(path.join(dependencyRoot, "node_modules"))) return status;
+    return parseStatus(status.lines.filter(line => line !== "?? node_modules").join("\n"));
+  }
+
   async function cleanupIntegrationWorktree(integrationPath, { unregisteredResidue = false } = {}) {
     try {
       if (!unregisteredResidue) {
-        const status = parseStatus((await gitRunner(["status", "--porcelain=v1", "--untracked-files=all"], { cwd: integrationPath })).stdout);
+        const status = await integrationCleanupStatus(integrationPath);
         if (status.dirty || status.staged.length > 0 || status.conflicted.length > 0 || status.untracked.length > 0) {
           return { cleaned: false, error: "Integration worktree is dirty; cleanup refused without force." };
         }
+        await cleanupDevTestDependencyBridge(integrationPath, dependencyRoot);
         await gitRunner(["worktree", "unlock", integrationPath], { cwd: repoRoot, allowFailure: true });
         await gitRunner(["worktree", "remove", integrationPath], { cwd: repoRoot, timeout: 60_000 });
       }
@@ -1350,7 +1365,7 @@ export function createDevIntegrationService({
           || (lockLine !== `locked Writer Workbench integration ${candidateId}` && !(recovering && !lockLine))) {
           throw new Error("VALIDATION_RECOVERY_WORKTREE_OWNERSHIP_MISMATCH");
         }
-        if (parseStatus((await gitRunner(["status", "--porcelain=v1", "--untracked-files=all"], { cwd: integrationPath })).stdout).dirty) {
+        if ((await integrationCleanupStatus(integrationPath)).dirty) {
           throw new Error("VALIDATION_RECOVERY_DIRTY_WORKTREE");
         }
         }
