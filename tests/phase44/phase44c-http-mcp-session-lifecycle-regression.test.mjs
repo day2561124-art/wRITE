@@ -9,6 +9,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { createTestOAuthCredentials, testOAuthEnvironment } from "../mcp/fixtures/workbench-http-test-security.mjs";
 
 const rootDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -230,6 +231,7 @@ await writeFile(
   "utf8",
 );
 
+const { proof, publicJwk } = createTestOAuthCredentials();
 const child = spawn(
   process.execPath,
   [
@@ -239,6 +241,7 @@ const child = spawn(
   ],
   {
     cwd: rootDir,
+    env: { ...process.env, ...testOAuthEnvironment(publicJwk) },
     stdio: [
       "ignore",
       "ignore",
@@ -283,6 +286,24 @@ try {
           port +
           "/mcp",
       ),
+      {
+        fetch: async (url, init) => {
+          // This owned loopback fixture simulates the upstream OAuth proxy's
+          // request proof. Production never loads the synthetic verifier.
+          if (init?.method === "POST" && typeof init.body === "string") {
+            const attachProof = (message) => ({
+              ...message,
+              params: {
+                ...message.params,
+                _meta: { ...message.params?._meta, workbench_http_access_token: proof },
+              },
+            });
+            const message = JSON.parse(init.body);
+            init = { ...init, body: JSON.stringify(Array.isArray(message) ? message.map(attachProof) : attachProof(message)) };
+          }
+          return fetch(url, init);
+        },
+      },
     );
 
   await withTimeout(
@@ -308,7 +329,7 @@ try {
     (tool) => tool.name,
   );
 
-  const directMcpSource = await readFile(directMcpServerPath, "utf8");
+  const directMcpSource = (await readFile(directMcpServerPath, "utf8")).replace(/\r\n/gu, "\n");
   const publicStart = directMcpSource.indexOf("const chatgptPublicToolNames = new Set([");
   const publicEnd = directMcpSource.indexOf("\n]);", publicStart);
   const registeredPublicNames = [...directMcpSource

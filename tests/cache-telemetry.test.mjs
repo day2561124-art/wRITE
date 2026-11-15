@@ -47,7 +47,7 @@ assert.throws(() => aggregateVerificationTelemetry({ cacheReceipts: [{
 }] }), /Unsupported/u);
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const workflow = await readFile(path.join(root, ".github", "workflows", "ci.yml"), "utf8");
+const workflow = (await readFile(path.join(root, ".github", "workflows", "ci.yml"), "utf8")).replace(/\r\n/gu, "\n");
 const scheduled = workflow.slice(workflow.indexOf("  scheduled-full:\n"), workflow.indexOf("  manual-full:\n"));
 assert.match(scheduled, /actions\/upload-artifact@v7/u);
 assert.match(scheduled, /always\(\) && matrix\.selector_audit == true/u);
