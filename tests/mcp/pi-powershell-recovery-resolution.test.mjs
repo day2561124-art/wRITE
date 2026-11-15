@@ -125,7 +125,7 @@ async function psEffectFixture(t,{legacy=false,holdOwner=false}={}){
  let release=async()=>{};
  t.after(async()=>{await release();assert.equal(path.dirname(dir),os.tmpdir());assert.match(path.basename(dir),/^pi-ps-/);await rm(dir,{recursive:true,force:true});});
  await mkdir(root,{recursive:true});await mkdir(artifacts);
- const git=async args=>(await psExec('git.exe',args,{cwd:root,windowsHide:true})).stdout.trim();
+ const git=async args=>(await psExec(process.platform==='win32'?'git.exe':'git',args,{cwd:root,windowsHide:true})).stdout.trim();
  await git(['init','--initial-branch=main']);await git(['config','user.name','PowerShell resolution fixture']);await git(['config','user.email','fixture@local.invalid']);
  await writeFile(path.join(root,'.gitignore'),'node_modules/\n');await writeFile(path.join(root,'effect.txt'),'before fixture\n');await git(['add','--','.gitignore','effect.txt']);await git(['commit','-m','fixture baseline']);
  const head=await git(['rev-parse','HEAD']);
