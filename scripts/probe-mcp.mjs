@@ -191,7 +191,18 @@ export async function runMcpProbe({ endpoint, mode = 'probe', expectedInstance,
           if (attempt === 2) throw failure('RESOURCES_DISCOVERY_FAILED', 'MCP resources/list retry limit reached', error);
           let ready = false;
           for (let poll = 0; poll < 100 && performance.now() < deadlineAt; poll++) {
-            const { response, payload } = await stage('runtime/readiness', () => json('/ready', headers()));
+            let response, payload;
+            try {
+              ({ response, payload } = await stage('runtime/readiness', () => json('/ready', headers())));
+            } catch (error) {
+              // Keep an observed runtime state when the final poll consumes the remaining budget.
+              // A timeout before any valid readiness response remains a transport timeout.
+              if (error?.code === 'HTTP_TIMEOUT' && lastReadiness.runtimeState && lastReadiness.runtimeState !== 'unknown'
+                && lastReadiness.runtimeState !== 'ready' && deadlineAt - performance.now() <= 2) {
+                throw failure('RUNTIME_NOT_READY', 'Runtime did not become ready within the startup budget');
+              }
+              throw error;
+            }
             lastReadiness = readinessFacts(payload);
             if (response.status === 404) throw failure('SESSION_NOT_FOUND', 'Session disappeared during readiness validation');
             if (payload?.child?.runtime_readiness?.state === 'failed') throw failure('RUNTIME_NOT_READY', 'Runtime recovery failed');
