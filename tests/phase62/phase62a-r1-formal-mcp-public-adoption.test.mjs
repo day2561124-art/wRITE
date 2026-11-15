@@ -10,6 +10,9 @@ import { fileURLToPath } from "node:url";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { createTestOAuthCredentials, testOAuthEnvironment, testOAuthFetch } from "../mcp/fixtures/workbench-http-test-security.mjs";
+
+const { proof, publicJwk } = createTestOAuthCredentials();
 
 import {
   isWorldSimulationMcpToolName,
@@ -147,6 +150,7 @@ async function connectClient(port, name) {
   await client.connect(
     new StreamableHTTPClientTransport(
       new URL(`http://127.0.0.1:${port}/mcp`),
+      { fetch: testOAuthFetch(proof) },
     ),
   );
   return client;
@@ -243,6 +247,7 @@ function spawnHttpParent(configPath) {
     [serverPath, "--config", configPath],
     {
       cwd: rootDir,
+      env: { ...process.env, ...testOAuthEnvironment(publicJwk) },
       stdio: ["ignore", "ignore", "pipe"],
       windowsHide: true,
     },

@@ -640,7 +640,7 @@ function closeBridgeSession(entry, reason = 'transport_closed') {
 function decorateReconciliationMetadata(reply) {
   if (!Array.isArray(reply?.result?.tools)) return reply;
   return { ...reply, result: { ...reply.result, tools: reply.result.tools.map((tool) =>
-    tool.annotations?.readOnlyHint !== false ? tool : { ...tool, _meta: { ...tool._meta,
+    tool.annotations?.readOnlyHint !== false || tool._meta?.['trpg/execution_domain'] === 'TRPG_GM_CONFIDENTIAL' ? tool : { ...tool, _meta: { ...tool._meta,
       'armed-academy/reconciliation': {
         key_location: 'params._meta.reconciliation_key',
         lookup_tool: 'dev_workspace_get_operation', automatic_replay_allowed: false,
@@ -703,6 +703,16 @@ function bindBridge(entry) {
 
   transport.onmessage = (message) => {
     try {
+      // GM restriction is monotonic and only removes authority. It must precede
+      // parent-owned shortcuts, which do not pass through child authorization.
+      const requestedTool = message?.method === 'tools/call' && typeof message.params?.name === 'string' ? message.params.name : null;
+      if (message?.params?._meta?.workbench_purpose === 'GM' || requestedTool?.startsWith('trpg.gm.')) entry.gmOnly = true;
+      if (entry.gmOnly && message?.method === 'tools/call' && !requestedTool?.startsWith('trpg.gm.')) {
+        if (message.id !== undefined) safeTransportSend(transport, {
+          jsonrpc: '2.0', id: message.id, error: { code: -32001, message: 'GM_CONNECTION_TOOL_DENIED' },
+        }, 'transport.send(gm-parent-denied)');
+        return;
+      }
       if (message?.method === 'tools/call'
         && [DEV_MCP_RELOAD_TOOL_NAME, INTEGRATE_TOOL_NAME].includes(message.params?.name)
         && message.params?._meta?.reconciliation_key != null) {
@@ -799,6 +809,12 @@ function bindBridge(entry) {
         }
 
         if (message.method === 'tools/list') {
+          // Preserve the child's exact GM projection, including an empty list.
+          // Do not load or append engineering controls to a game connection.
+          if (entry.gmOnly) {
+            safeTransportSend(transport, reply, 'transport.send(gm-tools/list)');
+            return;
+          }
           void integrationControl.prepare().then(() => {
             safeTransportSend(transport, decorateReconciliationMetadata(integrationControl.decorate(decorateParentOwnedTools(message, reply))), 'transport.send(tools/list)');
           }).catch((error) => {
@@ -1250,7 +1266,29 @@ const server = http.createServer(async (req, res) => {
 // alive until the upstream transport lifecycle no longer couples the two.
 server.keepAliveTimeout = 0;
 
+// A socket that has never sent a complete request is neither an active MCP
+// transport nor an HTTP keep-alive connection. Node's idle reaper may not
+// close it, so retire only these pre-request sockets explicitly on shutdown.
+const preRequestSockets = new Set();
+let shuttingDown = false;
+server.on('connection', (socket) => {
+  if (shuttingDown) {
+    socket.destroy();
+    return;
+  }
+  preRequestSockets.add(socket);
+  socket.once('close', () => preRequestSockets.delete(socket));
+});
+server.prependListener('request', (request, response) => {
+  preRequestSockets.delete(request.socket);
+  response.once('finish', () => {
+    if (shuttingDown) setImmediate(() => server.closeIdleConnections?.());
+  });
+});
+
 async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
   console.error(
     '[mcp-http] received ' +
       signal +
@@ -1283,6 +1321,7 @@ async function shutdown(signal) {
   // accepting new connections. Active requests/SSE streams are left alone and
   // finish through their normal transport/session shutdown path.
   server.closeIdleConnections?.();
+  for (const socket of preRequestSockets) socket.destroy();
 }
 
 process.once('SIGINT', () => {

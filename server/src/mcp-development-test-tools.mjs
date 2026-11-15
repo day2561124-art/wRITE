@@ -108,8 +108,21 @@ export const DEV_TEST_LAST_RESULT_TEXT_MAX_CHARACTERS = 12 * 1024;
 
 let activeChild = null;
 
+function signalOwnedTestGroup(child, signal = "SIGKILL") {
+  if (!Number.isInteger(child?.pid) || child.pid <= 1) return;
+  // On POSIX the test is launched as a new process-group leader. Signal
+  // that exact owned group even when its immediate child has already exited.
+  try { process.kill(-child.pid, signal); }
+  catch (error) { if (error?.code !== "ESRCH") throw error; }
+}
+
+function stopOwnedTestProcess(child) {
+  if (process.platform === "win32") terminateProcessTree(child);
+  else signalOwnedTestGroup(child);
+}
+
 process.once("exit", () => {
-  if (activeChild) terminateProcessTree(activeChild);
+  if (activeChild) stopOwnedTestProcess(activeChild);
 });
 
 const controlledEnvironment = controlledProcessEnvironment;
@@ -461,7 +474,7 @@ async function runDefinition(suite, definition, outputMaxCharacters, lockHandle,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
       shell: false,
-      detached: false,
+      detached: process.platform !== "win32",
     });
     activeChild = child;
     await bindRunLockToChild(lockHandle, suite, child.pid);
@@ -487,7 +500,7 @@ async function runDefinition(suite, definition, outputMaxCharacters, lockHandle,
       };
       const timeoutTimer = setTimeout(() => {
         timedOut = true;
-        terminateProcessTree(child);
+        stopOwnedTestProcess(child);
         forceSettleTimer = setTimeout(() => finish(null, null), 5_000);
         forceSettleTimer.unref?.();
       }, definition.timeoutMs);

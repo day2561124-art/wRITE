@@ -104,6 +104,7 @@ try {
   // Additive TRPG coverage preserves the reviewed legacy 24-script inventory.
   await runTestScript("tests/mcp/trpg-gm-bridge.test.mjs");
   await runTestScript("tests/mcp/trpg-gm-http-auth.test.mjs");
+  await runTestScript("tests/mcp/trpg-gm-parent-isolation.test.mjs");
   for (const scriptPath of [...testScripts, ...piTestScripts, ...(await import("./mcp-suite-groups.mjs")).mcpPiPostSealScripts, "tests/mcp/pi-bootstrap-wire.test.mjs"]) {
     await runTestScript(scriptPath);
   }

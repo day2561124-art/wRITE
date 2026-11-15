@@ -9,6 +9,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { createTestOAuthCredentials, testOAuthEnvironment, testOAuthFetch } from "../mcp/fixtures/workbench-http-test-security.mjs";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const serverPath = path.join(rootDir, "server", "src", "mcp-http-server.mjs");
@@ -74,8 +75,10 @@ const port = await reservePort();
 const configPath = path.join(tempDirectory, "mcp-http.json");
 await writeFile(configPath, JSON.stringify({ host: "127.0.0.1", port }, null, 2), "utf8");
 
+const { proof, publicJwk } = createTestOAuthCredentials();
 const child = spawn(process.execPath, [serverPath, "--config", configPath], {
   cwd: rootDir,
+  env: { ...process.env, ...testOAuthEnvironment(publicJwk) },
   stdio: ["ignore", "ignore", "pipe"],
   windowsHide: true,
 });
@@ -90,7 +93,7 @@ try {
     { name: "phase44c-http-compact-bootstrap-handoff", version: "1.0.0" },
     { capabilities: {} },
   );
-  await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`)));
+  await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`), { fetch: testOAuthFetch(proof) }));
 
   const listed = await client.listTools();
   assert(listed.tools.length >= 29);

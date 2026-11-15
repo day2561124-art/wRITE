@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const workflow = await readFile(path.join(root, ".github", "workflows", "ci.yml"), "utf8");
+const workflow = (await readFile(path.join(root, ".github", "workflows", "ci.yml"), "utf8")).replace(/\r\n/gu, "\n");
 
 function block(start, end) {
   const startIndex = workflow.indexOf(start);

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {loadTRPGGMBridge,trpgPublicToolDefinition,isTRPGTransportTrusted} from '../../server/src/mcp-trpg-gm-bridge.mjs';
+import {loadTRPGGMBridge,trpgPublicToolDefinition,isTRPGTransportTrusted,createWorkbenchTransportBoundary} from '../../server/src/mcp-trpg-gm-bridge.mjs';
 const name='trpg.gm.get_round_context',write='trpg.gm.commit_round_result';
 let calls=0,disabled=0;
 const tool=(n=name)=>({name:n,description:'synthetic',risk:n===write?'high-risk-write':'read',annotations:{readOnlyHint:n!==write},inputSchema:{type:'object',properties:{},additionalProperties:false},handler:async args=>{calls++;return {content:[{type:'text',text:JSON.stringify(args)}]};}});
@@ -31,3 +31,15 @@ assert.equal(isTRPGTransportTrusted({ipc:true,trustedLocalOwner:false}),false);
 assert.equal(isTRPGTransportTrusted({ipc:true,trustedLocalOwner:true}),true);
 assert.equal(isTRPGTransportTrusted({ipc:true,trustedLocalOwner:'true'}),false);
 console.log('TRPG transport trust: unauthenticated HTTP/IPC fails closed; local stdio remains available.');
+
+const attachment='trpg.gm.stage_scenario_attachment';
+const attachmentTool={...tool(write),name:attachment,annotations:{readOnlyHint:false,openWorldHint:true}};
+const withAttachment=await loadTRPGGMBridge({load:provider([attachmentTool]),disabled:false});
+assert.deepEqual(trpgPublicToolDefinition(withAttachment.tools[0])._meta['openai/fileParams'],['file']);
+assert.equal(trpgPublicToolDefinition(withAttachment.tools[0])._meta['armed-academy/reconciliation'],undefined);
+assert.equal(trpgPublicToolDefinition(tool(write))._meta['openai/fileParams'],undefined);
+const boundary=createWorkbenchTransportBoundary({ipc:false});
+assert.equal((await boundary.authorize({method:'tools/call',params:{name:attachment}})).ok,true);
+assert.equal(boundary.gmOnly,true);
+assert.equal(boundary.isToolAllowed(attachment),true);
+assert.equal(boundary.isToolAllowed('dev_mcp_reload'),false);

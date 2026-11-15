@@ -85,5 +85,5 @@ if (process.platform === 'win32') {
         exit [ListenerConsoleProbe]::Check(${listenerPid})`);
     } finally { process.kill(listenerPid); }
     console.log('Headless host passed: GUI PE, actual console absence, exact argv, pipe draining, exit propagation.');
-  } finally { await rm(temp, { recursive: true, force: true }); }
+  } finally { await rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
 }

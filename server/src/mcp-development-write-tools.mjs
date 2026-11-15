@@ -2197,6 +2197,7 @@ export const DEV_GIT_PUSH_PRODUCTION_POLICY = Object.freeze({
 
 const gitSha1Pattern = /^[A-Fa-f0-9]{40}$/u;
 const fixedPushGitExecutable = process.platform === "win32" ? "git.exe" : "git";
+const controlledPushRemote = "writer-workbench-controlled-push";
 const activePushGitChildren = new Set();
 let pushInProgress = false;
 
@@ -2441,7 +2442,7 @@ async function readPushConfigRegexp(runAudit, regexp) {
   };
 }
 
-async function auditPushConfiguration({ runAudit, policy }) {
+async function auditPushConfiguration({ runAudit, policy, forPush = false }) {
   const remoteUrl = await readPushConfigValues(runAudit, "remote.origin.url", { local: true });
   if (!remoteUrl.ok) {
     return { ok: false, execution_ok: false, reason: "CONFIG_AUDIT_FAILED", details: "Could not read remote.origin.url.", result: remoteUrl.result };
@@ -2466,6 +2467,19 @@ async function auditPushConfiguration({ runAudit, policy }) {
     }
     if (configured.present) {
       return { ok: false, execution_ok: true, reason, details };
+    }
+  }
+
+  if (forPush) {
+    // The push-only remote must have no repository-provided fetch mapping,
+    // push URL or other settings. Git may match a bare URL to a configured
+    // remote and update its tracking refs, even with an explicit refspec.
+    const pushRemoteConfig = await readPushConfigRegexp(runAudit, `^remote\\.${controlledPushRemote}\\.`);
+    if (!pushRemoteConfig.ok) {
+      return { ok: false, execution_ok: false, reason: "CONFIG_AUDIT_FAILED", details: "Could not audit the push-only remote name.", result: pushRemoteConfig.result };
+    }
+    if (pushRemoteConfig.entries.length > 0) {
+      return { ok: false, execution_ok: true, reason: "PUSH_REMOTE_NAME_CONFIGURED", details: "The reserved push-only remote name already has configuration." };
     }
   }
 
@@ -3146,23 +3160,7 @@ export function createDevGitPushTool({
         return { ok: true, remoteHead, result: remoteResult };
       };
 
-      const configAudit = await auditPushConfiguration({ runAudit, policy });
-      if (!configAudit.ok) {
-        const result = configAudit.result ?? {};
-        return pushFailureResult({
-          reason: configAudit.reason,
-          details: configAudit.details,
-          executionOk: configAudit.execution_ok,
-          expectedHead: normalized.expectedHead,
-          exitCode: result.exit_code ?? null,
-          signal: result.signal ?? null,
-          timedOut: result.timed_out === true,
-          stderr: result.stderr ?? "",
-          stderrTruncated: result.stderr_truncated === true,
-          durationMs: Date.now() - startedAt,
-        });
-      }
-
+      // A stale expected HEAD never needs remote configuration or a network call.
       const headResult = await runAudit(["rev-parse", "--verify", "HEAD"]);
       if (!headResult.execution_ok || headResult.exit_code !== 0 || !gitSha1Pattern.test(headResult.stdout.trim())) {
         return pushFailureResult({
@@ -3185,6 +3183,23 @@ export function createDevGitPushTool({
           details: "Current HEAD no longer matches expectedHead; push was not attempted.",
           head: actualHead,
           expectedHead: normalized.expectedHead,
+          durationMs: Date.now() - startedAt,
+        });
+      }
+
+      const configAudit = await auditPushConfiguration({ runAudit, policy, forPush: true });
+      if (!configAudit.ok) {
+        const result = configAudit.result ?? {};
+        return pushFailureResult({
+          reason: configAudit.reason,
+          details: configAudit.details,
+          executionOk: configAudit.execution_ok,
+          expectedHead: normalized.expectedHead,
+          exitCode: result.exit_code ?? null,
+          signal: result.signal ?? null,
+          timedOut: result.timed_out === true,
+          stderr: result.stderr ?? "",
+          stderrTruncated: result.stderr_truncated === true,
           durationMs: Date.now() - startedAt,
         });
       }
@@ -3615,7 +3630,7 @@ export function createDevGitPushTool({
         return pushFailureResult({ reason: "OPERATION_IN_PROGRESS", details: `Repository operation state became active during the final push race gate: ${finalOperationState.active.join(", ")}.`, head: actualHead, expectedHead: normalized.expectedHead, upstream, remoteHeadBefore, aheadBefore, behindBefore, workingTreeDirty, modifiedCount, untrackedCount, stagedCount, conflictedCount, durationMs: Date.now() - startedAt });
       }
 
-      const finalConfigAudit = await auditPushConfiguration({ runAudit, policy });
+      const finalConfigAudit = await auditPushConfiguration({ runAudit, policy, forPush: true });
       if (!finalConfigAudit.ok) {
         const result = finalConfigAudit.result ?? {};
         return pushFailureResult({
@@ -3688,10 +3703,11 @@ export function createDevGitPushTool({
       );
       const pushArgv = [
         ...networkPrefix,
+        "-c", `remote.${controlledPushRemote}.url=${policy.canonicalUrl}`,
         "push",
         "--porcelain",
         "--no-verify",
-        policy.canonicalUrl,
+        controlledPushRemote,
         `HEAD:refs/heads/${policy.branch}`,
       ];
       const pushResult = await runPushGit({
@@ -3899,10 +3915,11 @@ export function getDevGitPushCommandMapping() {
     ],
     push: [
       ...networkPrefix,
+      "-c", `remote.${controlledPushRemote}.url=${policy.canonicalUrl}`,
       "push",
       "--porcelain",
       "--no-verify",
-      policy.canonicalUrl,
+      controlledPushRemote,
       "HEAD:refs/heads/main",
     ],
     authoritative_remote_head_after: [

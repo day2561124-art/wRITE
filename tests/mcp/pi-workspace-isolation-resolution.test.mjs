@@ -161,8 +161,8 @@ test('orphan directory, branch and Git admin residue classify partial and cannot
  for(const kind of ['directory','branch','admin']){
   const f=await fixture(t);if(kind==='directory')await mkdir(path.join(f.container,'.writer-workbench-worktrees','dev_workspace_'+'f'.repeat(24)),{recursive:true});
   if(kind==='branch')await git(f.root,'branch','dev-ws/'+'f'.repeat(24));
-  if(kind==='admin'){const dir=path.join(f.root,'.git/worktrees/orphan');await mkdir(dir,{recursive:true});await writeFile(path.join(dir,'gitdir'),path.join(f.container,'missing/.git'));}
-  const p=await f.proposal();assert.equal(p.observation.classification,'partial');await assert.rejects(f.j.resolveWorkspaceIsolationMutation(p),/UNSAFE_ISOLATION_RESOLUTION/);
+  if(kind==='admin'){const dir=path.join(f.root,'.git/worktrees/orphan');await mkdir(dir,{recursive:true});await writeFile(path.join(dir,'gitdir'),path.join(f.container,'.writer-workbench-worktrees','dev_workspace_'+'f'.repeat(24),'.git'));}
+  const p=await f.proposal();assert.equal(p.observation.classification,'partial',kind);await assert.rejects(f.j.resolveWorkspaceIsolationMutation(p),/UNSAFE_ISOLATION_RESOLUTION/);
  }
 });
 test('competing registry update between observation and apply is detected before append',async t=>{

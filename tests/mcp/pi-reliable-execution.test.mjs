@@ -460,7 +460,7 @@ test('workspace shell foreign workspace fingerprint never permits retry or compl
 // one fixture fact. It never claims the production repository full Gate passed.
 async function oversizedVerificationFixture(t,{failTest=false}={}) {
  const f=await fixture(t),{mkdir}=await import('node:fs/promises');const root=path.join(f.root,'tiny-repo');await mkdir(root);
- const git=async args=>(await promisify(execFile)('git.exe',args,{cwd:root,windowsHide:true})).stdout.trim();
+ const git=async args=>(await promisify(execFile)(process.platform === 'win32' ? 'git.exe' : 'git',args,{cwd:root,windowsHide:true})).stdout.trim();
  await git(['init','--initial-branch=main']);await git(['config','user.name','Bounded test receipt fixture']);await git(['config','user.email','fixture@local.invalid']);
  await writeFile(path.join(root,'.gitignore'),'node_modules/\n');await writeFile(path.join(root,'fact.txt'),'actual fixture fact\n');await git(['add','--','.gitignore','fact.txt']);await git(['commit','-m','fixture baseline']);
  const head=await git(['rev-parse','HEAD']),workspace={...context,root,current_head:head,base_head:head,branch:'main',workspace_type:'isolated_worktree',lifecycle_state:'active',state:'active',healthy:true,mutation_allowed:true};

@@ -159,7 +159,9 @@ test("lightweight reads reuse real path, secret, symlink and output limits in se
   assert.equal(await readFile(path.join(right, "probe.txt"), "utf8"), "other-workspace\n");
 });
 
-test("authorized PowerShell retains formal Pi persistence, exact dispatch and duplicate suppression", async t => {
+test("authorized PowerShell retains formal Pi persistence, exact dispatch and duplicate suppression", {
+  skip: process.platform !== "win32" && "PowerShell host dispatch is Windows-only",
+}, async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), "pi-policy-powershell-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const journal = createDevOperationJournalService({ storageRoot: path.join(root, "journal") });
