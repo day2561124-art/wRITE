@@ -713,7 +713,7 @@ test("service rejects caller-controlled integration plumbing fields", async () =
 test("hard interruption recovers only bound dead validation, including interrupted cleanup and append", async () => {
   const harness = await createHarness("interrupted-validation");
   try {
-    const source = await harness.createSource({ changes: { "docs/recovery.txt": "recovery\n", ".gitignore": "node_modules/\n" } });
+    const source = await harness.createSource({ changes: { "docs/recovery.txt": "recovery\n", ".gitignore": "/node_modules\n" } });
     const runtime = path.join(harness.root, "runtime");
     const journalRoot = path.join(runtime, "journal");
     const lockPath = path.join(runtime, "test.lock");
