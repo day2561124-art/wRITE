@@ -42,3 +42,8 @@ The pinned HTTPS resource receives standard Bearer authentication. Private upstr
 Owned Windows tests retain cold/reuse/restart and parent pipe/liveness assertions, additionally run the authenticated full protocol, reject anonymous and forged credentials, and check stdout/stderr logs for token leakage. The tunnel suite also tests ACLs, bounds, pinning and actual SDK proof transport. The root24 full-MCP test inventory remains intact. Tunnel fixtures use their own dynamic ports and explicit PID/identity teardown; the runner no longer kills unrelated new listeners on shared8787.
 
 These are isolated source/loopback tests. Public-proxy health/readiness routing, production credential provisioning/renewal, existing live-parent upgrade/recovery and actual Nexa host/model/GM acceptance remain deployment gates. No anonymous fallback or broader Writer authority is granted to a GM connection.
+
+## ChatGPT scenario attachments
+
+When the paired TRPG loopback gateway advertises `trpg.gm.stage_scenario_attachment`, the existing Nexa descriptor exposes its `file` argument through ChatGPT's native file-parameter metadata. It stays in the GM-only dispatch path, outside general Writer host execution and journals. The gateway validates write scope and stages only a deduplicated private draft. The existing OAuth URL and plugin identity do not change. Source validation alone does not verify live App discovery or user attachment delivery.
+With GM-only purpose, the HTTP parent returns the child GM catalog unchanged and denies parent engineering actions; the normal Nexa engineering connection remains separate.
