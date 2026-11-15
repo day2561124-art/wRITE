@@ -80,12 +80,17 @@ try {
     idleSocket.once('error', reject);
   });
 
+  // Keep the accepted TCP socket open without a complete request. The
+  // incomplete header must not hold the listener open on shutdown.
+  idleSocket.write('GET /health HTTP/1.1\r\nHost: localhost\r\n');
+  const closed = new Promise((resolve) => idleSocket.once('close', resolve));
   child.kill('SIGTERM');
   await waitForPortAvailable(port);
   await waitUntil(() => child.exitCode !== null, `HTTP parent did not exit after SIGTERM. stderr=${stderr}`);
   assert.equal(child.exitCode, 0, stderr);
   assert.match(stderr, /received SIGTERM; closing sessions/u);
-  idleSocket.destroy();
+  await closed;
+  assert.equal(idleSocket.destroyed, true);
 } finally {
   if (child.exitCode === null) terminateProcessTree(child);
   await waitForPortAvailable(port);

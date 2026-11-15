@@ -1266,7 +1266,29 @@ const server = http.createServer(async (req, res) => {
 // alive until the upstream transport lifecycle no longer couples the two.
 server.keepAliveTimeout = 0;
 
+// A socket that has never sent a complete request is neither an active MCP
+// transport nor an HTTP keep-alive connection. Node's idle reaper may not
+// close it, so retire only these pre-request sockets explicitly on shutdown.
+const preRequestSockets = new Set();
+let shuttingDown = false;
+server.on('connection', (socket) => {
+  if (shuttingDown) {
+    socket.destroy();
+    return;
+  }
+  preRequestSockets.add(socket);
+  socket.once('close', () => preRequestSockets.delete(socket));
+});
+server.prependListener('request', (request, response) => {
+  preRequestSockets.delete(request.socket);
+  response.once('finish', () => {
+    if (shuttingDown) setImmediate(() => server.closeIdleConnections?.());
+  });
+});
+
 async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
   console.error(
     '[mcp-http] received ' +
       signal +
@@ -1299,6 +1321,7 @@ async function shutdown(signal) {
   // accepting new connections. Active requests/SSE streams are left alone and
   // finish through their normal transport/session shutdown path.
   server.closeIdleConnections?.();
+  for (const socket of preRequestSockets) socket.destroy();
 }
 
 process.once('SIGINT', () => {
