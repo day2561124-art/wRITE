@@ -27,7 +27,7 @@ const reviewedParallelSafeSet = new Set(reviewedParallelSafeTestPaths);
 
 export const reviewedCacheableTestPaths = Object.freeze([
   ...mcpHermeticCoreScripts,
-  "tests/communication/cc1-foundation.test.mjs",
+  // CC1 transitively reads world state; run it normally instead of caching its result.
   "tests/communication/cc6-listener-reception.test.mjs",
 ]);
 const reviewedCacheableSet = new Set(reviewedCacheableTestPaths);
