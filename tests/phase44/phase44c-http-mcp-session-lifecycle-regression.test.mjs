@@ -9,7 +9,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { createTestOAuthCredentials, testOAuthEnvironment } from "../mcp/fixtures/workbench-http-test-security.mjs";
+import { createTestOAuthCredentials, testOAuthEnvironment, testOAuthFetch } from "../mcp/fixtures/workbench-http-test-security.mjs";
 
 const rootDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -287,22 +287,7 @@ try {
           "/mcp",
       ),
       {
-        fetch: async (url, init) => {
-          // This owned loopback fixture simulates the upstream OAuth proxy's
-          // request proof. Production never loads the synthetic verifier.
-          if (init?.method === "POST" && typeof init.body === "string") {
-            const attachProof = (message) => ({
-              ...message,
-              params: {
-                ...message.params,
-                _meta: { ...message.params?._meta, workbench_http_access_token: proof },
-              },
-            });
-            const message = JSON.parse(init.body);
-            init = { ...init, body: JSON.stringify(Array.isArray(message) ? message.map(attachProof) : attachProof(message)) };
-          }
-          return fetch(url, init);
-        },
+        fetch: testOAuthFetch(proof),
       },
     );
 

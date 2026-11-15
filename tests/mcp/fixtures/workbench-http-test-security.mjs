@@ -109,3 +109,25 @@ try {
   }
   return file;
 }
+
+/** Supply the fixture's signed proof to the owned loopback HTTP parent as the
+ * real OAuth proxy would. This helper must never target a non-loopback host. */
+export function testOAuthFetch(proof) {
+  return async (url, init) => {
+    const target = new URL(url);
+    if (target.protocol !== 'http:' || target.hostname !== '127.0.0.1' || target.pathname !== '/mcp')
+      throw new Error('TEST_OAUTH_REQUIRES_OWNED_LOOPBACK_MCP');
+    if (init?.method === 'POST' && typeof init.body === 'string') {
+      const attachProof = (message) => ({
+        ...message,
+        params: {
+          ...message.params,
+          _meta: { ...message.params?._meta, workbench_http_access_token: proof },
+        },
+      });
+      const message = JSON.parse(init.body);
+      init = { ...init, body: JSON.stringify(Array.isArray(message) ? message.map(attachProof) : attachProof(message)) };
+    }
+    return fetch(url, init);
+  };
+}
