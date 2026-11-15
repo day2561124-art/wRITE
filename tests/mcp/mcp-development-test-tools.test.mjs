@@ -1331,6 +1331,11 @@ try {
     remoteStatusFixture.remoteUrl,
     "HEAD:refs/heads/main",
   ]);
+  // Some Git versions update matching tracking refs even when pushing by URL.
+  // Establish the intended stale-tracking fixture explicitly, not as a side effect.
+  runFixtureGit(remoteStatusFixture.repositoryRoot, [
+    "update-ref", "refs/remotes/origin/main", remoteStatusFixture.baseHead,
+  ]);
   await writeFile(
     path.join(remoteStatusFixture.repositoryRoot, "server", "src", "unrelated.mjs"),
     "export const unrelated = 123;\n",
