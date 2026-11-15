@@ -761,8 +761,9 @@ try {
   assert(pushMapping.push.includes("--no-verify"));
   assert.equal(
     pushMapping.push.at(-2),
-    "https://github.com/day2561124-art/wRITE.git",
+    "writer-workbench-controlled-push",
   );
+  assert(pushMapping.push.includes("remote.writer-workbench-controlled-push.url=https://github.com/day2561124-art/wRITE.git"));
   assert.equal(pushMapping.push.at(-1), "HEAD:refs/heads/main");
   for (const forbiddenToken of [
     "--force", "--force-with-lease", "--mirror", "--delete", "--tags", "--follow-tags",
@@ -1389,6 +1390,13 @@ try {
     policy: pushTestPolicy(pushSuccessFixture.remoteUrl),
   });
   const pushSuccessLocalBefore = fixtureHead(pushSuccessFixture.repositoryRoot);
+  // Git may find a configured tracking remote by matching the push URL.
+  runFixtureGit(pushSuccessFixture.repositoryRoot, ["remote", "add", "same-url", pushSuccessFixture.remoteUrl]);
+  runFixtureGit(pushSuccessFixture.repositoryRoot, [
+    "update-ref", "refs/remotes/same-url/main", pushSuccessFixture.baseHead,
+  ]);
+  const pushSuccessConfigPath = path.join(pushSuccessFixture.repositoryRoot, ".git", "config");
+  const pushSuccessConfigBefore = await readFile(pushSuccessConfigPath);
   const pushSuccessRemoteBefore = fixtureBareHead(pushSuccessFixture.bareRoot);
   assert.equal(pushSuccessRemoteBefore, pushSuccessFixture.baseHead);
   const pushSuccess = await pushSuccessTool({ expectedHead: pushSuccessFixture.head });
@@ -1404,6 +1412,10 @@ try {
   assert.equal(pushSuccess.timed_out, false);
   assert.equal(fixtureBareHead(pushSuccessFixture.bareRoot), pushSuccessFixture.head);
   assert.equal(fixtureHead(pushSuccessFixture.repositoryRoot), pushSuccessLocalBefore);
+  for (const name of ["origin", "same-url"]) {
+    assert.equal(runFixtureGit(pushSuccessFixture.repositoryRoot, ["rev-parse", `refs/remotes/${name}/main`]).stdout.trim(), pushSuccessFixture.baseHead);
+  }
+  assert.deepEqual(await readFile(pushSuccessConfigPath), pushSuccessConfigBefore);
 
   const stalePushFixture = await createPushFixture(tempRoot, "push-stale-head");
   const stalePushTool = createDevGitPushTool({
@@ -1629,6 +1641,20 @@ try {
   const pushurlReject = await pushurlTool({ expectedHead: pushurlFixture.head });
   assert.equal(pushurlReject.pushed, false);
   assert.equal(pushurlReject.reason, "PUSHURL_CONFIGURED");
+
+  const reservedRemoteFixture = await createPushFixture(tempRoot, "push-reserved-remote");
+  const reservedRemoteTool = createDevGitPushTool({
+    repositoryRoot: reservedRemoteFixture.repositoryRoot,
+    policy: pushTestPolicy(reservedRemoteFixture.remoteUrl),
+  });
+  runFixtureGit(reservedRemoteFixture.repositoryRoot, [
+    "config", "remote.writer-workbench-controlled-push.fetch",
+    "+refs/heads/*:refs/remotes/origin/*",
+  ]);
+  const reservedRemoteResult = await reservedRemoteTool({ expectedHead: reservedRemoteFixture.head });
+  assert.equal(reservedRemoteResult.pushed, false);
+  assert.equal(reservedRemoteResult.reason, "PUSH_REMOTE_NAME_CONFIGURED");
+  assert.equal(fixtureBareHead(reservedRemoteFixture.bareRoot), reservedRemoteFixture.baseHead);
 
   const receivepackFixture = await createPushFixture(tempRoot, "push-receivepack");
   const receivepackTool = createDevGitPushTool({
