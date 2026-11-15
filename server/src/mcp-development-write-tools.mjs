@@ -3160,23 +3160,7 @@ export function createDevGitPushTool({
         return { ok: true, remoteHead, result: remoteResult };
       };
 
-      const configAudit = await auditPushConfiguration({ runAudit, policy, forPush: true });
-      if (!configAudit.ok) {
-        const result = configAudit.result ?? {};
-        return pushFailureResult({
-          reason: configAudit.reason,
-          details: configAudit.details,
-          executionOk: configAudit.execution_ok,
-          expectedHead: normalized.expectedHead,
-          exitCode: result.exit_code ?? null,
-          signal: result.signal ?? null,
-          timedOut: result.timed_out === true,
-          stderr: result.stderr ?? "",
-          stderrTruncated: result.stderr_truncated === true,
-          durationMs: Date.now() - startedAt,
-        });
-      }
-
+      // A stale expected HEAD never needs remote configuration or a network call.
       const headResult = await runAudit(["rev-parse", "--verify", "HEAD"]);
       if (!headResult.execution_ok || headResult.exit_code !== 0 || !gitSha1Pattern.test(headResult.stdout.trim())) {
         return pushFailureResult({
@@ -3199,6 +3183,23 @@ export function createDevGitPushTool({
           details: "Current HEAD no longer matches expectedHead; push was not attempted.",
           head: actualHead,
           expectedHead: normalized.expectedHead,
+          durationMs: Date.now() - startedAt,
+        });
+      }
+
+      const configAudit = await auditPushConfiguration({ runAudit, policy, forPush: true });
+      if (!configAudit.ok) {
+        const result = configAudit.result ?? {};
+        return pushFailureResult({
+          reason: configAudit.reason,
+          details: configAudit.details,
+          executionOk: configAudit.execution_ok,
+          expectedHead: normalized.expectedHead,
+          exitCode: result.exit_code ?? null,
+          signal: result.signal ?? null,
+          timedOut: result.timed_out === true,
+          stderr: result.stderr ?? "",
+          stderrTruncated: result.stderr_truncated === true,
           durationMs: Date.now() - startedAt,
         });
       }
