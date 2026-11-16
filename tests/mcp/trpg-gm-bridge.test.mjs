@@ -43,3 +43,24 @@ assert.equal((await boundary.authorize({method:'tools/call',params:{name:attachm
 assert.equal(boundary.gmOnly,true);
 assert.equal(boundary.isToolAllowed(attachment),true);
 assert.equal(boundary.isToolAllowed('dev_mcp_reload'),false);
+
+const review='trpg.gm.get_scenario_import',preview='trpg.gm.preview_scenario_publish',publish='trpg.gm.publish_scenario';
+const definitions=[review,preview,publish].map(name=>({
+ name,description:'Synthetic scenario lifecycle tool',risk:name===review?'read':'high-risk-write',
+ annotations:{readOnlyHint:name===review},inputSchema:{type:'object',additionalProperties:false},
+ handler:async args=>({content:[{type:'text',text:JSON.stringify(args)}]}),
+}));
+const lifecycle=await loadTRPGGMBridge({disabled:false,load:async()=>({loadWriterWorkbenchBridge:async()=>({
+ protocol:'trpg-writer-workbench-bridge/1.0',tools:definitions,instruction:'Synthetic scoped TRPG lifecycle',
+})})});
+assert.deepEqual(lifecycle.tools.map(t=>t.name),[review,preview,publish]);
+const exact={campaign_id:'synthetic',version_id:'synthetic-version',preview_revision:1,preview_token:'synthetic-token',approved:true};
+assert.deepEqual(JSON.parse((await lifecycle.callTool(publish,exact)).content[0].text),exact);
+assert.match(trpgPublicToolDefinition(lifecycle.tools[2])._meta['trpg/approval'],/exact preview receipt/);
+assert.equal(trpgPublicToolDefinition(lifecycle.tools[2])._meta['openai/fileParams'],undefined);
+const lifecycleBoundary=createWorkbenchTransportBoundary({ipc:false});
+assert.equal((await lifecycleBoundary.authorize({method:'tools/call',params:{name:review}})).ok,true);
+assert.equal(lifecycleBoundary.gmOnly,true);
+assert.equal(lifecycleBoundary.isToolAllowed(preview),true);
+assert.equal(lifecycleBoundary.isToolAllowed(publish),true);
+assert.equal((await lifecycleBoundary.authorize({method:'tools/call',params:{name:'dev_mcp_reload'}})).code,'GM_CONNECTION_TOOL_DENIED');
