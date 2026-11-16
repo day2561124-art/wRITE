@@ -47,3 +47,7 @@ These are isolated source/loopback tests. Public-proxy health/readiness routing,
 
 When the paired TRPG loopback gateway advertises `trpg.gm.stage_scenario_attachment`, the existing Nexa descriptor exposes its `file` argument through ChatGPT's native file-parameter metadata. It stays in the GM-only dispatch path, outside general Writer host execution and journals. The gateway validates write scope and stages only a deduplicated private draft. The existing OAuth URL and plugin identity do not change. Source validation alone does not verify live App discovery or user attachment delivery.
 With GM-only purpose, the HTTP parent returns the child GM catalog unchanged and denies parent engineering actions; the normal Nexa engineering connection remains separate.
+
+## Delegated scenario publication
+
+When the paired TRPG gateway provides the separate scenario-publication grant, this host exposes only the exact additional names `trpg.gm.get_scenario_import`, `trpg.gm.preview_scenario_publish`, and `trpg.gm.publish_scenario`. They stay in the same authenticated GM-only boundary. The adapter does not grant this privilege, issue an approval or change the publication plan. TRPG binds an expiring receipt to the reviewed revision, actor, campaign, and credential. Use a campaign-specific authorization before accepting the plan. An uncertain publication is verified with the status tool or retried with the exact receipt, never by silently making a new plan.
