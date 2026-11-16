@@ -369,6 +369,11 @@ function Start-McpTailscale {
     return $false
   }
 
+  if (-not (Start-WorkbenchOAuth)) {
+    Write-Host "OAuth is not ready. Tailscale Funnel was left unchanged." -ForegroundColor Yellow
+    return $false
+  }
+
   return (Invoke-McpTunnelLauncher $script)
 }
 
@@ -478,7 +483,7 @@ function Show-Menu {
     Write-Host "  4. Run full validation"
     Write-Host "  5. Create desktop shortcut"
     Write-Host "  6. Stop UI"
-    Write-Host "  7. Start MCP + Tailscale Funnel (primary)"
+    Write-Host "  7. Start MCP + OAuth + Tailscale Funnel (primary)"
     Write-Host "  8. Start Writer Workbench OAuth (background)"
     Write-Host "  9. Start / Restart Writer Workbench Secure Tunnel"
     Write-Host "  10. Show Writer Workbench Secure Tunnel Status"

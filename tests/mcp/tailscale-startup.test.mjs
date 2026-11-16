@@ -22,6 +22,89 @@ async function powershell(script, cwd = root, env = {}) {
   });
 }
 
+
+test('primary Funnel starts only the OAuth proxy route after verifying local OAuth', async () => {
+  const start = launcher.slice(launcher.lastIndexOf('if (-not (Test-WorkbenchOAuthProxy))'));
+  const menu = await fs.readFile(path.join(root, 'launcher.ps1'), 'utf8');
+  const option = menu.slice(menu.indexOf('function Start-McpTailscale'), menu.indexOf('function Show-McpTailscaleStatus'));
+  assert.match(option, /if \(-not \(Start-WorkbenchOAuth\)\)[\s\S]+return \$false[\s\S]+Invoke-McpTunnelLauncher/u);
+  assert.match(start, /Test-WorkbenchOAuthProxy[\s\S]+Ensure-McpServer[\s\S]+funnel --bg --https=443 \$OAuthProxyUrl/u);
+  assert.match(launcher, /\$OAuthProxyUrl = "http:\/\/127\.0\.0\.1:8788"/u);
+  assert.doesNotMatch(launcher, /funnel --bg[^\r\n]*\$McpPort/u);
+  assert.match(start, /if \(-not \$funnel\.ProxyMatches\) \{/u);
+  assert.match(start, /Test-PublicOAuthDiscovery \$funnel\.BaseUrl/u);
+  assert.doesNotMatch(start, /Invoke-McpProbe/u);
+});
+
+test('PowerShell Funnel status recognises the OAuth root, not a direct or unrelated route', {skip:process.platform!=='win32'}, async t => {
+  const f = await fixture(t);
+  const result = await powershell(definitions + `
+$ErrorActionPreference = 'Stop'
+function Get-TailscaleServiceState { return [pscustomobject]@{Present=$true;Running=$true} }
+function Invoke-FakeTailscale {
+  $script:LASTEXITCODE = 0
+  $script:statusFixture
+}
+$fake = [pscustomobject]@{Source='Invoke-FakeTailscale'}
+$script:statusFixture = @('# Funnel on:', '#     - https://workbench.example.ts.net', '',
+  'https://workbench.example.ts.net (Funnel on)', '|-- / proxy http://127.0.0.1:8788')
+$status = Get-FunnelStatusInfo $fake
+if (-not $status.ProxyMatches -or $status.McpUrl -ne 'https://workbench.example.ts.net/mcp') { throw 'OAUTH_ROOT_NOT_RECOGNISED' }
+foreach ($different in @('|-- / proxy http://127.0.0.1:8787', '|-- /other proxy http://127.0.0.1:8788', '|-- / proxy http://127.0.0.1:87880')) {
+  $script:statusFixture[4] = $different
+  if ((Get-FunnelStatusInfo $fake).ProxyMatches) { throw 'INCORRECT_ROUTE_ACCEPTED' }
+}
+$script:statusFixture = @('https://workbench.example.ts.net (Funnel on)', '|-- / proxy http://127.0.0.1:8787',
+  'https://workbench.example.ts.net:8443 (Funnel on)', '|-- / proxy http://127.0.0.1:8788')
+if ((Get-FunnelStatusInfo $fake).ProxyMatches) { throw 'NONDEFAULT_PORT_ACCEPTED' }
+`, f.dir);
+  assert.equal(result.code, 0, result.output);
+});
+
+test('PowerShell primary Funnel reuses 8788, replaces the old target, and leaves the route alone when OAuth is down', {skip:process.platform!=='win32'}, async t => {
+  const f = await fixture(t);
+  const start = launcher.slice(launcher.lastIndexOf('if (-not (Test-WorkbenchOAuthProxy))'));
+  const script = `
+$OAuthProxyUrl = 'http://127.0.0.1:8788'
+$McpPort = 8787
+$PublicReadyTimeoutSeconds = 2
+$tailscale = [pscustomobject]@{Source='Invoke-FakeTailscale'}
+$script:targetGood = $env:NEXA_FIXTURE_CASE -in @('reuse', 'no-discovery')
+function Test-WorkbenchOAuthProxy { return $env:NEXA_FIXTURE_CASE -ne 'unavailable' }
+function Ensure-McpServer { Write-Host 'BACKEND_CHECKED' }
+function Get-FunnelStatusInfo {
+  return [pscustomobject]@{ProxyMatches=$script:targetGood;BaseUrl='https://workbench.example.ts.net';McpUrl='https://workbench.example.ts.net/mcp'}
+}
+function Invoke-FakeTailscale {
+  if (($args -join ' ') -ne 'funnel --bg --https=443 http://127.0.0.1:8788') { throw 'UNEXPECTED_FUNNEL_COMMAND' }
+  $script:targetGood = $true
+  $script:LASTEXITCODE = 0
+  Write-Host 'FUNNEL_UPDATED'
+}
+function Test-PublicOAuthDiscovery {
+  param([string]$BaseUrl, [int]$TimeoutSeconds)
+  return $env:NEXA_FIXTURE_CASE -ne 'no-discovery' -and $script:targetGood -and $BaseUrl -eq 'https://workbench.example.ts.net' -and $TimeoutSeconds -ge 1
+}
+` + start;
+  for (const scenario of ['reuse', 'replace', 'unavailable', 'no-discovery']) {
+    const result = await powershell(script, f.dir, {NEXA_FIXTURE_CASE:scenario});
+    assert.equal(result.code, ['unavailable', 'no-discovery'].includes(scenario) ? 1 : 0, result.output);
+    if (scenario === 'unavailable') {
+      assert.match(result.output, /Funnel was left unchanged/u);
+      assert.doesNotMatch(result.output, /BACKEND_CHECKED|FUNNEL_UPDATED/u);
+    } else if (scenario === 'no-discovery') {
+      assert.match(result.output, /public OAuth discovery could not be verified/u);
+      assert.doesNotMatch(result.output, /FUNNEL_UPDATED/u);
+    } else {
+      assert.match(result.output, /BACKEND_CHECKED/u);
+      assert.match(result.output, /public OAuth discovery verified/u);
+      if (scenario === 'replace') assert.match(result.output, /FUNNEL_UPDATED/u);
+      else assert.doesNotMatch(result.output, /FUNNEL_UPDATED/u);
+    }
+  }
+});
+
+
 test('actual Ensure-McpServer cold start, reuse and restart pass local health and separate authenticated full protocol', {skip:process.platform!=='win32'}, async t => {
   const f=await fixture(t);
   const port=await new Promise(resolve=>{const s=net.createServer();s.listen(0,'127.0.0.1',()=>{const p=s.address().port;s.close(()=>resolve(p));});});

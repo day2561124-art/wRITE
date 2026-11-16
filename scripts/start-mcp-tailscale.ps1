@@ -20,6 +20,7 @@ $LogDir = if ($LogDirectory) {
   Join-Path $Root "data\outputs\logs"
 }
 $OriginUrl = "http://127.0.0.1:$McpPort"
+$OAuthProxyUrl = "http://127.0.0.1:8788"
 # Listener admission: 15s. Local health and separate protocol probes are bounded.
 
 function Invoke-McpProbe {
@@ -182,50 +183,64 @@ function Get-TailscaleServiceState {
   }
 }
 
+function Test-WorkbenchOAuthProxy {
+  try {
+    $response = Invoke-WebRequest -UseBasicParsing -Uri "$OAuthProxyUrl/health" -TimeoutSec 2 -MaximumRedirection 0
+    $health = $response.Content | ConvertFrom-Json
+    return ($response.StatusCode -eq 200 -and
+      $response.Headers["x-workbench-security-protocol"] -eq "trpg-workbench-security/1.0" -and
+      $health.service -eq "workbench-mcp-security" -and
+      $health.protocol -eq "trpg-workbench-security/1.0" -and $health.mode -ne "shield")
+  } catch {
+    return $false
+  }
+}
+
+function Test-PublicOAuthDiscovery {
+  param([string]$BaseUrl, [int]$TimeoutSeconds)
+  try {
+    $response = Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/.well-known/oauth-protected-resource/mcp" -TimeoutSec $TimeoutSeconds -MaximumRedirection 0
+    $metadata = $response.Content | ConvertFrom-Json
+    $issuers = @($metadata.authorization_servers)
+    return ($response.StatusCode -eq 200 -and
+      $response.Headers["x-workbench-security-protocol"] -eq "trpg-workbench-security/1.0" -and
+      $metadata.resource -ceq "$BaseUrl/mcp" -and $issuers.Count -eq 1 -and $issuers[0] -ceq "$BaseUrl/oauth")
+  } catch {
+    return $false
+  }
+}
+
 function Get-FunnelStatusInfo {
-  param(
-    $Tailscale,
-    [string]$ExpectedInstance = "",
-    [int]$ProbeBudgetMilliseconds = 60000
-  )
+  param($Tailscale)
 
   $service = Get-TailscaleServiceState
-  if (-not $Tailscale) {
-    return [pscustomobject]@{
-      Service = $service
-      BaseUrl = $null
-      McpUrl = $null
-      ProxyMatches = $false
-      PublicHealthy = $false
-      Status = "tailscale-not-found"
-      Raw = ""
+  $baseUrl = $null
+  $proxyMatches = $false
+  if ($Tailscale) {
+    try {
+      $inDefaultFunnel = $false
+      $statusLines = @(& $Tailscale.Source funnel status 2>&1)
+      if ($LASTEXITCODE -ne 0) { throw "Could not read Funnel status." }
+      foreach ($line in $statusLines) {
+        if ([string]$line -match '^https://') {
+          $inDefaultFunnel = [string]$line -match '^(https://[a-zA-Z0-9.-]+\.ts\.net)(?::443)?/?[ \t]+\(Funnel on\)[ \t]*$'
+          if ($inDefaultFunnel) {
+            if ($baseUrl) { throw "More than one default Funnel was reported." }
+            $baseUrl = $Matches[1]
+          }
+        } elseif ($inDefaultFunnel -and [string]$line -match '^\s*\|--\s+/?\s*proxy\s+http://127\.0\.0\.1:8788/?\s*$') {
+          $proxyMatches = $true
+        }
+      }
+    } catch {
+      $baseUrl = $null
+      $proxyMatches = $false
     }
   }
 
-  $statusText = ""
-  try {
-    $statusText = (& $Tailscale.Source funnel status 2>&1 | Out-String)
-  } catch {
-    $statusText = [string]$_.Exception.Message
-  }
-
-  $urls = @(
-    [regex]::Matches($statusText, 'https://[a-zA-Z0-9.-]+\.ts\.net') |
-      ForEach-Object { $_.Value.TrimEnd("/") } |
-      Select-Object -Unique
-  )
-  $baseUrl = if ($urls.Count -gt 0) { [string]$urls[0] } else { $null }
-  $proxyPattern = 'proxy\s+http://127\.0\.0\.1:' + [regex]::Escape([string]$McpPort) + '(?:/|\s|$)'
-  $proxyMatches = [bool]($statusText -match $proxyPattern)
-  $mcpUrl = if ($baseUrl) { "$baseUrl/mcp" } else { $null }
-
-  $publicHealthy = $false
-  if ($service.Running -and $proxyMatches -and $mcpUrl -and $ExpectedInstance) {
-    $publicProbe = Invoke-McpProbe $mcpUrl "probe" $ExpectedInstance $ProbeBudgetMilliseconds
-    $publicHealthy = [bool]$publicProbe
-  }
-
-  $statusName = if (-not $service.Present) {
+  $statusName = if (-not $Tailscale) {
+    "tailscale-not-found"
+  } elseif (-not $service.Present) {
     "tailscale-service-missing"
   } elseif (-not $service.Running) {
     "tailscale-service-stopped"
@@ -233,10 +248,6 @@ function Get-FunnelStatusInfo {
     "funnel-stopped"
   } elseif (-not $proxyMatches) {
     "funnel-target-mismatch"
-  } elseif ($ExpectedInstance -and $publicHealthy) {
-    "registered / healthy"
-  } elseif ($ExpectedInstance) {
-    "registered / unverified"
   } else {
     "registered"
   }
@@ -244,11 +255,9 @@ function Get-FunnelStatusInfo {
   return [pscustomobject]@{
     Service = $service
     BaseUrl = $baseUrl
-    McpUrl = $mcpUrl
+    McpUrl = $(if ($baseUrl) { "$baseUrl/mcp" })
     ProxyMatches = $proxyMatches
-    PublicHealthy = $publicHealthy
     Status = $statusName
-    Raw = $statusText
   }
 }
 
@@ -378,38 +387,32 @@ function Ensure-McpServer {
 }
 
 function Show-TailscaleStatus {
-  # Launcher/menu status must stay fast. Full MCP protocol validation is performed
-  # when the primary tunnel is started or restarted, not on every menu refresh.
-  $localListening = Test-McpPortOpen
+  # Menu status stays local. Only startup checks public OAuth discovery.
+  $localListening = ($McpPort -eq 8787) -and (Test-McpPortOpen)
+  $oauthReady = Test-WorkbenchOAuthProxy
   $tailscale = Resolve-Tailscale
-  $funnel = Get-FunnelStatusInfo $tailscale ""
+  $funnel = Get-FunnelStatusInfo $tailscale
 
   Write-Host "Local MCP: $(if ($localListening) { "listening" } else { "stopped" })"
   Write-Host "Tailscale service: $(if ($funnel.Service.Running) { "running" } else { $funnel.Service.Status })"
 
-  $displayStatus = if (
-    $localListening -and
-    $funnel.Service.Running -and
-    $funnel.ProxyMatches -and
-    $funnel.McpUrl
-  ) {
-    "configured / ready"
+  $configured = $localListening -and $oauthReady -and $funnel.Service.Running -and $funnel.ProxyMatches
+  $displayStatus = if ($configured) {
+    "configured / OAuth proxy ready"
+  } elseif ($funnel.Status -eq "registered" -and -not $oauthReady) {
+    "registered / OAuth proxy not ready"
+  } elseif ($funnel.Status -eq "registered" -and -not $localListening) {
+    "registered / local MCP stopped"
   } else {
     $funnel.Status
   }
-  Write-Host "Funnel status: $displayStatus" -ForegroundColor $(if ($displayStatus -eq "configured / ready") { "Green" } elseif ($displayStatus -like "registered*") { "Yellow" } else { "Red" })
+  Write-Host "Funnel status: $displayStatus" -ForegroundColor $(if ($configured) { "Green" } else { "Yellow" })
 
-  if ($funnel.McpUrl) {
+  if ($funnel.ProxyMatches -and $funnel.McpUrl) {
     Write-Host "ChatGPT MCP URL:" -ForegroundColor Green
     Write-Host $funnel.McpUrl -ForegroundColor Cyan
   }
-
-  return (
-    $localListening -and
-    $funnel.Service.Running -and
-    $funnel.ProxyMatches -and
-    [bool]$funnel.McpUrl
-  )
+  return $configured
 }
 
 if ($EnsureMcpOnly) {
@@ -434,6 +437,10 @@ if ($StopFunnel) {
   exit 0
 }
 
+if ($McpPort -ne 8787) {
+  throw "The primary OAuth Funnel requires local MCP on port 8787. Use -EnsureMcpOnly for a separate local listener."
+}
+
 if (-not $tailscale) {
   throw "tailscale.exe was not found. Install Tailscale first."
 }
@@ -451,36 +458,46 @@ if (-not $service.Running) {
   }
 }
 
-$current = Ensure-McpServer
+if (-not (Test-WorkbenchOAuthProxy)) {
+  throw "Writer Workbench OAuth is not ready on 127.0.0.1:8788. Start it with launcher option 8. Tailscale Funnel was left unchanged."
+}
+
+Ensure-McpServer | Out-Null
 Write-Host "MCP_PORT=$McpPort"
 
-Write-Host "`n=== Tailscale Funnel (primary) ==="
-& $tailscale.Source funnel --bg $McpPort
-if ($LASTEXITCODE -ne 0) {
-  throw "tailscale funnel failed with exit code $LASTEXITCODE."
+Write-Host "`n=== Tailscale Funnel (primary, OAuth) ==="
+$funnel = Get-FunnelStatusInfo $tailscale
+if (-not $funnel.ProxyMatches) {
+  & $tailscale.Source funnel --bg --https=443 $OAuthProxyUrl
+  if ($LASTEXITCODE -ne 0) {
+    throw "tailscale funnel failed with exit code $LASTEXITCODE."
+  }
 }
 
 $publicWatch = [Diagnostics.Stopwatch]::StartNew()
-$funnel = $null
+$publicVerified = $false
 do {
-  $remainingMs = [int]($PublicReadyTimeoutSeconds * 1000 - $publicWatch.ElapsedMilliseconds)
-  if ($remainingMs -lt 2000) { break }
-  $funnel = Get-FunnelStatusInfo $tailscale ([string]$current.instanceId) $remainingMs
-  if ($funnel.Status -eq "registered / healthy") { break }
+  $remainingSeconds = [int][Math]::Floor($PublicReadyTimeoutSeconds - $publicWatch.Elapsed.TotalSeconds)
+  $funnel = Get-FunnelStatusInfo $tailscale
+  if ($funnel.ProxyMatches -and $funnel.BaseUrl) {
+    $publicVerified = Test-PublicOAuthDiscovery $funnel.BaseUrl ([Math]::Max(1, [Math]::Min(5, $remainingSeconds)))
+    if ($publicVerified) { break }
+  }
+  if (($PublicReadyTimeoutSeconds - $publicWatch.Elapsed.TotalSeconds) -lt 1) { break }
   Start-Sleep -Milliseconds 1000
-} while ($publicWatch.ElapsedMilliseconds -lt ($PublicReadyTimeoutSeconds * 1000))
+} while ($publicWatch.Elapsed.TotalSeconds -lt $PublicReadyTimeoutSeconds)
 
-if (-not $funnel -or -not $funnel.McpUrl) {
-  throw "Tailscale Funnel started, but no public ts.net URL was reported."
+if (-not $funnel.ProxyMatches -or -not $funnel.McpUrl) {
+  throw "Tailscale Funnel does not show the expected OAuth proxy target on 127.0.0.1:8788."
 }
 
 Write-Host "ChatGPT MCP URL:" -ForegroundColor Green
 Write-Host $funnel.McpUrl -ForegroundColor Cyan
 
-if ($funnel.Status -ne "registered / healthy") {
-  Write-Host "Funnel is configured, but public protocol verification failed: $(Get-McpProbeFailureSummary)." -ForegroundColor Yellow
+if (-not $publicVerified) {
+  Write-Host "Funnel targets the OAuth proxy, but public OAuth discovery could not be verified." -ForegroundColor Yellow
   exit 1
 }
 
-Write-Host "Tailscale Funnel registered / healthy; public initialize, tools/list, resources/list, readiness and ping passed." -ForegroundColor Green
+Write-Host "Funnel and public OAuth discovery verified. Confirm tool access with a read-only call from ChatGPT." -ForegroundColor Green
 exit 0
