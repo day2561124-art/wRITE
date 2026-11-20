@@ -977,6 +977,7 @@ const steps = [
   ["Observer dialogue answer provenance", ["tests/communication/observer-dialogue-answer.test.mjs"]],
   ["Timestamped observer panel memory", ["tests/communication/observer-dialogue-panel-memory.test.mjs"]],
   ["Native dialogue learning", ["tests/communication/observer-dialogue-native-learning.test.mjs"]],
+  ["Native dialogue reference boundaries", ["tests/communication/observer-dialogue-native-references.test.mjs"]],
   ["Native dialogue and prior panel memory", ["tests/communication/observer-dialogue-native-description.test.mjs"]],
   ["Native movement and fresh panel recheck", ["tests/communication/observer-dialogue-native-panel-recheck.test.mjs"]],
   ["CC-7A subjective turn projection and response preparation", ["tests/communication/cc7-turn-projection.test.mjs"]],

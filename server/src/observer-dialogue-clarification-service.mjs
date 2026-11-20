@@ -40,6 +40,24 @@ export function admitDialogueClarificationTarget({
   return {observer, partner: speaker, ...(clarification.request ? {request: clarification.request} : {})};
 }
 
+// A live reference belongs to a verified speaker and scene, not simply the
+// observer's most recent thought. The last listener turn must be immediately
+// followed by the current partner's speech in the same committed lineage.
+export function recentDialogueThreadAnchor({observer, sceneId, history, snapshot}) {
+  const [anchorTurn, speechTurn] = list(history?.turns).slice(-2);
+  if (!anchorTurn || !speechTurn || !sceneId || !snapshot
+      || sceneOf(anchorTurn) !== sceneId || sceneOf(speechTurn) !== sceneId
+      || anchorTurn.revision_to !== speechTurn.revision_from
+      || anchorTurn.next_state_hash !== speechTurn.previous_state_hash
+      || speechTurn.revision_to !== snapshot.revision || speechTurn.next_state_hash !== snapshot.state_hash) return null;
+  const anchors = list(anchorTurn.dialogue_thread_anchors).filter(item => item?.observer === observer
+    && typeof item.partner === "string" && item.partner && item.partner !== observer && /^learned_[a-f0-9]{24}$/u.test(item.referent)
+    && ["focused", "paused"].includes(item.kind));
+  if (anchors.length !== 1) return null;
+  const [anchor] = anchors;
+  return directSpeech(speechTurn, anchor.partner, observer).length === 1 ? anchor : null;
+}
+
 export function stageDialogueClarificationRequest(target, actionId) {
   return target?.request && typeof actionId === "string"
     ? {...target, action_id: actionId, version} : null;
