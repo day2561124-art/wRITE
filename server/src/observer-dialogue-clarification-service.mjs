@@ -1,6 +1,11 @@
 import { hashAgentRunValue } from "./agent-run-service.mjs";
 
 const version = "observer-dialogue-clarification-v1";
+const correctionQuestion = {request_field: "runtime", answer_kind: "max_countdown"};
+const sameTurnPair = (first, second, sceneId, snapshot) => Boolean(first && second && sceneId && snapshot
+  && sceneOf(first) === sceneId && sceneOf(second) === sceneId
+  && first.revision_to === second.revision_from && first.next_state_hash === second.previous_state_hash
+  && second.revision_to === snapshot.revision && second.next_state_hash === snapshot.state_hash);
 const list = value => Array.isArray(value) ? value : [];
 const sceneOf = turn => turn?.event?.scene_id ?? turn?.event?.location_id ?? null;
 export const dialogueClarificationQuestion = "你指的是哪一件？";
@@ -40,22 +45,91 @@ export function admitDialogueClarificationTarget({
   return {observer, partner: speaker, ...(clarification.request ? {request: clarification.request} : {})};
 }
 
-// A live reference belongs to a verified speaker and scene, not simply the
-// observer's most recent thought. The last listener turn must be immediately
-// followed by the current partner's speech in the same committed lineage.
+// Only correctly attributed, understood speech from the same committed
+// emission can provide shared context. Listener interpretation is subjective:
+// two listeners count as sharing a cue only if their interpretations match.
+export function dialogueHearingAttestations({observer, sceneId, history, understanding, receipts}) {
+  const turn = list(history?.turns).at(-1);
+  if (!sceneId || sceneOf(turn) !== sceneId || understanding?.observer !== observer
+      || understanding?.version !== "cc6c-listener-speech-understanding-v1") return [];
+  const results = [];
+  for (const receipt of list(receipts)) {
+    if (receipt.observer !== observer || !receipt.speaker || typeof receipt.semantic_content !== "string") continue;
+    const heard = list(understanding.audit?.decisions).filter(decision => decision.source_action_id === receipt.source_action_id
+      && decision.source_speaker === receipt.speaker && decision.source_turn_id === turn.turn_id
+      && decision.reception_verified === true);
+    if (heard.length !== 1 || !heard[0].speech_candidate_id) continue;
+    results.push({observer, emission: hashAgentRunValue({
+      turn_id: turn.turn_id, action_id: receipt.source_action_id, speaker: receipt.speaker,
+      interpreted: receipt.semantic_content,
+    }), receipt_hash: hashAgentRunValue(receipt)});
+  }
+  return results;
+}
+
+export function dialogueThreadAnchorsWithAudience(anchors, attestations) {
+  return list(anchors).map(({receipt_hash, ...anchor}) => {
+    const matches = list(attestations).filter(item => item.observer === anchor.observer
+      && item.receipt_hash === receipt_hash && item.emission);
+    if (matches.length !== 1 || anchor.kind !== "focused") return anchor;
+    const shared = [...new Set(list(attestations).filter(item => item.emission === matches[0].emission
+      && item.observer !== anchor.observer && item.observer !== anchor.partner).map(item => item.observer))];
+    return shared.length ? {...anchor, shared_with: shared} : anchor;
+  });
+}
+
+// The immediate follow-up may come from the original partner or from a
+// bystander who shared the actual understood cue, never from presence alone.
 export function recentDialogueThreadAnchor({observer, sceneId, history, snapshot}) {
   const [anchorTurn, speechTurn] = list(history?.turns).slice(-2);
-  if (!anchorTurn || !speechTurn || !sceneId || !snapshot
-      || sceneOf(anchorTurn) !== sceneId || sceneOf(speechTurn) !== sceneId
-      || anchorTurn.revision_to !== speechTurn.revision_from
-      || anchorTurn.next_state_hash !== speechTurn.previous_state_hash
-      || speechTurn.revision_to !== snapshot.revision || speechTurn.next_state_hash !== snapshot.state_hash) return null;
+  if (!sameTurnPair(anchorTurn, speechTurn, sceneId, snapshot)) return null;
   const anchors = list(anchorTurn.dialogue_thread_anchors).filter(item => item?.observer === observer
     && typeof item.partner === "string" && item.partner && item.partner !== observer && /^learned_[a-f0-9]{24}$/u.test(item.referent)
     && ["focused", "paused"].includes(item.kind));
   if (anchors.length !== 1) return null;
   const [anchor] = anchors;
-  return directSpeech(speechTurn, anchor.partner, observer).length === 1 ? anchor : null;
+  const eligible = new Set([anchor.partner, ...(anchor.kind === "focused" ? list(anchor.shared_with) : [])]);
+  const speakers = [...eligible].filter(partner => directSpeech(speechTurn, partner, observer).length === 1);
+  return speakers.length === 1 ? {...anchor, partner: speakers[0]} : null;
+}
+
+// Use the selected surface's reply shape, not a planner's private intent.
+const durationReply = /(?:最多能倒數|上限是|我猜(?:它能倒數|是)|應該是)[0-9零一二兩三四五六七八九十百千]+(?:秒|分鐘|小時)[。！!]?$/u;
+
+// Capture a candidate question only when the observer actually made a
+// selected and emitted response to its verified original speaker.
+export function committedDialogueAnswerFollowups(questions, selections, outcomes) {
+  const followups = [];
+  for (const question of list(questions)) {
+    const {observer, partner} = question;
+    const replies = directSpeech({action_outcomes: outcomes}, observer, partner);
+    if (replies.length !== 1) continue;
+    const [reply] = replies;
+    const selected = list(selections).filter(row => row.character === observer && row.action_id === reply.action_id);
+    const spoken = reply.communication_event.surface_text;
+    if (selected.length !== 1 || typeof spoken !== "string" || !durationReply.test(spoken.normalize("NFKC").trim())) continue;
+    followups.push({observer, partner, response_action_id: reply.action_id});
+  }
+  return followups;
+}
+
+export function admitDialogueAnswerCorrection({observer, sceneId, history, snapshot, understanding, receipts}) {
+  const [responseTurn, correctionTurn] = list(history?.turns).slice(-2);
+  if (!sameTurnPair(responseTurn, correctionTurn, sceneId, snapshot)) return null;
+  const matches = list(responseTurn.dialogue_answer_followups).filter(item => item.observer === observer);
+  if (matches.length !== 1) return null;
+  const {partner, response_action_id} = matches[0];
+  if (directSpeech(responseTurn, observer, partner).filter(row => row.action_id === response_action_id).length !== 1) return null;
+  const listening = list(correctionTurn.communication_listener_understanding_projections).filter(row => row.character === partner);
+  const recognition = list(correctionTurn.communication_speaker_recognition_projections).filter(row => row.character === partner);
+  if (listening.length !== 1 || recognition.length !== 1) return null;
+  const heard = list(listening[0].audit?.decisions).filter(row => row.source_turn_id === responseTurn.turn_id
+    && row.source_action_id === response_action_id && row.source_speaker === observer && row.reception_verified === true);
+  if (heard.length !== 1 || list(recognition[0].audit?.decisions).filter(row => row.speech_candidate_id === heard[0].speech_candidate_id
+    && row.listener_understanding_attested === true && row.speech_content_intelligible === true
+    && row.perceived_speaker_matches_world_source === true).length !== 1) return null;
+  const receipt = receivedDirectSpeech({observer, speaker: partner, turn: correctionTurn, understanding, receipts});
+  return receipt ? {...correctionQuestion, receipt_hash: hashAgentRunValue(receipt)} : null;
 }
 
 export function stageDialogueClarificationRequest(target, actionId) {

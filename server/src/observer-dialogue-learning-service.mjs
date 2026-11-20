@@ -253,6 +253,28 @@ function analyzeDescriptiveSource({character, source, lines, registry, named, pr
     : null};
 }
 
+// A full directed correction can complete a recent question without
+// becoming a fact/assertion about the corrected object.
+function resolveNamedCorrection(reply, sources, registry) {
+  if (reply?.request_field !== "runtime" || reply.answer_kind !== "max_countdown") return null;
+  const received = sources.filter(item => item.receipt_hash === reply.receipt_hash);
+  if (received.length !== 1 || uncertainty.test(received[0].text)) return null;
+  const text = received[0].text.normalize("NFKC").trim();
+  const match = /^(?:(?:不是|不對)[,，]\s*)?(?:(?:我)?(?:說|指|問)的是)\s*(.+?)[。！!]?$/u.exec(text);
+  if (!match) return null;
+  const supplied = match[1].trim();
+  const quoted = /^(?:「([^」]+)」|『([^』]+)』|“([^”]+)”|"([^"]+)")$/u.exec(supplied);
+  const name = permittedName(quoted ? quoted.slice(1).find(value => value !== undefined) : supplied);
+  if (!name) return null;
+  const entries = [...registry.values()].filter(entry => [entry.name, ...entry.aliases]
+    .some(value => value && normalize(value) === normalize(name)));
+  if (entries.length !== 1) return null;
+  return {scope: focusOn(entries[0].id, received[0].text), field: reply.request_field, answer_kind: reply.answer_kind,
+    from_correction: true};
+}
+
+export const isDialogueCountdownQuestion = text => typeof text === "string" && answerKind(text) === "max_countdown";
+
 function resolveClarificationFragment(reply, sources, registry) {
   if (!reply || !factTypes.some(([name]) => name === reply.request_field)) return null;
   const descriptor = dialogueDescriptorQuery(reply.request_descriptor);
@@ -279,7 +301,7 @@ function resolveClarificationFragment(reply, sources, registry) {
 // objects or the text of another character. A candidate binding is ephemeral.
 export function analyzeObserverDialogueLearning({
   character, perception, memories, previousReferent, pausedReferent, verifiedReceiptHashes, clarificationReply,
-  allowDialogueContinuation,
+  allowDialogueContinuation, answerCorrection,
 }) {
   const sources = observerLearningObservations(perception, character, verifiedReceiptHashes);
   const registry = localRegistry(memories);
@@ -289,6 +311,7 @@ export function analyzeObserverDialogueLearning({
   const clarifications = [];
   let ambiguous = false;
   let unresolvedDescription = false;
+  const inheritedQuestions = new Set();
   for (const source of sources) {
     const {text} = source;
     const namedMatch = nameMentions(text, registry);
@@ -325,12 +348,15 @@ export function analyzeObserverDialogueLearning({
     // A nameless turn may only carry a verified conversational referent.
     // An explicit introduction, name or description remains usable across
     // partners and scenes. Refusing a binding is not a ban on speculative talk.
+    const bareQuestion = /^(?:那[，,\s]*)?(?:它|那(?:個|台|臺|支|顆|套)|這(?:個|台|臺|支|顆|套))(?:呢[？?。]?|[？?])$/u
+      .test(text.trim());
     const pronoun = !introducedName && !named.length && question.test(text)
-      && /^(?:那(?:個|台|臺|支|顆|套)|這(?:個|台|臺|支|顆|套)|它)[\s，,]*(?:還|能|可以|在哪|要|可不可以|多久|放)/u.test(text);
+      && (bareQuestion || /^(?:那[，,\s]*)?(?:那(?:個|台|臺|支|顆|套)|這(?:個|台|臺|支|顆|套)|它)[\s，,]*(?:還|能|可以|在哪|要|可不可以|多久|放)/u.test(text));
     const wantsResume = !introducedName && !named.length && resume.test(text);
     const candidate = pronoun ? previous : wantsResume ? registry.get(pausedReferent) : null;
     const continuity = candidate && typeof allowDialogueContinuation === "function"
-      && allowDialogueContinuation(source, candidate.id, wantsResume ? "paused" : "focused");
+      && allowDialogueContinuation(source, candidate.id, wantsResume ? "paused" : "focused", bareQuestion);
+    if (continuity && bareQuestion) inheritedQuestions.add(text);
     if ((!introducedName && namedMatch.unidentified) || ((pronoun || wantsResume) && !continuity)) {
       ambiguous = true;
       unresolvedDescription = true;
@@ -374,13 +400,16 @@ export function analyzeObserverDialogueLearning({
   }
   const multiObject = new Set(found.map(result => result.mode + ":" + result.referent)).size > 1;
   const ordinaryScope = ambiguous || multiObject ? {mode: "ambiguous"} : found[0] ?? null;
-  const ordinaryField = ordinaryScope?.mode === "focus" ? requestedField(ordinaryScope.evidence) : null;
+  const inheritedQuestion = ordinaryScope?.mode === "focus" && inheritedQuestions.has(ordinaryScope.evidence);
+  const ordinaryField = inheritedQuestion ? "runtime" : ordinaryScope?.mode === "focus" ? requestedField(ordinaryScope.evidence) : null;
   const fragment = !ambiguous && !multiObject && !ordinaryField && bindings.size === 0
-    ? resolveClarificationFragment(clarificationReply, sources, registry) : null;
+    ? resolveClarificationFragment(clarificationReply, sources, registry)
+      ?? resolveNamedCorrection(answerCorrection, sources, registry) : null;
   const confirmed = fragment && (!ordinaryScope
     || (ordinaryScope.mode === "focus" && ordinaryScope.referent === fragment.scope.referent)) ? fragment : null;
   const scope = confirmed?.scope ?? ordinaryScope;
-  const answer = confirmed ? confirmed.answer_kind : scope?.mode === "focus" ? answerKind(scope.evidence) : null;
+  const answer = confirmed ? confirmed.answer_kind
+    : inheritedQuestion ? "max_countdown" : scope?.mode === "focus" ? answerKind(scope.evidence) : null;
   const speakers = answer ? sources.filter(source => source.text === scope?.evidence && source.speaker && source.receipt_hash) : [];
   const entry = registry.get(scope?.referent);
   const currentDescription = answer && entry && !entry.collision
@@ -394,7 +423,8 @@ export function analyzeObserverDialogueLearning({
     answer_request: answer === "max_countdown" && entry && speakers.length === 1
       ? {kind: answer, referent: entry.id, descriptor: currentDescription,
         remembered_descriptor: entry.descriptor, referent_collision: entry.collision,
-        speaker: speakers[0].speaker, receipt_hash: speakers[0].receipt_hash} : null,
+        speaker: speakers[0].speaker, receipt_hash: speakers[0].receipt_hash,
+        ...(confirmed?.from_correction ? {from_correction: true} : {})} : null,
     unresolved_description: unresolvedDescription,
     clarification: clarifications.length === 1 && !found.length ? clarifications[0] : null,
     bindings: ambiguous || multiObject ? collisionBindings : bindings,
