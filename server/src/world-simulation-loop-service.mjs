@@ -1,7 +1,8 @@
 import { analyzeObserverDialogueLearning, learnedDialogueMemoryStage, observerDialogueReferentDescriptor,
-  observerDialogueClarification, observerDialogueClarificationGoal } from "./observer-dialogue-learning-service.mjs";
-import { admitDialogueClarificationReply, admitDialogueClarificationTarget, committedDialogueClarificationRequests,
-  recentDialogueThreadAnchor, stageDialogueClarificationRequest } from "./observer-dialogue-clarification-service.mjs";
+  isDialogueCountdownQuestion, observerDialogueClarification, observerDialogueClarificationGoal } from "./observer-dialogue-learning-service.mjs";
+import { admitDialogueAnswerCorrection, admitDialogueClarificationReply, admitDialogueClarificationTarget,
+  committedDialogueAnswerFollowups, committedDialogueClarificationRequests, dialogueHearingAttestations,
+  dialogueThreadAnchorsWithAudience, recentDialogueThreadAnchor, stageDialogueClarificationRequest } from "./observer-dialogue-clarification-service.mjs";
 import { buildCharacterCommunicationActionCandidate } from "./character-communication-foundation-service.mjs";
 import { planDialogueCountdownAnswer, projectDialogueCountdownDisplay, visibleDialogueCountdownPanel } from "./observer-dialogue-answer-service.mjs";
 import { historicalDialoguePanelMemory } from "./observer-dialogue-panel-memory-service.mjs";
@@ -5137,6 +5138,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const communicationSpeakerRecognitionProjections = [];
   const dialogueClarificationProposals = [];
   const dialogueThreadAnchors = [];
+  const dialogueAudienceAttestations = [];
+  const dialogueAnswerQuestions = [];
   const dialoguePanelReceipts = [];
   const dialoguePanelQuotes = [];
   const dialoguePanelRecheckPlans = [];
@@ -5985,6 +5988,11 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       observer: character, clarification: source, sceneId: listenerSceneId, history: worldHistory,
       understanding: listenerUnderstandingProjection, receipts: understoodTestimonyReceipts,
     });
+    const dialogueHearing = {observer: character, sceneId: listenerSceneId, history: worldHistory, snapshot,
+      understanding: listenerUnderstandingProjection, receipts: understoodTestimonyReceipts};
+    if (learnsDialogue && understoodTestimonyReceipts.length) {
+      dialogueAudienceAttestations.push(...dialogueHearingAttestations(dialogueHearing));
+    }
     const liveDialogueThread = learnsDialogue && understoodTestimonyReceipts.length
       ? recentDialogueThreadAnchor({observer: character, sceneId: listenerSceneId, history: worldHistory, snapshot})
       : null;
@@ -5993,14 +6001,13 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       memories: characterMapValue(worldState.memories, character),
       previousReferent: previousConversation?.conversation_referent,
       pausedReferent: previousConversation?.conversation_paused_referent,
-      allowDialogueContinuation: (source, referent, kind) => Boolean(liveDialogueThread
+      allowDialogueContinuation: (source, referent, kind, inheritsQuestion) => Boolean(liveDialogueThread
         && liveDialogueThread.partner === source.speaker && liveDialogueThread.referent === referent
-        && liveDialogueThread.kind === kind && verifiedDialogueTarget(source)),
+        && liveDialogueThread.kind === kind && (!inheritsQuestion || liveDialogueThread.countdown_question === true)
+        && verifiedDialogueTarget(source)),
       verifiedReceiptHashes: understoodTestimonyReceipts.map(hashAgentRunValue),
-      clarificationReply: understoodTestimonyReceipts.length ? admitDialogueClarificationReply({
-        observer: character, sceneId: listenerSceneId, history: worldHistory, snapshot,
-        understanding: listenerUnderstandingProjection, receipts: understoodTestimonyReceipts,
-      }) : null,
+      clarificationReply: understoodTestimonyReceipts.length ? admitDialogueClarificationReply(dialogueHearing) : null,
+      answerCorrection: understoodTestimonyReceipts.length ? admitDialogueAnswerCorrection(dialogueHearing) : null,
     }) : null;
     const conversationScope = await resolveObserverDialogueScope({
       resolve: learnsDialogue ? async input => learnedDialogue.scope
@@ -6018,7 +6025,10 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       groundReferents: options.groundDialogueReferents === true,
     });
     // Only a locally understood, directed, committed speech turn can open a
-    // thread. Its metadata remains on the World side of the Brain boundary.
+    // thread. A real audience is joined from same-turn listener receipts below.
+    const askedCountdown = array(learnedDialogue?.sources).filter(source => isDialogueCountdownQuestion(source.text))
+      .map(verifiedDialogueTarget).filter(Boolean);
+    if (askedCountdown.length === 1) dialogueAnswerQuestions.push(askedCountdown[0]);
     const threadScope = learnedDialogue?.scope;
     const threadKind = conversationScope?.referent === threadScope?.referent && threadScope?.mode === "focus"
       ? "focused" : threadScope?.mode === "shift" && conversationScope?.paused_referent === threadScope.referent
@@ -6028,6 +6038,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       const target = sources.length === 1 ? verifiedDialogueTarget(sources[0]) : null;
       if (target) dialogueThreadAnchors.push({
         observer: character, partner: target.partner, referent: threadScope.referent, kind: threadKind,
+        receipt_hash: sources[0].receipt_hash,
+        ...(isDialogueCountdownQuestion(sources[0].text) ? {countdown_question: true} : {}),
       });
     }
     const ordinaryAnswerRequest = learnedDialogue?.answer_request;
@@ -8441,7 +8453,10 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       ? {dialogue_clarification_proposals: cloneJson(dialogueClarificationProposals)} : {}),
     ...(dialoguePanelReceipts.length ? {dialogue_panel_receipts: cloneJson(dialoguePanelReceipts)} : {}),
     ...(dialoguePanelQuotes.length ? {dialogue_panel_quotes: cloneJson(dialoguePanelQuotes)} : {}),
-    ...(dialogueThreadAnchors.length ? {dialogue_thread_anchors: cloneJson(dialogueThreadAnchors)} : {}),
+    ...(dialogueThreadAnchors.length ? {
+      dialogue_thread_anchors: dialogueThreadAnchorsWithAudience(dialogueThreadAnchors, dialogueAudienceAttestations),
+    } : {}),
+    ...(dialogueAnswerQuestions.length ? {dialogue_answer_questions: cloneJson(dialogueAnswerQuestions)} : {}),
     ...(dialoguePanelRecheckPlans.length ? {dialogue_panel_recheck_plans: cloneJson(dialoguePanelRecheckPlans)} : {}),
     communication_grounding_evidence_projections:
       cloneJson(communicationGroundingEvidenceProjections),
@@ -14137,6 +14152,11 @@ export async function resolveWorldSimulationTurn(
       ...(options.groundDialogueReferents === true && options.learnDialogueReferents === true
           && preparedTurn.dialogue_thread_anchors?.length ? {
         dialogue_thread_anchors: cloneJson(preparedTurn.dialogue_thread_anchors),
+      } : {}),
+      ...(options.groundDialogueReferents === true && options.learnDialogueReferents === true
+          && preparedTurn.dialogue_answer_questions?.length ? {
+        dialogue_answer_followups: committedDialogueAnswerFollowups(preparedTurn.dialogue_answer_questions,
+          selected, causalResolution.action_outcomes),
       } : {}),
       ...(preparedTurn.dialogue_panel_quotes?.length ? {
         dialogue_panel_quotes: committedPanelQuotes(preparedTurn.dialogue_panel_quotes, selected, causalResolution.action_outcomes),

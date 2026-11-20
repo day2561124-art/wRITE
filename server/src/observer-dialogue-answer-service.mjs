@@ -116,7 +116,7 @@ export function planDialogueCountdownAnswer({character, target, request, display
   const sourceChannel = source?.internal_provenance?.dialogue_source_channel;
   if (recalled && distinctSeconds.size === 1 && recovered && source?.content.lesson === fragment.content) {
     const auditory = ["heard_text", "understood_testimony"].includes(sourceChannel);
-    return goal(fragment.content, {omit_subject: true,
+    return goal(fragment.content, {omit_subject: true, ...(request.from_correction ? {topic: "喔"} : {}),
       pre_predicate_modifiers: [auditory ? "我記得有人說" : "我記得"],
       predicate: "最多能倒數", object: recalled.duration}, "retrieved_memory");
   }
