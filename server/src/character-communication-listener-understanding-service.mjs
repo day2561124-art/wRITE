@@ -46,9 +46,16 @@ function priorCommittedOutcomes(worldHistory) {
     })));
 }
 
-function exactCommittedOutcome(worldHistory, actionId, speaker) {
-  const matches = priorCommittedOutcomes(worldHistory).filter(({ outcome }) =>
+function exactCommittedOutcome(worldHistory, actionId, speaker, signal) {
+  const sourceTurn = signal.created_turn_id ?? null;
+  // Candidate action IDs may recur when a character says the same thing.
+  // A bridge signal belongs to a particular committed emission, not to
+  // every utterance that used the same action.
+  const matches = priorCommittedOutcomes(worldHistory).filter(({ turn_id, outcome }) =>
     record(outcome)
+    && (sourceTurn === null || (turn_id === sourceTurn
+      && outcome.communication_acoustic_signal?.registered === true
+      && outcome.communication_acoustic_signal?.sound_id === signal.sound_id))
     && outcome.action_id === actionId
     && outcome.actor === speaker
     && outcome.result === "communication_emitted"
@@ -232,7 +239,7 @@ export function buildCharacterCommunicationListenerUnderstandingResolverView(inp
       continue;
     }
 
-    const source = exactCommittedOutcome(history, actionId, speaker);
+    const source = exactCommittedOutcome(history, actionId, speaker, signal);
     if (!source) {
       skips.push({ sound_id: soundId, reason: "committed_source_outcome_not_unique" });
       continue;

@@ -2,6 +2,8 @@ import {
   hashAgentRunValue,
 } from "./agent-run-service.mjs";
 
+import { learnedDialogueLineageHash } from "./observer-dialogue-learning-service.mjs";
+
 export const worldSimulationSubjectiveEpisodeSegmentationVersion =
   "phase67a-subjective-episode-segmentation-v1";
 
@@ -186,10 +188,12 @@ function canonicalSourceMemory(worldState, source, expectedTurnId) {
     throw error;
   }
 
+  const learnedLineage = learnedDialogueLineageHash(canonical);
   return {
     character,
     memory_id: memoryId,
     memory_hash: hashAgentRunValue(canonical),
+    ...(learnedLineage ? {learned_dialogue_lineage_hash: learnedLineage} : {}),
     source_turn_id: sourceTurnId,
     scene_id: optionalString(
       canonical?.retrieval_cues?.scene_id
@@ -427,6 +431,8 @@ function groupCurrentSources(sources) {
     group.source_memory_refs.push({
       memory_id: source.memory_id,
       memory_hash: source.memory_hash,
+      ...(source.learned_dialogue_lineage_hash
+        ? {learned_dialogue_lineage_hash: source.learned_dialogue_lineage_hash} : {}),
     });
     if (source.scene_id) group.scene_ids.push(source.scene_id);
     if (source.encoded_at !== null && source.encoded_at !== undefined) {

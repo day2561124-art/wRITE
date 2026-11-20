@@ -4,6 +4,12 @@ import {
 import {
   worldSimulationSocialAppraisalExperienceBridgeVersion,
 } from "./world-simulation-social-appraisal-memory-bridge-service.mjs";
+import {
+  analyzeObserverDialogueLearning,
+  observerDialogueLearningVersion,
+} from "./observer-dialogue-learning-service.mjs";
+import { dialogueReferentCue } from "./observer-dialogue-scope-service.mjs";
+import { bindObserverPanelMemory, dialoguePanelStatement } from "./observer-dialogue-panel-memory-service.mjs";
 
 export const worldSimulationSubjectiveMemoryFormationVersion = "phase63a-subjective-memory-formation-v2";
 
@@ -458,6 +464,7 @@ function memoryRecordFor({
   sceneId,
   encodedAt,
   observationIndex,
+  dialogueBinding,
 }) {
   const sanitized = sanitizePerceivedValue(observation);
 
@@ -490,10 +497,26 @@ function memoryRecordFor({
     : postOutcomeActionExperience
       ? "episodic_action_experience"
       : "episodic_direct_perception";
-  const contentHash = hashAgentRunValue({
-    sense,
-    content: sanitized,
-  });
+  const encodedContent = dialogueBinding ? {
+      ...object(sanitized),
+      kind: isObject(sanitized) && typeof sanitized.kind === "string"
+        ? sanitized.kind : "observed_dialogue_about_referent",
+      topic: "learned_dialogue",
+      referent_id: dialogueBinding.referent_id,
+      referent_name: dialogueBinding.referent_name,
+      referent_aliases: dialogueBinding.referent_aliases,
+      ...(dialogueBinding.referent_description ? {referent_description: dialogueBinding.referent_description} : {}),
+      ...(dialogueBinding.referent_description_collision ? {referent_description_collision: true} : {}),
+      utterance: dialogueBinding.source.text,
+      lesson: dialogueBinding.detail?.lesson ?? null,
+      detail_type: dialogueBinding.detail?.detail_type ?? null,
+      ...(dialogueBinding.panel_reading ? {panel_reading: dialogueBinding.panel_reading} : {}),
+      statement_kind: dialogueBinding.panel_reading ? dialoguePanelStatement
+        : dialogueBinding.detail ? "perceived_statement_not_verified"
+        : dialogueBinding.referent_description_collision ? "observed_description_collision"
+          : dialogueBinding.referent_name ? "observed_name" : "observed_description",
+  } : sanitized;
+  const contentHash = hashAgentRunValue({sense, content: sanitized});
 
   const perceptualCertainty = metricWithOrigin(
     observation,
@@ -522,7 +545,7 @@ function memoryRecordFor({
     memory_id: memoryId,
     memory_type: memoryType,
 
-    content: sanitized,
+    content: encodedContent,
 
     // Subjectively meaningful source features only.
     // Engine lineage belongs in internal_provenance below.
@@ -542,6 +565,14 @@ function memoryRecordFor({
       observation_hash: contentHash,
       formation_version:
         worldSimulationSubjectiveMemoryFormationVersion,
+      ...(dialogueBinding ? {
+        dialogue_learning_version: observerDialogueLearningVersion,
+        dialogue_source_channel: dialogueBinding.source.channel,
+        ...(dialogueBinding.panel_lineage ? {
+          dialogue_panel_identity: dialogueBinding.panel_lineage.identity,
+          dialogue_panel_revision: dialogueBinding.panel_lineage.revision,
+        } : {}),
+      } : {}),
       ...(subjectiveSocialExperience
         ? {
             social_appraisal_hash:
@@ -581,6 +612,12 @@ function memoryRecordFor({
           : null,
       memory_type: memoryType,
     },
+    ...(dialogueBinding ? {
+      retrieval_cue_links: [{
+        kind: "semantic", value: dialogueReferentCue(dialogueBinding.referent_id),
+        source: "subjective_dialogue_learning",
+      }],
+    } : {}),
 
     perceptual_certainty_at_encoding:
       perceptualCertainty.value,
@@ -652,6 +689,9 @@ function solveSubjectiveMemoryFormation(context) {
 
   let totalCreated = 0;
   let totalSkipped = 0;
+  const dialogueReceipts = new Map(array(context.dialogue_receipt_provenance)
+    .map(item => [item.character, array(item.receipt_hashes)]));
+  const panelReceipts = new Map(array(context.dialogue_panel_receipts).map(item => [item.character, item]));
 
   for (const packet of array(context.decision_packets)) {
     const character = nonEmptyString(packet?.character);
@@ -661,6 +701,10 @@ function solveSubjectiveMemoryFormation(context) {
     const profile = encodingProfileFor(worldState, character);
     const existingRaw = characterMapValue(worldState.memories, character);
     const existing = Array.isArray(existingRaw) ? cloneJson(existingRaw) : [];
+    const dialogueBindings = context.learn_dialogue_referents
+      ? analyzeObserverDialogueLearning({character, perception, memories: existing,
+        verifiedReceiptHashes: dialogueReceipts.get(character)}).bindings
+      : null;
     const existingIds = new Set(existing.map((item) => String(item?.memory_id ?? item?.id ?? "")).filter(Boolean));
     const seenContent = new Set();
     const created = [];
@@ -758,6 +802,14 @@ function solveSubjectiveMemoryFormation(context) {
 
         // "encode", "unspecified", or no explicit
         // decision all preserve normal formation.
+        const panelReceipt = panelReceipts.get(character);
+        const panelMemory = context.learn_dialogue_referents && sense === "visual"
+          ? bindObserverPanelMemory({
+            receipt: panelReceipt, observation, observationIndex: senseIndex,
+            // The authoritative receipt was checked against the pre-action
+            // snapshot. Speaking can advance the clock before memory commits.
+            encodedAt: perception.simulation_time ?? panelReceipt?.observed_at,
+          }) : null;
         const record = memoryRecordFor({
           character,
           observation,
@@ -768,8 +820,9 @@ function solveSubjectiveMemoryFormation(context) {
           sceneId:
             perception.scene_id
             ?? sceneId,
-          encodedAt,
+          encodedAt: panelMemory?.panel_reading.observed_at ?? encodedAt,
           observationIndex,
+          dialogueBinding: panelMemory ?? dialogueBindings?.get(sense + ":" + senseIndex),
         });
 
         if (!record) {
@@ -1087,6 +1140,9 @@ export function formWorldSimulationSubjectiveMemories(input = {}) {
 
     episode_bindings:
       array(input.episode_bindings),
+    ...(input.learn_dialogue_referents === true ? {learn_dialogue_referents: true,
+      dialogue_receipt_provenance: array(input.dialogue_receipt_provenance),
+      dialogue_panel_receipts: array(input.dialogue_panel_receipts)} : {}),
   });
   const inputHashBefore = hashAgentRunValue(context);
   const runOnce = () => solveSubjectiveMemoryFormation(deepFreeze(cloneJson(context)));

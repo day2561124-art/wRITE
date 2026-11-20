@@ -46,7 +46,7 @@ export function buildWorldSimulationNativeTemporalReplayContract() {
 
 function canonicalInput({
   session_id, turn_id, world_state, world_state_revision, world_state_hash,
-  event, scene_analysis, selected_action_intents,
+  event, scene_analysis, selected_action_intents, dialogue_panel_recheck_plans,
 }) {
   return {
     world_simulation_session_id: session_id, turn_id,
@@ -54,6 +54,7 @@ function canonicalInput({
     world_state_revision, world_state_hash,
     event: clone(event), scene_analysis: clone(scene_analysis),
     selected_action_intents: clone(selected_action_intents),
+    ...(dialogue_panel_recheck_plans?.length ? {dialogue_panel_recheck_plans: clone(dialogue_panel_recheck_plans)} : {}),
   };
 }
 
@@ -84,7 +85,7 @@ export async function replayWorldSimulationNativeTemporalResponse({
   event, scene_analysis, selected_action_intents, observer,
   character_input, character_input_resolver, selection_resolver,
   preparation_decision_resolver, causal_epoch_revalidation_resolver,
-  committed_history = null, conscious_ingress_guard,
+  committed_history = null, conscious_ingress_guard, dialogue_panel_recheck_plans,
 } = {}) {
   if (!record(world_state) || hashAgentRunValue(world_state) !== world_state_hash
       || !Array.isArray(selected_action_intents)
@@ -108,7 +109,7 @@ export async function replayWorldSimulationNativeTemporalResponse({
 
   const input = canonicalInput({
     session_id, turn_id, world_state, world_state_revision, world_state_hash,
-    event, scene_analysis, selected_action_intents,
+    event, scene_analysis, selected_action_intents, dialogue_panel_recheck_plans,
   });
   const initial = await adjudicateWorldSimulationCausality(input);
   const consciousAdmission = buildWorldSimulationConsciousObserverAdmission({
@@ -357,7 +358,7 @@ export async function replayWorldSimulationNativeTemporalResponse({
   const replay = await adjudicateWorldSimulationCausality({
     ...canonicalInput({
       session_id, turn_id, world_state, world_state_revision, world_state_hash,
-      event, scene_analysis, selected_action_intents: replayedSelected,
+      event, scene_analysis, selected_action_intents: replayedSelected, dialogue_panel_recheck_plans,
     }),
     native_temporal_response: {
       actor: observer, action_id: anchor.action_id,
