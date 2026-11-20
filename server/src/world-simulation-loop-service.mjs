@@ -1,3 +1,13 @@
+import { analyzeObserverDialogueLearning, learnedDialogueMemoryStage, observerDialogueReferentDescriptor,
+  observerDialogueClarification, observerDialogueClarificationGoal } from "./observer-dialogue-learning-service.mjs";
+import { admitDialogueClarificationReply, admitDialogueClarificationTarget, committedDialogueClarificationRequests,
+  stageDialogueClarificationRequest } from "./observer-dialogue-clarification-service.mjs";
+import { buildCharacterCommunicationActionCandidate } from "./character-communication-foundation-service.mjs";
+import { planDialogueCountdownAnswer, projectDialogueCountdownDisplay, visibleDialogueCountdownPanel } from "./observer-dialogue-answer-service.mjs";
+import { historicalDialoguePanelMemory } from "./observer-dialogue-panel-memory-service.mjs";
+import { committedPanelQuotes, isPanelRecheckQuestion, planPanelRecheckSpeech, recentPanelQuote,
+  resolvePendingPanelRecheck, suggestPanelApproach } from "./observer-dialogue-panel-recheck-service.mjs";
+import { dialogueReferentCue, resolveObserverDialogueScope, scopeConversationMemoryStage } from "./observer-dialogue-scope-service.mjs";
 import {
   hashAgentRunValue,
 } from "./agent-run-service.mjs";
@@ -1110,6 +1120,9 @@ function currentMindCandidate({
       : prior?.last_seen_simulation_time ?? null,
     source_ref: sourceRef ? cloneJson(sourceRef) : cloneJson(prior?.source_ref ?? null),
     maintenance_evidence: cloneJson(prior?.maintenance_evidence ?? null),
+    ...(rawEvidence.dialogue_referent || prior?.dialogue_referent ? {
+      dialogue_referent: rawEvidence.dialogue_referent ?? prior.dialogue_referent,
+    } : {}),
     raw_evidence: cloneJson(rawEvidence),
     fresh: fresh === true,
   };
@@ -1138,6 +1151,34 @@ function currentMindDecayMetadata(candidate, currentMindSequence, simulationTime
 function currentMindPriorityEvidence(candidate, context) {
   const raw = object(candidate.raw_evidence);
   const sourceKind = candidate.source_kind;
+  const scope = context.conversation_scope;
+  const historicalDialogue = Boolean(scope) && sourceKind === "committed_experience"
+    && typeof candidate.content === "string";
+  const topicalSource = sourceKind === "perception" || sourceKind === "recovered_memory" || historicalDialogue;
+  const scopeEvidence = sourceKind === "perception" && candidate.fresh === true
+    && scope?.focus_evidence !== null && scope?.focus_evidence === candidate.content;
+  const activeReferent = scope?.referent
+    ?? (!scope?.unresolved_description && ["passive", "ambiguous"].includes(scope?.mode)
+      ? scope?.previous_referent ?? null : null);
+  const matchesReferent = activeReferent && candidate.dialogue_referent === activeReferent;
+  const candidateTopic = topicalSource && context.working_topic
+    ? (scopeEvidence ? context.turn_topic : matchesReferent ? context.working_topic
+      : context.topic_for(candidate.content)
+        ?? (candidate.candidate_id === context.current_focus_id ? scope?.previous_topic ?? null : null))
+    : null;
+  const topicSupport = candidateTopic !== null && candidateTopic === context.turn_topic;
+  const offTopic = candidateTopic !== null && candidateTopic !== context.working_topic;
+  const scopeExcluded = candidateTopic !== null && scope?.excluded_topics.includes(candidateTopic);
+  const changedObject = scope?.referent && scope.previous_referent && scope.referent !== scope.previous_referent;
+  const offObject = scope?.ground_referents && candidate.dialogue_referent
+    && candidate.dialogue_referent !== activeReferent;
+  const deferredObject = scope?.paused_referent && candidate.dialogue_referent === scope.paused_referent;
+  const unattributedOldDialogue = (changedObject || (scope?.paused_referent && !scope.referent))
+    && historicalDialogue && !candidate.dialogue_referent;
+  const topicDisplaced = topicalSource && (candidate.fresh !== true || historicalDialogue)
+    && (offTopic || scopeExcluded || offObject || deferredObject || unattributedOldDialogue
+      || (scope?.unresolved_description && historicalDialogue)
+      || (scope?.mode === "shift" && typeof candidate.content === "string"));
   const programmaticPerceptualSalience = currentMindExplicitRank(
     raw.salience ?? raw.perceptual_salience,
     { low: 1, normal: 1, medium: 2, high: 3, critical: 3 },
@@ -1197,6 +1238,8 @@ function currentMindPriorityEvidence(candidate, context) {
     expectation_violation: expectationViolation,
     immediate_constraint_urgency: urgency,
     focus_continuity: focusContinuity,
+    ...(context.working_topic || scope?.ground_referents
+      ? { current_topic_support: topicSupport, previous_topic_displaced: topicDisplaced } : {}),
     activation_order: candidate.activation_order,
     experience_sequence: Number.isSafeInteger(experienceSequence) ? experienceSequence : 0,
     stable_candidate_identity: candidate.candidate_id,
@@ -1206,6 +1249,7 @@ function currentMindPriorityEvidence(candidate, context) {
     + (expectationViolation ? 6 : 0)
     + goalRelevance * 3
     + perceptualSalience * 2
+    + (topicSupport && candidate.fresh ? 4 : 0)
     + (candidate.fresh ? 1 : 0)
   );
   return {
@@ -1268,10 +1312,20 @@ function currentMindAdmissionDecision(candidate, context) {
         currentMindStableText(supportedGoal) === currentMindStableText(currentGoal)
       ))
     ));
+  // Relevance gates the working view, never the stored memory or goals.
+  if (evidence.previous_topic_displaced && !strongSupport) {
+    return {
+      candidate_id: candidate.candidate_id, source_kind: candidate.source_kind,
+      prior_presence: priorPresence, fresh: candidate.fresh === true,
+      gate_outcome: priorPresence ? "decay" : "reject",
+      reason_codes: ["superseded_conversation_topic"],
+    };
+  }
   const maintenanceSupport = evidence.focus_continuity === true
     || evidence.goal_intention_relevance > 0
     || priorGoalContinuity;
   const freshAdmissionSupport = strongSupport
+    || evidence.current_topic_support === true
     || evidence.goal_intention_relevance > 0
     || evidence.perceptual_salience >= 2
     || candidate.source_kind === "current_action";
@@ -1302,6 +1356,7 @@ function currentMindAdmissionDecision(candidate, context) {
       fresh: true,
       gate_outcome: "admit",
       reason_codes: [
+        ...(evidence.current_topic_support === true ? ["observer_topic_support"] : []),
         ...(evidence.immediate_constraint_urgency > 0 ? ["immediate_constraint_or_urgency"] : []),
         ...(evidence.expectation_violation === true ? ["expectation_violation"] : []),
         ...(evidence.goal_intention_relevance > 0 ? ["goal_or_intention_support"] : []),
@@ -1337,6 +1392,13 @@ function currentMindOutputGateDecision(candidate, slot, admissionDecision = null
   const evidence = object(candidate.priority_evidence);
   const admissionReasons = new Set(array(admissionDecision?.reason_codes));
   const reasonCodes = [];
+  if (admissionReasons.has("superseded_conversation_topic")) {
+    return {
+      candidate_id: candidate.candidate_id, source_kind: candidate.source_kind, slot,
+      gate_outcome: "closed", reason_codes: ["superseded_conversation_topic"],
+    };
+  }
+  if (evidence.current_topic_support === true) reasonCodes.push("observer_topic_support");
   if (slot === "focus") reasonCodes.push("focus_selected");
   if (candidate.source_kind === "current_action") reasonCodes.push("current_action");
   if (evidence.immediate_constraint_urgency > 0) {
@@ -1479,13 +1541,32 @@ function currentMindSourceRef(kind, payload, extra = {}) {
   };
 }
 
-function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
+function buildWorldSimulationCharacterCurrentMindTransition(input = {}, resolveAttentionTopic = null) {
   const priorState = isObject(input.prior_current_mind)
     ? cloneJson(input.prior_current_mind)
     : currentMindInitialState();
   const currentMindSequence = Number(priorState.current_mind_sequence ?? 0) + 1;
   const simulationTime = input.simulation_time ?? null;
   const perception = object(input.perception);
+  const topicFor = (value) => {
+    if (typeof resolveAttentionTopic !== "function" || typeof value !== "string" || value.length > 1000) return null;
+    const result = resolveAttentionTopic(value);
+    return typeof result === "string" && /^[a-z][a-z0-9_-]{0,39}$/u.test(result) ? result : null;
+  };
+  // Only existing observer-facing text can establish a current topic.
+  // Unclear or competing labels do not interrupt the previous focus.
+  const observedTopics = [...new Set([
+    ...array(perception.observed), ...array(perception.audible),
+  ].slice(0, 48).map(topicFor).filter(Boolean))];
+  const conversationScope = input.conversation_scope ?? null;
+  const turnTopic = conversationScope
+    ? (conversationScope.mode === "shift" ? "dialogue_redirect" : conversationScope.topic)
+    : observedTopics.length === 1 ? observedTopics[0] : null;
+  const priorTopicalFocus = ["perception", "recovered_memory"].includes(priorState.focus?.source_kind)
+    ? topicFor(priorState.focus.content) : null;
+  const workingTopic = conversationScope
+    ? (turnTopic ?? conversationScope.previous_topic)
+    : (turnTopic ?? priorTopicalFocus);
   const recoveredMemories = array(input.recovered_memories);
   const experientialKnowledge = array(input.experiential_knowledge);
   const compatibilityState = object(input.compatibility_state);
@@ -1534,6 +1615,8 @@ function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
         }),
         rawEvidence: {
           ...(isObject(observation) ? observation : {}),
+          ...(conversationScope?.referent && conversationScope.focus_evidence === observation
+            ? {dialogue_referent: conversationScope.referent} : {}),
           ...(neuralPerceptualSalienceRank > 0
             ? { neural_perceptual_salience_rank: neuralPerceptualSalienceRank }
             : {}),
@@ -1565,7 +1648,10 @@ function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
         recovery_index: memoryIndex,
         recollection_occurrence_hash: recollectionOccurrenceHash,
       }),
-      rawEvidence: isObject(memory) ? memory : {},
+      rawEvidence: {
+        ...(isObject(memory) ? memory : {}),
+        ...(conversationScope?.referent ? {dialogue_referent: conversationScope.referent} : {}),
+      },
       characterContext,
     }));
   });
@@ -1729,6 +1815,10 @@ function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
     currentMindPriorityEvidence(candidate, {
       current_focus_id: currentFocusId,
       goal_texts: goalTexts,
+      turn_topic: turnTopic,
+      working_topic: workingTopic,
+      topic_for: topicFor,
+      conversation_scope: conversationScope,
     })
   ));
   const neuralSalienceConsumptionCount = prioritized.filter((candidate) => (
@@ -1871,6 +1961,15 @@ function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
     fading_context: fadingContext.map(stripPriorityInternals),
     suspended_context: suspendedContext.map(stripPriorityInternals),
     last_experience_sequence_integrated: integratedExperienceSequence,
+    ...(conversationScope ? {
+      conversation_topic: conversationScope.mode === "shift" || conversationScope.unresolved_description ? null
+        : conversationScope.topic ?? conversationScope.previous_topic,
+      ...(conversationScope.ground_referents ? {
+        conversation_referent: conversationScope.mode === "shift" || conversationScope.unresolved_description ? null
+          : conversationScope.referent ?? conversationScope.previous_referent,
+        conversation_paused_referent: conversationScope.paused_referent,
+      } : {}),
+    } : {}),
     temporary_expectation: cloneJson(
       temporaryExpectationResolved
         ? null
@@ -1894,7 +1993,8 @@ function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
   for (const item of stateAfter.fading_context) processingByCandidateId.set(item.candidate_id, "fading");
   for (const item of stateAfter.suspended_context) processingByCandidateId.set(item.candidate_id, "suspended");
   const encodingEvidence = prioritized
-    .filter((candidate) => candidate.source_kind === "perception")
+    // Only fresh input owns the current-turn (sense, index) encoding slot.
+    .filter((candidate) => candidate.source_kind === "perception" && candidate.fresh === true)
     .map((candidate) => ({
       sense: candidate.source_ref?.sense ?? null,
       sense_index: candidate.source_ref?.sense_index ?? null,
@@ -1923,6 +2023,9 @@ function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
     compatibility_attention: sanitizeCurrentMindValue(legacyAttentionBootstrap),
     compatibility_expectation: sanitizeCurrentMindValue(legacyExpectationBootstrap),
     compatibility_goals: sanitizeCurrentMindValue(goalTexts),
+    ...(turnTopic ? { observer_topic_hint: turnTopic } : {}),
+    ...(workingTopic && !turnTopic ? { retained_topic_scope: workingTopic } : {}),
+    ...(conversationScope ? { conversation_scope: conversationScope } : {}),
     prior_current_mind_sequence: Number(priorState.current_mind_sequence ?? 0),
     recent_experience_sequences: recentExperienceReceipts
       .map((receipt) => Number(receipt?.experience_sequence ?? 0))
@@ -2007,6 +2110,9 @@ function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
       output_gate_uses_learned_policy: false,
       deterministic_pairwise_resolver: true,
       focus_resolution_evidence: cloneJson(focusResolutionEvidence),
+      ...(turnTopic ? { observer_topic_hint: turnTopic } : {}),
+      ...(workingTopic && !turnTopic ? { retained_topic_scope: workingTopic } : {}),
+      ...(conversationScope ? { conversation_scope_mode: conversationScope.mode } : {}),
       focus_retention_bonus: focusRetentionBonus,
       switching_interruption_cost: switchingInterruptionCost,
       simple_sort_score_focus_selection_used: false,
@@ -2589,7 +2695,7 @@ async function resolveCharacterRuntimeWorldLineage(
   );
 }
 
-function createCharacterRuntimeInstance({ worldLineage, identity }) {
+function createCharacterRuntimeInstance({ worldLineage, identity, resolveAttentionTopic }) {
   const runtimeId = `character_runtime_${hashAgentRunValue({
     world_lineage: worldLineage,
     character_entity_id: identity.entity_id,
@@ -2684,7 +2790,7 @@ function createCharacterRuntimeInstance({ worldLineage, identity }) {
         formal_identity: identity.formal === true,
         prior_current_mind: cloneJson(committedCurrentMind),
         recent_experience_receipts: cloneJson(recentExperienceReceipts),
-      });
+      }, resolveAttentionTopic);
     }, () => {
       pendingCurrentMindCycles -= 1;
     });
@@ -2915,6 +3021,7 @@ export function createWorldSimulationCharacterRuntimeManager(config = {}) {
     if (!runtime) {
       runtime = createCharacterRuntimeInstance({
         worldLineage: resolvedWorldLineage,
+        resolveAttentionTopic: config.resolveAttentionTopic,
         identity: {
           entity_id: entityId,
           canonical_name: identity?.canonical_name ?? entityId,
@@ -2958,6 +3065,7 @@ export function createWorldSimulationCharacterRuntimeManager(config = {}) {
       simulation_time: input.simulation_time ?? null,
       perception: cloneJson(input.perception ?? {}),
       recovered_memories: cloneJson(input.recovered_memories ?? []),
+      ...(input.conversation_scope ? { conversation_scope: cloneJson(input.conversation_scope) } : {}),
       experiential_knowledge: cloneJson(input.experiential_knowledge ?? []),
       current_action: cloneJson(input.current_action ?? null),
       compatibility_state: cloneJson(input.compatibility_state ?? {}),
@@ -3355,6 +3463,7 @@ function currentEvent(worldState, requestedEventId = null) {
   // authoritative source action/observer identities as a character cue.
   delete safeEvent.native_acoustic_source_lineage;
   delete safeEvent.native_acoustic_cancellation_requests;
+  delete safeEvent.dialogue_panel_recheck;
   return { ...safeEvent, event_id: eventId };
 }
 
@@ -5026,6 +5135,10 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const olfactionQueries = [];
   const communicationListenerUnderstandingProjections = [];
   const communicationSpeakerRecognitionProjections = [];
+  const dialogueClarificationProposals = [];
+  const dialoguePanelReceipts = [];
+  const dialoguePanelQuotes = [];
+  const dialoguePanelRecheckPlans = [];
   const communicationGroundingEvidenceProjections = [];
   const listenerSocialInterpretationProjections = [];
   const personTargetedSocialAppraisalProjections = [];
@@ -5789,6 +5902,10 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       version: characterCommunicationSpeakerRecognitionVersion,
       receipt_count:
         speakerRecognitionProjection.audit?.receipt_count ?? 0,
+      ...(options.groundDialogueReferents === true && options.learnDialogueReferents === true
+        && understoodTestimonyReceipts.length ? {
+          dialogue_receipt_hashes: understoodTestimonyReceipts.map(hashAgentRunValue),
+        } : {}),
       character_view_hash:
         hashAgentRunValue(speakerRecognitionProjection.character_view),
       audit: cloneJson(speakerRecognitionProjection.audit),
@@ -5856,6 +5973,89 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       audit: cloneJson(visibleConstraintObservationProjection.audit),
     });
 
+    const learnsDialogue = options.groundDialogueReferents === true && options.learnDialogueReferents === true;
+    const previousConversation = (learnsDialogue || typeof options.resolveObserverDialogue === "function")
+      ? array(worldHistory.turns).filter(turn => turn.revision_to <= snapshot.revision)
+        .flatMap(turn => array(turn.committed_character_current_mind_projection?.character_projections))
+        .findLast(projection => projection.character === character)
+        ?.reducer_state_after ?? null
+      : null;
+    const learnedDialogue = learnsDialogue ? analyzeObserverDialogueLearning({
+      character, perception: characterPerception,
+      memories: characterMapValue(worldState.memories, character),
+      previousReferent: previousConversation?.conversation_referent,
+      pausedReferent: previousConversation?.conversation_paused_referent,
+      verifiedReceiptHashes: understoodTestimonyReceipts.map(hashAgentRunValue),
+      clarificationReply: understoodTestimonyReceipts.length ? admitDialogueClarificationReply({
+        observer: character, sceneId: listenerSceneId, history: worldHistory, snapshot,
+        understanding: listenerUnderstandingProjection, receipts: understoodTestimonyReceipts,
+      }) : null,
+    }) : null;
+    const conversationScope = await resolveObserverDialogueScope({
+      resolve: learnsDialogue ? async input => learnedDialogue.scope
+        ?? (typeof options.resolveObserverDialogue === "function"
+          ? await options.resolveObserverDialogue(input) : {mode: "passive"})
+        : options.resolveObserverDialogue,
+      ...(learnedDialogue ? {
+        evidenceLines: learnedDialogue.sources.map(source => source.text),
+        unresolvedDescription: learnedDialogue.unresolved_description,
+      } : {}),
+      perception: characterPerception,
+      previousTopic: previousConversation?.conversation_topic,
+      previousReferent: previousConversation?.conversation_referent,
+      pausedReferent: previousConversation?.conversation_paused_referent,
+      groundReferents: options.groundDialogueReferents === true,
+    });
+    const ordinaryAnswerRequest = learnedDialogue?.answer_request;
+    const recheckSources = array(learnedDialogue?.sources).filter(source => source.speaker && source.receipt_hash
+      && isPanelRecheckQuestion(source.text));
+    const question = recheckSources.length === 1 ? recheckSources[0] : null;
+    const askedToRecheck = question ? admitDialogueClarificationTarget({
+      observer: character, clarification: question, sceneId: listenerSceneId,
+      history: worldHistory, understanding: listenerUnderstandingProjection, receipts: understoodTestimonyReceipts,
+    }) : null;
+    const pendingRecheck = learnsDialogue ? resolvePendingPanelRecheck({
+      event: array(worldState.event_queue)[0], character, snapshot, history: worldHistory,
+    }) : null;
+    const verificationTarget = pendingRecheck ? {observer: character, partner: pendingRecheck.plan.partner} : askedToRecheck;
+    const recheckBasis = pendingRecheck?.plan ?? (askedToRecheck
+      ? recentPanelQuote({history: worldHistory, character, partner: askedToRecheck.partner, sceneId: listenerSceneId, snapshot})
+      : null);
+    const verificationRequest = recheckBasis ? {
+      kind: "max_countdown", referent: recheckBasis.referent, identity: recheckBasis.identity,
+      descriptor: observerDialogueReferentDescriptor(characterMapValue(worldState.memories, character), recheckBasis.referent),
+    } : null;
+    const mayInspect = verificationTarget && (!pendingRecheck || pendingRecheck.moved);
+    const verificationVisible = mayInspect && verificationRequest
+      ? visibleDialogueCountdownPanel({request: verificationRequest, visibility: illuminationVisibilityQuery.result}) : null;
+    const verificationMatches = verificationVisible && verificationVisible.identity === verificationRequest.identity;
+    const approach = askedToRecheck && !pendingRecheck && verificationMatches
+      ? suggestPanelApproach({target: verificationTarget, request: verificationRequest, visible: verificationVisible, turnId}) : null;
+    const dialogueAnswerRequest = verificationTarget ? verificationRequest : ordinaryAnswerRequest;
+    const dialogueAnswerTarget = !verificationTarget && dialogueAnswerRequest && conversationScope?.referent === dialogueAnswerRequest.referent
+      ? admitDialogueClarificationTarget({
+        observer: character, clarification: dialogueAnswerRequest, sceneId: listenerSceneId,
+        history: worldHistory, understanding: listenerUnderstandingProjection, receipts: understoodTestimonyReceipts,
+      }) : null;
+    const dialogueAnswerDisplay = (dialogueAnswerTarget || verificationMatches) && array(characterPerception.observed).length < 32
+      ? projectDialogueCountdownDisplay({
+        request: dialogueAnswerRequest, visibility: illuminationVisibilityQuery.result, objects: worldState.objects,
+      }) : null;
+    if (dialogueAnswerDisplay) {
+      dialoguePanelReceipts.push({
+        character, referent: dialogueAnswerRequest.referent,
+        observation_index: array(characterPerception.observed).length,
+        observed_at: worldState.simulation_time ?? event.simulation_time ?? null,
+        revision: snapshot.revision, identity: dialogueAnswerDisplay.identity, seconds: dialogueAnswerDisplay.seconds,
+      });
+      characterPerception.observed = [...array(characterPerception.observed), dialogueAnswerDisplay.content];
+    }
+    const historicalPanel = dialogueAnswerTarget && !dialogueAnswerDisplay
+      ? historicalDialoguePanelMemory({
+        request: dialogueAnswerRequest, memories: characterMapValue(worldState.memories, character),
+        simulationTime: worldState.simulation_time ?? event.simulation_time, revision: snapshot.revision,
+      }) : null;
+
     const memoryAccessibilityCueProbeInput = {
       world_state:
         cloneJson(
@@ -5880,12 +6080,12 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
           characterPerception,
         ),
 
-      context_cues:
-        cloneJson(
-          object(
-            event.memory_context_cues,
-          ),
-        ),
+      context_cues: {
+        ...cloneJson(object(event.memory_context_cues)),
+        ...(conversationScope ? { semantic: conversationScope.referent
+          ? [dialogueReferentCue(conversationScope.referent)]
+          : conversationScope.topic ? [conversationScope.topic] : [] } : {}),
+      },
 
       retrieval_context:
         cloneJson(
@@ -6118,10 +6318,15 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         event.memory_retrieval_context,
       );
 
-    const stagedMemoryRetrievalResolver =
-      typeof options.memoryRetrievalStageResolver === "function"
-        ? options.memoryRetrievalStageResolver
-        : null;
+    const learnedLookup = learnsDialogue && conversationScope?.referent?.startsWith("learned_");
+    const stagedMemoryRetrievalResolver = scopeConversationMemoryStage(
+      learnedLookup ? view => learnedDialogueMemoryStage({
+        ...view, request_field: learnedDialogue.request_field, historical_panel: historicalPanel,
+      })
+        : conversationScope?.unresolved_description ? () => ({process_occurred: false})
+          : typeof options.memoryRetrievalStageResolver === "function" ? options.memoryRetrievalStageResolver : null,
+      conversationScope,
+    );
 
     let memoryRetrievalQuery;
     let memoryRetrievalProcess;
@@ -6167,7 +6372,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
           resolver:
             stagedMemoryRetrievalResolver,
           technical_step_budget:
-            options.memoryRetrievalTechnicalStepBudget,
+            options.memoryRetrievalTechnicalStepBudget ?? (learnedLookup ? 2 : undefined),
           perception:
             characterPerception,
           character_state:
@@ -6679,6 +6884,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
             ?? null,
           perception: characterPerception,
           recovered_memories: recoveredMemories,
+          ...(conversationScope ? { conversation_scope: conversationScope } : {}),
           experiential_knowledge:
             experientialKnowledgeReentry.character_view.experiential_knowledge,
           current_action:
@@ -7512,7 +7718,47 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       );
     }
 
-    const menuActions = repairSpeechActionCandidates.length
+    const dialogueClarification = observerDialogueClarification(learnedDialogue);
+    let pendingClarificationProposal = null;
+    if (dialogueClarification) {
+      characterCognition.dialogue_clarification = dialogueClarification;
+      const target = admitDialogueClarificationTarget({
+        observer: character, clarification: learnedDialogue.clarification, sceneId: listenerSceneId,
+        history: worldHistory, understanding: listenerUnderstandingProjection, receipts: understoodTestimonyReceipts,
+      });
+      const goal = target ? observerDialogueClarificationGoal(character, dialogueClarification) : null;
+      if (goal && characterCognition.communication_goal == null) {
+        characterCognition.communication_goal = goal;
+        const action = target.request ? buildCharacterCommunicationActionCandidate({character, cognition: characterCognition}) : null;
+        pendingClarificationProposal = stageDialogueClarificationRequest(target, action?.action_id);
+      }
+    }
+
+    let pendingPanelQuote = null;
+    if (verificationTarget && characterCognition.communication_goal == null) {
+      characterCognition.communication_goal = planPanelRecheckSpeech({
+        character, partner: verificationTarget.partner, display: dialogueAnswerDisplay,
+      });
+    }
+    if (dialogueAnswerTarget && characterCognition.communication_goal == null) {
+      const answerGoal = planDialogueCountdownAnswer({
+        character, target: dialogueAnswerTarget, request: dialogueAnswerRequest, display: dialogueAnswerDisplay,
+        cognition: characterCognition, retrieval: memoryRetrievalProcess, memories: characterMapValue(worldState.memories, character),
+        historicalPanel,
+      });
+      if (answerGoal) {
+        characterCognition.communication_goal = answerGoal;
+        const identity = answerGoal.claim_source_kind === "current_perception" ? dialogueAnswerDisplay?.identity
+          : (answerGoal.public_content === historicalPanel?.lesson ? historicalPanel?.identity : null);
+        if (identity) {
+          const action = buildCharacterCommunicationActionCandidate({character, cognition: characterCognition});
+          if (action?.action_id) pendingPanelQuote = {character, partner: dialogueAnswerTarget.partner,
+            referent: dialogueAnswerRequest.referent, identity, action_id: action.action_id};
+        }
+      }
+    }
+
+    let menuActions = repairSpeechActionCandidates.length
       || repairResponseActionCandidates.length
       ? [
           ...availableActions.slice(0, Math.max(0, 22
@@ -7522,6 +7768,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
           ...repairResponseActionCandidates,
         ]
       : availableActions;
+    if (approach) menuActions = [...menuActions.slice(0, 22), approach.candidate];
     // The character may propose exact current evidence refs before the trusted
     // candidate universe is assembled. The resolver sees no raw World state.
     const affordanceResolver = typeof options.subjectiveAffordanceProposalResolver
@@ -7620,6 +7867,14 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       actionCandidates.character_view
       ?? actionCandidates,
     );
+    if (pendingClarificationProposal && array(characterActionCandidates.candidate_action_intents)
+      .filter(item => item.action_id === pendingClarificationProposal.action_id).length === 1) {
+      dialogueClarificationProposals.push(pendingClarificationProposal);
+    }
+    if (pendingPanelQuote && array(characterActionCandidates.candidate_action_intents)
+      .some(item => item.action_id === pendingPanelQuote.action_id)) dialoguePanelQuotes.push(pendingPanelQuote);
+    if (approach && array(characterActionCandidates.candidate_action_intents)
+      .some(item => item.action_id === approach.plan.action_id)) dialoguePanelRecheckPlans.push(approach.plan);
 
     // Phase76F records an explicit provenance edge from a Phase76E transferred
     // method to an already-existing Action Proposer candidate. The resolver may
@@ -8158,6 +8413,11 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       cloneJson(communicationListenerUnderstandingProjections),
     communication_speaker_recognition_projections:
       cloneJson(communicationSpeakerRecognitionProjections),
+    ...(dialogueClarificationProposals.length
+      ? {dialogue_clarification_proposals: cloneJson(dialogueClarificationProposals)} : {}),
+    ...(dialoguePanelReceipts.length ? {dialogue_panel_receipts: cloneJson(dialoguePanelReceipts)} : {}),
+    ...(dialoguePanelQuotes.length ? {dialogue_panel_quotes: cloneJson(dialoguePanelQuotes)} : {}),
+    ...(dialoguePanelRecheckPlans.length ? {dialogue_panel_recheck_plans: cloneJson(dialoguePanelRecheckPlans)} : {}),
     communication_grounding_evidence_projections:
       cloneJson(communicationGroundingEvidenceProjections),
     listener_social_interpretation_projections:
@@ -10695,6 +10955,7 @@ export async function resolveWorldSimulationTurn(
       ),
       selected_action_intents: cloneJson(selected),
       observer: nativeObserver,
+      dialogue_panel_recheck_plans: preparedTurn.dialogue_panel_recheck_plans,
       committed_history: await getWorldSimulationHistory(sessionId, options),
       conscious_ingress_guard: guardNativeConsciousIngress,
       character_input_resolver:
@@ -10918,6 +11179,8 @@ export async function resolveWorldSimulationTurn(
       ?? preparedTurn.scene_analysis,
     ),
     selected_action_intents: cloneJson(causalSelected),
+    ...(array(preparedTurn.dialogue_panel_recheck_plans).length
+      ? {dialogue_panel_recheck_plans: cloneJson(preparedTurn.dialogue_panel_recheck_plans)} : {}),
     ...(options.characterNativePendingAcousticCancellationPlan
       ? {pending_acoustic_cancellation_plan: cloneJson(
         options.characterNativePendingAcousticCancellationPlan)}
@@ -12100,6 +12363,34 @@ export async function resolveWorldSimulationTurn(
       options,
     );
 
+  // Recheck the panel against the pre-action snapshot. Text in a decision
+  // packet or a prepared receipt alone is not authority for first-hand memory.
+  const verifiedDialoguePanelReceipts = [];
+  if (options.groundDialogueReferents === true && options.learnDialogueReferents === true
+    && array(preparedTurn.dialogue_panel_receipts).length) {
+    const event = currentEvent(snapshot.state, preparedTurn.event.event_id);
+    const scene = currentScene(snapshot.state, event);
+    const sceneId = scene.scene_id ?? event.scene_id ?? event.location_id ?? null;
+    const participants = participantsForEvent(snapshot.state, event);
+    const receipts = array(preparedTurn.dialogue_panel_receipts);
+    for (const receipt of receipts) {
+      const character = receipt?.character;
+      if (!participants.includes(character) || receipts.filter(item => item?.character === character).length !== 1
+          || receipt.revision !== snapshot.revision
+          || receipt.observed_at !== (snapshot.state.simulation_time ?? event.simulation_time ?? null)) continue;
+      const descriptor = observerDialogueReferentDescriptor(characterMapValue(snapshot.state.memories, character), receipt.referent);
+      if (!descriptor) continue;
+      const observation = projectDialogueCountdownDisplay({
+        request: {kind: "max_countdown", descriptor}, objects: snapshot.state.objects,
+        visibility: queryWorldSimulationObserverIlluminationVisibility({
+          world_state: snapshot.state, scene_state: scene, scene_id: sceneId, observer: character,
+        }).result,
+      });
+      if (observation && receipt.identity === observation.identity && receipt.seconds === observation.seconds) {
+        verifiedDialoguePanelReceipts.push({...receipt, descriptor});
+      }
+    }
+  }
   const subjectiveMemoryFormation =
     formWorldSimulationSubjectiveMemories({
       world_state:
@@ -12119,6 +12410,11 @@ export async function resolveWorldSimulationTurn(
 
       episode_bindings:
         subjectiveMemoryEpisodeBindings.bindings,
+
+      learn_dialogue_referents: options.groundDialogueReferents === true && options.learnDialogueReferents === true,
+      dialogue_receipt_provenance: array(preparedTurn.communication_speaker_recognition_projections)
+        .map(item => ({character: item.character, receipt_hashes: item.dialogue_receipt_hashes ?? []})),
+      dialogue_panel_receipts: verifiedDialoguePanelReceipts,
     });
   const subjectiveMemoryPreview = applySubjectiveMemoryPreview(
     consolidationPersistedWorldState,
@@ -13813,6 +14109,14 @@ export async function resolveWorldSimulationTurn(
       communication_speaker_recognition_projections: cloneJson(
         preparedTurn.communication_speaker_recognition_projections ?? [],
       ),
+      ...(preparedTurn.dialogue_panel_quotes?.length ? {
+        dialogue_panel_quotes: committedPanelQuotes(preparedTurn.dialogue_panel_quotes, selected, causalResolution.action_outcomes),
+      } : {}),
+      ...(preparedTurn.dialogue_clarification_proposals?.length ? {
+        dialogue_clarification_requests: committedDialogueClarificationRequests(
+          preparedTurn.dialogue_clarification_proposals, selected, causalResolution.action_outcomes,
+        ),
+      } : {}),
       communication_grounding_evidence_projections: cloneJson(
         preparedTurn.communication_grounding_evidence_projections ?? [],
       ),

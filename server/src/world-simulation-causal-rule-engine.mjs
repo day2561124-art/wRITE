@@ -1,3 +1,4 @@
+import { schedulePanelRechecks } from "./observer-dialogue-panel-recheck-service.mjs";
 import { projectWorldSimulationOffscreenBreakpoint } from "./world-simulation-offscreen-breakpoint-service.mjs";
 import {
   hashAgentRunValue,
@@ -2173,9 +2174,12 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     error.code="CC7AF_PENDING_CANCELLATION_UNVERIFIED";
     throw error;
   }
+  const rechecks = physicalStep ? [] : schedulePanelRechecks({
+    plans: input.dialogue_panel_recheck_plans, selections: selectedActionIntents, outcomes, turnId: input.turn_id, sceneId,
+  });
   if (!physicalStep) {
   next.event_queue = [
-    ...(cancellation?.remaining_queue ?? queue.slice(1)),...followUps];
+    ...rechecks, ...(cancellation?.remaining_queue ?? queue.slice(1)), ...followUps];
   pushTransition(
     transitions,
     "world",
@@ -2187,7 +2191,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
   );
   }
 
-  for (const followUp of followUps) {
+  for (const followUp of [...rechecks, ...followUps]) {
     scheduledEvents.push(followUp.event_id ?? followUp.id ?? followUp);
   }
 

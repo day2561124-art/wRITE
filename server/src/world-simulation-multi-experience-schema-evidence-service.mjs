@@ -1,4 +1,5 @@
 import { hashAgentRunValue } from "./agent-run-service.mjs";
+import { learnedDialogueLineageHash } from "./observer-dialogue-learning-service.mjs";
 import {
   subjectiveEpisodeSegmentationEventSchemaVersion,
   worldSimulationSubjectiveEpisodeSegmentationVersion,
@@ -167,13 +168,17 @@ function canonicalMemoryRefsForLifeEvent(worldState, character, lifeEvent) {
     for (const ref of event.source_memory_refs) {
       const id = requiredString(ref?.memory_id, "source memory id");
       const hash = requiredString(ref?.memory_hash, "source memory hash");
+      const stable = optionalString(ref?.learned_dialogue_lineage_hash);
       const prior = memoryRefs.get(id);
-      if (prior && prior !== hash) {
+      if (prior && prior.memory_hash !== hash
+          && (!stable || stable !== prior.learned_dialogue_lineage_hash)) {
         const error = new Error(`Phase77A found conflicting immutable hashes for memory ${id}.`);
         error.code = "WORLD_SIMULATION_MULTI_EXPERIENCE_SCHEMA_EVIDENCE_MEMORY_LINEAGE_CONFLICT";
         throw error;
       }
-      memoryRefs.set(id, hash);
+      memoryRefs.set(id, {memory_id: id, memory_hash: hash,
+        ...(stable ? {learned_dialogue_lineage_hash: stable} : {}),
+      });
     }
   }
   episodeRefs.sort((left, right) =>
@@ -181,8 +186,7 @@ function canonicalMemoryRefsForLifeEvent(worldState, character, lifeEvent) {
       || compareText(left.segmentation_event_id, right.segmentation_event_id));
   return {
     episode_refs: episodeRefs,
-    memory_refs: [...memoryRefs.entries()]
-      .map(([id, hash]) => ({ memory_id: id, memory_hash: hash }))
+    memory_refs: [...memoryRefs.values()]
       .sort((left, right) => compareText(left.memory_id, right.memory_id)),
   };
 }
@@ -198,7 +202,9 @@ function lifeEventEvidence(worldState, lifeEvent, latestOrganizationEvent, role)
   const usedMemoryRefs = [];
   for (const ref of lineage.memory_refs) {
     const record = records.find((item) => memoryId(item) === ref.memory_id);
-    if (!isObject(record) || hashAgentRunValue(record) !== ref.memory_hash) {
+    const stableMatch = ref.learned_dialogue_lineage_hash
+      && learnedDialogueLineageHash(record) === ref.learned_dialogue_lineage_hash;
+    if (!isObject(record) || (hashAgentRunValue(record) !== ref.memory_hash && !stableMatch)) {
       const error = new Error(
         `Phase77A source memory ${ref.memory_id} no longer matches canonical Phase67A lineage.`,
       );

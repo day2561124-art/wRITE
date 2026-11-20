@@ -1,4 +1,5 @@
 import { hashAgentRunValue } from "./agent-run-service.mjs";
+import { dialogueMemoriesCanCompete } from "./observer-dialogue-learning-service.mjs";
 import { memoryRetrievalEventSchemaVersion } from "./world-simulation-memory-retrieval-persistence-service.mjs";
 import { worldSimulationMemoryRetrievalProcessV3Version } from "./world-simulation-memory-retrieval-multistep-service.mjs";
 import { probeWorldSimulationRetrievalCompetitionMonitoringEvidence } from "./world-simulation-retrieval-competition-monitoring-evidence-service.mjs";
@@ -327,6 +328,10 @@ export function buildWorldSimulationRetrievalInducedForgettingConsequences(input
         .filter(Boolean),
     );
     if (recoveredIds.size === 0) continue;
+    const observer = String(retrievalEvent.character ?? "").trim().toLocaleLowerCase("zh-Hant-TW");
+    const observerRecords = Object.entries(object(worldState.memories))
+      .find(([character]) => character.trim().toLocaleLowerCase("zh-Hant-TW") === observer)?.[1];
+    const recordsById = new Map(array(observerRecords).map(record => [record.memory_id ?? record.id, record]));
 
     const candidateIds = array(evidence.monitor.candidate_memory_ids)
       .map(optionalString)
@@ -342,6 +347,7 @@ export function buildWorldSimulationRetrievalInducedForgettingConsequences(input
       if (report.competition_status !== "known_dominated_on_modeled_dimensions") continue;
       const dominatorMemoryId = optionalString(report.dominator_witness_memory_id);
       if (!dominatorMemoryId || !recoveredIds.has(dominatorMemoryId)) continue;
+      if (!dialogueMemoriesCanCompete(recordsById.get(dominatorMemoryId), recordsById.get(competitorMemoryId))) continue;
 
       const eventBody = eventBodyFor({
         retrievalEvent,
@@ -400,7 +406,7 @@ export function buildWorldSimulationRetrievalInducedForgettingConsequences(input
     stateTransitions.push({
       entity: "world",
       field: "retrieval_induced_forgetting_events",
-      from: cloneJson(existingEvents),
+      from: cloneJson(worldState.retrieval_induced_forgetting_events ?? null),
       to: cloneJson(nextEvents),
       cause: "persist immutable Phase83A retrieval-induced-forgetting consequence evidence",
       source_layer: "memory_retrieval_competition_consequence",
@@ -411,7 +417,7 @@ export function buildWorldSimulationRetrievalInducedForgettingConsequences(input
     stateTransitions.push({
       entity: "world",
       field: "retrieval_induced_forgetting_history",
-      from: cloneJson(existingHistory),
+      from: cloneJson(worldState.retrieval_induced_forgetting_history ?? null),
       to: cloneJson(nextHistory),
       cause: "append Phase83A retrieval-induced-forgetting consequence history",
       source_layer: "memory_retrieval_competition_consequence",
