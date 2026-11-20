@@ -3,7 +3,7 @@ import { hashAgentRunValue } from "../../server/src/agent-run-service.mjs";
 import { analyzeObserverDialogueLearning, observerDialogueLearningVersion } from "../../server/src/observer-dialogue-learning-service.mjs";
 import {
   admitDialogueClarificationReply, admitDialogueClarificationTarget, committedDialogueClarificationRequests,
-  dialogueClarificationQuestion, stageDialogueClarificationRequest,
+  dialogueClarificationQuestion, recentDialogueThreadAnchor, stageDialogueClarificationRequest,
 } from "../../server/src/observer-dialogue-clarification-service.mjs";
 
 const observer = "值班員";
@@ -107,4 +107,19 @@ for (const altered of [
   {...input, history: {turns: [request, {...answer, action_outcomes: [...answer.action_outcomes,
     emitted(partner, observer, "reply2", "桌上那台。")]}]}},
 ]) assert.equal(admitDialogueClarificationReply(altered), null);
+const anchor = {observer, partner, referent: id(2), kind: "focused"};
+const anchorTurn = {...request, dialogue_thread_anchors: [anchor]};
+const liveThread = {...input, history: {turns: [anchorTurn, answer]}};
+assert.deepEqual(recentDialogueThreadAnchor(liveThread), anchor);
+for (const altered of [
+  {...liveThread, observer: other},
+  {...liveThread, sceneId: "別的房間"},
+  {...liveThread, snapshot: {revision: 3, state_hash: "uncommitted"}},
+  {...liveThread, history: {turns: [anchorTurn, {...answer, previous_state_hash: "mismatch"}]}},
+  {...liveThread, history: {turns: [anchorTurn, {...answer,
+    action_outcomes: [emitted(other, observer, "reply", "它能倒數多久？")]}]}},
+  {...liveThread, history: {turns: [anchorTurn, {...answer,
+    action_outcomes: [emitted(partner, other, "reply", "它能倒數多久？")]}]}},
+  {...liveThread, history: {turns: [{...anchorTurn, dialogue_thread_anchors: [anchor, anchor]}, answer]}},
+]) assert.equal(recentDialogueThreadAnchor(altered), null);
 console.log("Observer-dialogue clarification: request field, reply forms, unchanged candidate set and committed directed turn linkage verified.");

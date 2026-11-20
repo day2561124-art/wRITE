@@ -24,7 +24,7 @@ const unique = list => [...new Set(list)];
 const normalize = value => value.normalize("NFKC").trim().toLocaleLowerCase("zh-Hant-TW");
 const intro = /^(?:這|那)(?:個|具|台|支|顆|款|套|只)[\p{L}\p{N} ]{0,18}(?:叫做?|名叫|名字是|稱作)[「『“"]([^」』”"]{2,32})[」』”"]/u;
 const createsSecond = /另一(?:個|具|台|支|顆|款|套|只)|同名|也叫同一個名字/u;
-const uncertainty = /(?:如果|假如|聽說|可能|也許|據說|不確定|聽不清|有人說|好像|我記得|印象中)/u;
+const uncertainty = /(?:如果|假如|聽說|可能|也許|據說|不確定|聽不清|有人說|好像|我記得|印象中|我猜|大概|多半|不一定|估計|恐怕|我以為|原以為)/u;
 const question = /[？?]|(?:嗎|呢)(?:[。！!]?)$|(?:幾|多少|多久|在哪|什麼時候|哪種|哪個|哪一?[台臺支件]|能不能|可不可以|有沒有)/u;
 const defer = /(?:暫且|暫時|先)(?:別|不要|不)(?:談|聊|看|查|提)|先(?:放著|擱著|放一邊)|(?:不是|不在).{0,9}(?:要談|重點|範圍)|(?:晚點|等一下|稍後).{0,5}再/u;
 const resume = /(?:回到|說回|談回|重提)(?:剛才|先前|方才|之前)(?:那(?:個|件|項)|的話題)/u;
@@ -110,11 +110,54 @@ export function observerDialogueReferentDescriptor(memories, referent) {
   return entry && !entry.collision ? entry.descriptor : null;
 }
 
-function byMention(text, registry) {
+// A substring of a different name is not evidence that this referent was
+// mentioned. Quoted names are literal; unquoted names must end at a clause
+// boundary or a known Mandarin grammatical connector, not an arbitrary suffix.
+const quotedName = /「([^」]*)」|『([^』]*)』|“([^”]*)”|"([^"]*)"/gu;
+const nameCharacter = /^[\p{L}\p{M}\p{N}_-]/u;
+const nameCharacterEnd = /[\p{L}\p{M}\p{N}_-]$/u;
+const startsAfter = /(?:和|跟|與|或|以及|或者|還有|不是|而非|請問|問一下|想知道|我猜|我以為|大概|恐怕|問的是|指的是|是指|至於|關於|也許|可能|假如|聽說|據說|如果|認為|看到|拿出|找到|看一下|那台|這台|那個|這個|那支|這支)$/u;
+const endsBefore = /^(?:的|是|不|沒|嗎|呢|吧|啊|呀|了|最[多少]|至少|還|可以|不可|可否|能|會|要|得|放|收|擺|掛|留|位於|在|在哪|用|開機|運作|運轉|啟動|倒數|計時|續航|電量|電池|額定|充電|供電|限制|先|現在|目前|只能|必須|適合|還有|和|跟|與|或|以及|哪|幾|多少|多久|先前|原本)/u;
+const isLeftBoundary = text => !nameCharacterEnd.test(text.trimEnd()) || startsAfter.test(text.trimEnd());
+const isRightBoundary = text => !nameCharacter.test(text.trimStart()) || endsBefore.test(text.trimStart());
+
+function nameMentions(text, registry) {
   const value = normalize(text);
-  return [...registry.values()].filter(record =>
-    [record.name, ...record.aliases].filter(Boolean).some(name => value.includes(normalize(name))));
+  const names = [...registry.values()].flatMap(entry => [entry.name, ...entry.aliases]
+    .filter(Boolean).map(name => ({entry, name: normalize(name)})));
+  const quoted = [...value.matchAll(quotedName)].map(hit => ({
+    start: hit.index, end: hit.index + hit[0].length, value: hit.slice(1).find(field => field !== undefined)?.trim(),
+  }));
+  const found = [];
+  let unidentified = false;
+  for (const token of quoted) {
+    const exact = names.filter(item => item.name === token.value);
+    for (const {entry} of exact) found.push({...token, entry});
+    // A quoted subject before a fact or question is an explicit name, even
+    // when it has never been learned. Quoted values elsewhere are not subjects.
+    if (!exact.length && permittedName(token.value)
+        && isLeftBoundary(value.slice(0, token.start))
+        && endsBefore.test(value.slice(token.end).trimStart())
+        && (field(value.slice(token.end)) || question.test(value.slice(token.end)))) unidentified = true;
+  }
+  for (const {entry, name} of names) {
+    for (let start = value.indexOf(name); start !== -1; start = value.indexOf(name, start + name.length)) {
+      const end = start + name.length;
+      if (quoted.some(token => token.start < end && start < token.end)) continue;
+      if (!isLeftBoundary(value.slice(0, start))) continue;
+      if (isRightBoundary(value.slice(end))) found.push({start, end, entry});
+      else if (!names.some(other => other.name.length > name.length && other.name.startsWith(name)
+        && value.startsWith(other.name, start) && isRightBoundary(value.slice(start + other.name.length)))) {
+        unidentified = true;
+      }
+    }
+  }
+  const longest = found.filter(hit => !found.some(other => other.start <= hit.start && other.end >= hit.end
+    && (other.start < hit.start || other.end > hit.end)));
+  return {entries: [...new Map(longest.map(hit => [hit.entry.id, hit.entry])).values()], unidentified};
 }
+
+const byMention = (text, registry) => nameMentions(text, registry).entries;
 
 function statementFor(clause) {
   const text = clause.trim();
@@ -236,6 +279,7 @@ function resolveClarificationFragment(reply, sources, registry) {
 // objects or the text of another character. A candidate binding is ephemeral.
 export function analyzeObserverDialogueLearning({
   character, perception, memories, previousReferent, pausedReferent, verifiedReceiptHashes, clarificationReply,
+  allowDialogueContinuation,
 }) {
   const sources = observerLearningObservations(perception, character, verifiedReceiptHashes);
   const registry = localRegistry(memories);
@@ -247,7 +291,8 @@ export function analyzeObserverDialogueLearning({
   let unresolvedDescription = false;
   for (const source of sources) {
     const {text} = source;
-    const named = byMention(text, registry);
+    const namedMatch = nameMentions(text, registry);
+    const named = namedMatch.entries;
     const lines = dialogueClauses(text);
     const described = analyzeDescriptiveSource({character, source, lines, registry, named, previousReferent});
     if (described) {
@@ -277,15 +322,28 @@ export function analyzeObserverDialogueLearning({
       continue;
     }
     const previous = registry.get(previousReferent);
-    // An explicit different noun is not a pronoun. Only continue a clearly
-    // pronominal question, and only if the observer has that committed object.
-    const implicit = !introducedName && named.length === 0 && previous && question.test(text)
-      && /^(?:那(?:個|台|支|顆|套)|這(?:個|台|支|顆|套)|它)[\s，,]*(?:還|能|可以|在哪|要|可不可以|多久|放)/u.test(text);
-    const paused = !named.length && resume.test(text) ? registry.get(pausedReferent) : null;
+    // A nameless turn may only carry a verified conversational referent.
+    // An explicit introduction, name or description remains usable across
+    // partners and scenes. Refusing a binding is not a ban on speculative talk.
+    const pronoun = !introducedName && !named.length && question.test(text)
+      && /^(?:那(?:個|台|臺|支|顆|套)|這(?:個|台|臺|支|顆|套)|它)[\s，,]*(?:還|能|可以|在哪|要|可不可以|多久|放)/u.test(text);
+    const wantsResume = !introducedName && !named.length && resume.test(text);
+    const candidate = pronoun ? previous : wantsResume ? registry.get(pausedReferent) : null;
+    const continuity = candidate && typeof allowDialogueContinuation === "function"
+      && allowDialogueContinuation(source, candidate.id, wantsResume ? "paused" : "focused");
+    if ((!introducedName && namedMatch.unidentified) || ((pronoun || wantsResume) && !continuity)) {
+      ambiguous = true;
+      unresolvedDescription = true;
+      if (question.test(text)) clarifications.push({
+        evidence: text, reason: namedMatch.unidentified ? "unrecognized_name" : "unconfirmed_dialogue_thread",
+        speaker: source.speaker ?? null, receipt_hash: source.receipt_hash ?? null,
+      });
+      continue;
+    }
     const current = introducedName
       ? existingSameName ?? {id: "learned_" + hashAgentRunValue({character, name: normalize(introducedName)}).slice(0, 24),
         name: introducedName, aliases: []}
-      : named[0] ?? paused ?? (implicit ? previous : null);
+      : named[0] ?? (continuity ? candidate : null);
     if (defer.test(text)) {
       const blocked = named[0] ?? (/^(?:它|那(?:個|台|支|顆|套)|這(?:個|台|支|顆|套))/u.test(text) ? previous : null);
       if (blocked?.id === previous?.id && blocked) {
@@ -295,15 +353,17 @@ export function analyzeObserverDialogueLearning({
     }
     if (!current) continue;
     found.push(focusOn(current.id, text));
-    if (implicit || paused) continue;
-    const aliases = lines.map(line => line.match(aliasClause))
+    if (continuity) continue;
+    const tentative = uncertainty.test(text);
+    const aliases = tentative ? [] : lines.map(line => line.match(aliasClause))
       .map(match => permittedName(match?.[1])).filter(Boolean)
       .filter(alias => ![...registry.values()].some(entry => entry.id !== current.id
         && [entry.name, ...entry.aliases].filter(Boolean).some(name => normalize(name) === normalize(alias))));
-    const details = lines.filter(line => !line.match(intro) && !line.match(aliasClause))
+    const introducedNames = [{...current, aliases: unique([...current.aliases, ...aliases])}];
+    const details = tentative ? [] : lines.filter(line => !line.match(intro) && !line.match(aliasClause))
       .filter(line => byMention(line, registry).some(entry => entry.id === current.id)
         || (introducedName !== null && (/^(?:它|這[個台支顆套])/u.test(line)
-          || [current.name, ...aliases].filter(Boolean).some(name => normalize(line).includes(normalize(name))))))
+          || byMention(line, introducedNames).length > 0)))
       .map(statementFor).filter(Boolean);
     if (!introducedName && !aliases.length && details.length !== 1) continue;
     bindings.set(sourceKey(source), {
