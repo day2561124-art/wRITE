@@ -22,27 +22,44 @@ export function activeTestimonyClaims(memories, referent, detailType) {
   const byId = new Map(claims.map(record => [record.memory_id, record]));
   const retracted = new Set();
   for (const record of claims) {
-    const original = byId.get(record.content.retracts_memory_id);
-    if (original && original !== record
-        && record.content.testimony_speaker
-        && original.content.testimony_speaker === record.content.testimony_speaker
-        && record.internal_provenance?.dialogue_source_channel === "understood_testimony"
-        && original.internal_provenance?.dialogue_source_channel === "understood_testimony") {
-      retracted.add(original.memory_id);
+    const targets = Array.isArray(record.content.retracts_memory_ids)
+      ? record.content.retracts_memory_ids.slice(0, 16)
+      : record.content.retracts_memory_id ? [record.content.retracts_memory_id] : [];
+    for (const memoryId of targets) {
+      const original = byId.get(memoryId);
+      if (original && original !== record
+          && record.content.testimony_speaker
+          && original.content.testimony_speaker === record.content.testimony_speaker
+          && record.internal_provenance?.dialogue_source_channel === "understood_testimony"
+          && original.internal_provenance?.dialogue_source_channel === "understood_testimony") {
+        retracted.add(original.memory_id);
+      }
     }
   }
   return claims.filter(record => !retracted.has(record.memory_id));
 }
 
-export function findTestimonyRetraction({source, memories, referent, detail}) {
+// A witness can repeat one location without creating a second competing
+// position. The next explicit correction retracts *all* repeated copies;
+// different locations, witnesses or types are never collapsed.
+export function findTestimonyRetractions({source, memories, referent, detail}) {
   if (source?.channel !== "understood_testimony" || !source.speaker || !source.receipt_hash
       || !/^learned_[a-f0-9]{24}$/u.test(referent ?? "")
-      || !detail?.lesson || !detail?.detail_type || !revisedTestimonyBody(source.text)) return null;
+      || !detail?.lesson || !detail?.detail_type || !revisedTestimonyBody(source.text)) return [];
   const existing = activeTestimonyClaims(memories, referent, detail.detail_type)
     .filter(record => record.content.testimony_speaker === source.speaker
       && record.internal_provenance?.dialogue_source_channel === "understood_testimony");
-  if (existing.length !== 1 || existing[0].content.lesson === detail.lesson) return null;
-  return existing[0].memory_id;
+  const distinct = new Set(existing.map(record => normalize(record.content.lesson)));
+  if (!existing.length || existing.length > 16 || distinct.size !== 1
+      || distinct.has(normalize(detail.lesson))
+      || existing.some(record => typeof record.memory_id !== "string" || !record.memory_id)) return [];
+  return existing.map(record => record.memory_id);
+}
+
+// Preserve the one-to-one API for legacy callers.
+export function findTestimonyRetraction(input) {
+  const targets = findTestimonyRetractions(input);
+  return targets.length === 1 ? targets[0] : null;
 }
 
 // An omitted subject can be recovered only from one recent, recognized
@@ -67,14 +84,17 @@ export function findEllipticalLocationCorrection({source, memories, observedAt})
     const when = Date.parse(record.encoded_at ?? "");
     return Number.isFinite(when) && currentTime >= when && currentTime - when <= 10 * 60 * 1000;
   });
-  if (recent.length !== 1) return null;
+  const samePlace = new Set(recent.map(record =>
+    record.content.referent_id + ":" + normalize(record.content.lesson)));
+  if (!recent.length || recent.length > 16 || samePlace.size !== 1) return null;
   const [prior] = recent;
   return {
     referent_id: prior.content.referent_id,
     referent_name: prior.content.referent_name,
     referent_aliases: list(prior.content.referent_aliases),
     detail: {detail_type: "location", lesson: prior.content.referent_name + "放在" + place + "。"},
-    retracts_memory_id: prior.memory_id,
+    ...(recent.length === 1 ? {retracts_memory_id: prior.memory_id}
+      : {retracts_memory_ids: recent.map(record => record.memory_id)}),
   };
 }
 

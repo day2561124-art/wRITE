@@ -3,7 +3,7 @@ import { committedDescriptor, dialogueClarificationFragment, dialogueDescriptorQ
   dialogueDescription, matchesDescriptor, namedByDescription, sameDescriptor } from "./observer-dialogue-description-service.mjs";
 import { dialogueClarificationQuestion } from "./observer-dialogue-clarification-service.mjs";
 import { isDialoguePanelMemory } from "./observer-dialogue-panel-memory-service.mjs";
-import { findEllipticalLocationCorrection, findTestimonyRetraction, revisedTestimonyBody,
+import { findEllipticalLocationCorrection, findTestimonyRetractions, revisedTestimonyBody,
   singleUncontestedTestimony } from "./observer-dialogue-testimony-revision-service.mjs";
 
 export const observerDialogueLearningVersion = "observer-dialogue-learning-v1";
@@ -404,14 +404,15 @@ export function analyzeObserverDialogueLearning({
       .map(statementFor).filter(Boolean);
     if (!introducedName && !aliases.length && details.length !== 1) continue;
     const detail = details.length === 1 ? details[0] : null;
-    const retraction = detail && revisedTestimonyBody(source.text) ? findTestimonyRetraction({
+    const retractions = detail && revisedTestimonyBody(source.text) ? findTestimonyRetractions({
       source, memories, referent: current.id, detail,
-    }) : null;
+    }) : [];
     bindings.set(sourceKey(source), {
       source, referent_id: current.id, referent_name: current.name,
       referent_aliases: unique([...current.aliases, ...aliases]).slice(0, 8),
       detail,
-      ...(retraction ? {retracts_memory_id: retraction} : {}),
+      ...(retractions.length === 1 ? {retracts_memory_id: retractions[0]} : {}),
+      ...(retractions.length > 1 ? {retracts_memory_ids: retractions} : {}),
     });
   }
   const multiObject = new Set(found.map(result => result.mode + ":" + result.referent)).size > 1;
