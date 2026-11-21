@@ -11,7 +11,7 @@ import {getWorldSimulationHistory, getWorldSimulationState} from "../../server/s
 const actor="值班員", witness="陳叔", visitor="季文", item="霧橋出入簿";
 const room="值班室", time="2026-11-21T08:00:00.000Z";
 const original=item+"放在東樓梯櫃。", revised=item+"放在西側醫務櫃。";
-const correction="我剛才說錯了，"+revised;
+const correction="我剛才說錯了，是西側醫務櫃。";
 const question=item+"在哪裡？";
 const expected="陳叔後來說，"+revised;
 function spoken(person, addressee, content, clause) {
@@ -27,7 +27,7 @@ const intro=spoken(witness,actor,"這台簿冊叫「"+item+"」。",
 const old=spoken(witness,actor,original,
   {subject:item,predicate:"放在",object:"東樓梯櫃",punctuation:"。"});
 const update=spoken(witness,actor,correction,
-  {topic:"我剛才說錯了",subject:item,predicate:"放在",object:"西側醫務櫃",punctuation:"。"});
+  {topic:"我剛才說錯了",omit_subject:true,predicate:"是",object:"西側醫務櫃",punctuation:"。"});
 const ask=spoken(visitor,actor,question,
   {subject:item,predicate:"在哪裡",punctuation:"？"});
 const event=(id,part,next=[])=>({event_id:id,type:"conversation",scene_id:room,participants:part,next_events:next});
