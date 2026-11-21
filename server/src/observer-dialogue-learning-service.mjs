@@ -3,6 +3,8 @@ import { committedDescriptor, dialogueClarificationFragment, dialogueDescriptorQ
   dialogueDescription, matchesDescriptor, namedByDescription, sameDescriptor } from "./observer-dialogue-description-service.mjs";
 import { dialogueClarificationQuestion } from "./observer-dialogue-clarification-service.mjs";
 import { isDialoguePanelMemory } from "./observer-dialogue-panel-memory-service.mjs";
+import { findEllipticalLocationCorrection, findTestimonyRetraction, revisedTestimonyBody,
+  singleUncontestedTestimony } from "./observer-dialogue-testimony-revision-service.mjs";
 
 export const observerDialogueLearningVersion = "observer-dialogue-learning-v1";
 export function learnedDialogueLineageHash(record) {
@@ -49,7 +51,9 @@ function requestedField(text) {
 function answerKind(text) {
   const clauses = dialogueClauses(text).filter(clause => question.test(clause));
   return clauses.length === 1 && !/(?:已經|剩|還能|不能|不是|如果|假如|可否|能不能|以前)/u.test(clauses[0])
-    && /(?:能|可以|最多)倒數(?:多久|多長時間|幾(?:秒|分鐘|小時))/u.test(clauses[0]) ? "max_countdown" : null;
+    && /(?:能|可以|最多)倒數(?:多久|多長時間|幾(?:秒|分鐘|小時))/u.test(clauses[0]) ? "max_countdown"
+    : clauses.length === 1 && field(clauses[0]) === "location"
+      && /(?:在哪(?:裡|裏)?|放在哪(?:裡|裏)?)/u.test(clauses[0]) ? "object_location" : null;
 }
 
 function permittedName(value) {
@@ -301,7 +305,7 @@ function resolveClarificationFragment(reply, sources, registry) {
 // objects or the text of another character. A candidate binding is ephemeral.
 export function analyzeObserverDialogueLearning({
   character, perception, memories, previousReferent, pausedReferent, verifiedReceiptHashes, clarificationReply,
-  allowDialogueContinuation, answerCorrection,
+  allowDialogueContinuation, answerCorrection, observationTime,
 }) {
   const sources = observerLearningObservations(perception, character, verifiedReceiptHashes);
   const registry = localRegistry(memories);
@@ -314,6 +318,13 @@ export function analyzeObserverDialogueLearning({
   const inheritedQuestions = new Set();
   for (const source of sources) {
     const {text} = source;
+    const elliptical = findEllipticalLocationCorrection({source, memories,
+      observedAt: observationTime ?? perception?.simulation_time});
+    if (elliptical && registry.has(elliptical.referent_id)) {
+      found.push(focusOn(elliptical.referent_id, text));
+      bindings.set(sourceKey(source), {source, ...elliptical});
+      continue;
+    }
     const namedMatch = nameMentions(text, registry);
     const named = namedMatch.entries;
     const lines = dialogueClauses(text);
@@ -392,10 +403,15 @@ export function analyzeObserverDialogueLearning({
           || byMention(line, introducedNames).length > 0)))
       .map(statementFor).filter(Boolean);
     if (!introducedName && !aliases.length && details.length !== 1) continue;
+    const detail = details.length === 1 ? details[0] : null;
+    const retraction = detail && revisedTestimonyBody(source.text) ? findTestimonyRetraction({
+      source, memories, referent: current.id, detail,
+    }) : null;
     bindings.set(sourceKey(source), {
       source, referent_id: current.id, referent_name: current.name,
       referent_aliases: unique([...current.aliases, ...aliases]).slice(0, 8),
-      detail: details.length === 1 ? details[0] : null,
+      detail,
+      ...(retraction ? {retracts_memory_id: retraction} : {}),
     });
   }
   const multiObject = new Set(found.map(result => result.mode + ":" + result.referent)).size > 1;
@@ -420,7 +436,7 @@ export function analyzeObserverDialogueLearning({
     sources,
     scope,
     request_field: confirmed?.field ?? ordinaryField,
-    answer_request: answer === "max_countdown" && entry && speakers.length === 1
+    answer_request: ["max_countdown", "object_location"].includes(answer) && entry && speakers.length === 1
       ? {kind: answer, referent: entry.id, descriptor: currentDescription,
         remembered_descriptor: entry.descriptor, referent_collision: entry.collision,
         speaker: speakers[0].speaker, receipt_hash: speakers[0].receipt_hash,
@@ -465,10 +481,14 @@ export function learnedDialogueMemoryStage(view) {
       .filter(record => view.historical_panel
         ? view.historical_panel.memory_id === record.memory_id && isDialoguePanelMemory(record)
         : !isDialoguePanelMemory(record));
-    const distinct = unique(eligible.map(record => normalize(record.content.lesson)));
-    // Conflicting claims may both remain in memory. This path must not pick
-    // one as settled truth based on order of storage.
-    const record = distinct.length === 1 ? eligible[0] : null;
+    // The full committed evidence may veto a stale retrieval frontier.
+    const all = Array.isArray(view.committed_referent_memories)
+      ? view.committed_referent_memories : null;
+    const selected = !view.historical_panel && all && view.conversation_referent
+      ? singleUncontestedTestimony(all, view.conversation_referent, requestField) : null;
+    const record = !all || !view.conversation_referent || view.historical_panel
+      ? (unique(eligible.map(item => normalize(item.content.lesson))).length === 1 ? eligible[0] : null)
+      : selected ? eligible.find(item => item.memory_id === selected.memory_id) ?? null : null;
     return record ? {
       contacted_candidate_refs: [record.memory_id],
       recovered_selections: [{source_memory_ref: record.memory_id, content_kind: "detail",

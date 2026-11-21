@@ -979,6 +979,8 @@ const steps = [
   ["Native dialogue learning", ["tests/communication/observer-dialogue-native-learning.test.mjs"]],
   ["Native dialogue reference boundaries", ["tests/communication/observer-dialogue-native-references.test.mjs"]],
   ["Native dialogue correction and shared context", ["tests/communication/observer-dialogue-native-continuation.test.mjs"]],
+  ["Witness testimony revision and recall", ["tests/communication/observer-dialogue-testimony-revision.test.mjs"]],
+  ["Native witness correction and retrieval", ["tests/communication/observer-dialogue-native-revision.test.mjs"]],
   ["Native dialogue and prior panel memory", ["tests/communication/observer-dialogue-native-description.test.mjs"]],
   ["Native movement and fresh panel recheck", ["tests/communication/observer-dialogue-native-panel-recheck.test.mjs"]],
   ["CC-7A subjective turn projection and response preparation", ["tests/communication/cc7-turn-projection.test.mjs"]],
