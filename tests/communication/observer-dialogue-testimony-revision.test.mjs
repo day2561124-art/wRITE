@@ -97,7 +97,7 @@ const reply = planDialogueLocationAnswer({character: observer, target, request,
   memories: [first, second], retrieval: recovered(second), cognition: cognition(second)});
 assert.equal(reply?.surface_realization?.clause?.topic, witness + "後來說");
 assert.equal(buildCharacterCommunicationActionCandidate({character: observer, cognition: {
-  communication_goal: reply}})?.communication?.surface_realization?.surface_text,
+  ...cognition(second), communication_goal: reply}})?.communication?.surface_realization?.surface_text,
   witness + "後來說，" + revised);
 const uncertain = (memories, memory) => planDialogueLocationAnswer({character: observer, target,
   request, memories, retrieval: recovered(memory), cognition: cognition(memory)}).public_content;
