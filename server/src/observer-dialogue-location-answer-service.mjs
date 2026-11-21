@@ -26,7 +26,7 @@ export function planDialogueLocationAnswer({character, target, request, cognitio
       ...(source ? {claim_kind: "uncertain_hypothesis", claim_source_kind: source}
         : {unresolved_question_followup: true}),
       surface_realization: {schema_version: "cc5-mandarin-clause-request-v1",
-        semantic_anchor: content, clause}};
+        semantic_anchor: content, clause: source ? clause : {...clause, punctuation: "。"}}};
   }
   const uncertain = () => goal("我不確定，得再查一下。",
     {topic: "我不確定", omit_subject: true, predicate: "得再查一下"});
