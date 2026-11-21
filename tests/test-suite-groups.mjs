@@ -30,6 +30,7 @@ export const communicationSteps = Object.freeze([
   Object.freeze(["Native dialogue correction and shared context", ["tests/communication/observer-dialogue-native-continuation.test.mjs"]]),
   Object.freeze(["Witness testimony revision and recall", ["tests/communication/observer-dialogue-testimony-revision.test.mjs"]]),
   Object.freeze(["Native witness correction and retrieval", ["tests/communication/observer-dialogue-native-revision.test.mjs"]]),
+  Object.freeze(["Native repeated witness correction", ["tests/communication/observer-dialogue-native-repeated-revision.test.mjs"]]),
   Object.freeze(["Native dialogue and prior panel memory", ["tests/communication/observer-dialogue-native-description.test.mjs"]]),
   Object.freeze(["Native movement and fresh panel recheck", ["tests/communication/observer-dialogue-native-panel-recheck.test.mjs"]]),
   Object.freeze(["CC-7A subjective turn projection and response preparation", ["tests/communication/cc7-turn-projection.test.mjs"]]),
