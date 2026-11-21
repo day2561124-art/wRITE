@@ -475,12 +475,12 @@ export function learnedDialogueMemoryStage(view) {
         : !isDialoguePanelMemory(record));
     // The full committed evidence may veto a stale retrieval frontier.
     const all = Array.isArray(view.committed_referent_memories)
-      ? view.committed_referent_memories : eligible;
-    const selected = view.historical_panel ? null
-      : singleUncontestedTestimony(all, view.conversation_referent, requestField);
-    const record = view.historical_panel
+      ? view.committed_referent_memories : null;
+    const selected = !view.historical_panel && all && view.conversation_referent
+      ? singleUncontestedTestimony(all, view.conversation_referent, requestField) : null;
+    const record = !all || !view.conversation_referent || view.historical_panel
       ? (unique(eligible.map(item => normalize(item.content.lesson))).length === 1 ? eligible[0] : null)
-      : selected && eligible.find(item => item.memory_id === selected.memory_id) ? selected : null;
+      : selected ? eligible.find(item => item.memory_id === selected.memory_id) ?? null : null;
     return record ? {
       contacted_candidate_refs: [record.memory_id],
       recovered_selections: [{source_memory_ref: record.memory_id, content_kind: "detail",
