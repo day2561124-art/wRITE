@@ -3,8 +3,9 @@ import { hashAgentRunValue } from "../../server/src/agent-run-service.mjs";
 import { analyzeObserverDialogueLearning, learnedDialogueMemoryStage, observerDialogueLearningVersion } from "../../server/src/observer-dialogue-learning-service.mjs";
 import { buildCharacterCommunicationActionCandidate } from "../../server/src/character-communication-foundation-service.mjs";
 import { planDialogueLocationAnswer } from "../../server/src/observer-dialogue-location-answer-service.mjs";
-import { activeTestimonyClaims, findEllipticalLocationCorrection, findTestimonyRetraction, revisedTestimonyBody,
-  singleUncontestedTestimony } from "../../server/src/observer-dialogue-testimony-revision-service.mjs";
+import { activeTestimonyClaims, findEllipticalLocationCorrection, findTestimonyRetraction,
+  findTestimonyRetractions, revisedTestimonyBody, singleUncontestedTestimony
+} from "../../server/src/observer-dialogue-testimony-revision-service.mjs";
 
 const observer = "值班員", witness = "陳叔", other = "季文", name = "霧橋出入簿";
 const referent = "learned_" + "a".repeat(24);
@@ -54,6 +55,50 @@ assert.equal(singleUncontestedTestimony([first, second], referent, "location")?.
 assert.equal(singleUncontestedTestimony([first, second, third], referent, "location")?.memory_id, third.memory_id);
 assert.deepEqual(activeTestimonyClaims([first, second, third], referent, "location").map(x => x.memory_id),
   [third.memory_id], "Past testimony is retained but no longer competes in current judgement");
+
+// After a witness repeats the corrected answer, one later correction must
+// withdraw *both* copies of that witness's now-stale location.
+const repeated = record("memory_repeated", witness, revised);
+const final = record("memory_final", witness, name + "放在地下保管室。",
+  null);
+const finalLine = "我剛才說錯了，" + final.content.lesson;
+const finalDetail = {detail_type:"location", lesson:final.content.lesson};
+assert.deepEqual(findTestimonyRetractions({source:speaking(finalLine),
+  memories:[first,second,repeated],referent,detail:finalDetail}),
+  [second.memory_id,repeated.memory_id]);
+const chainFinal = {...final, content:{...final.content,
+  retracts_memory_ids:[second.memory_id,repeated.memory_id]}};
+assert.deepEqual(activeTestimonyClaims([first,second,repeated,chainFinal],referent,"location")
+  .map(x=>x.memory_id),[final.memory_id]);
+assert.equal(singleUncontestedTestimony([first,second,repeated,chainFinal],referent,"location")
+  ?.content.lesson,final.content.lesson);
+assert.equal(findTestimonyRetraction({source:speaking(finalLine),
+  memories:[first,second,repeated],referent,detail:finalDetail}),null,
+  "The old single-target API refuses ambiguous multiple rows");
+const repeatedBrief = findEllipticalLocationCorrection({
+  source:speaking("我剛才說錯了，是地下保管室。"),
+  memories:[first,second,repeated], observedAt:"2026-11-20T08:01:00Z",
+});
+assert.deepEqual(repeatedBrief?.retracts_memory_ids,
+  [second.memory_id,repeated.memory_id]);
+assert.equal(repeatedBrief?.detail.lesson,final.content.lesson);
+
+const otherWitness = record("memory_other_witness",other,revised);
+assert.deepEqual(findTestimonyRetractions({source:speaking(finalLine),
+  memories:[first,second,repeated,otherWitness],referent,detail:finalDetail}),
+  [second.memory_id,repeated.memory_id],"Do not retract a different person's testimony");
+assert.equal(singleUncontestedTestimony(
+  [first,second,repeated,chainFinal,otherWitness],referent,"location"),null,
+  "An independent contradictory witness must remain in the dispute");
+assert.deepEqual(findTestimonyRetractions({source:speaking(finalLine,other),
+  memories:[first,second,repeated],referent,detail:finalDetail}),[],
+  "Even a confidently recognized different speaker cannot retract this witness");
+const firstHand = {...record("sighted",null,name+"放在東樓梯櫃。"),
+  internal_provenance:{dialogue_learning_version:observerDialogueLearningVersion,
+    dialogue_source_channel:"observed_text"}};
+assert.equal(singleUncontestedTestimony([firstHand,second,repeated,chainFinal],
+  referent,"location"),null,"An eyewitness location conflict must not be silently overridden");
+
 assert.equal(singleUncontestedTestimony([first, record("unretracted", witness, revised)], referent, "location"), null,
   "Same speaker inconsistency without a correction is unresolved");
 assert.equal(singleUncontestedTestimony([first, record("other", other, revised)], referent, "location"), null,
@@ -61,6 +106,13 @@ assert.equal(singleUncontestedTestimony([first, record("other", other, revised)]
 const heard = {kind: "understood_utterance", schema_version: "cc2-listener-understood-utterance-v1",
   observer, speaker: witness, semantic_content: line, speech_content_intelligible: true,
   speaker_identity_recognized: true, public_event_committed: true, world_truth_claimed: false};
+const unrecognized = {...heard, speaker_identity_recognized:false};
+const unrecognizedAnalysis = analyzeObserverDialogueLearning({
+  character:observer, perception:{audible:[unrecognized]},memories:[first],
+  verifiedReceiptHashes:[hashAgentRunValue(unrecognized)],
+});
+assert.equal(unrecognizedAnalysis.bindings.size,0,
+  "An unrecognized speaker must not be adopted as a witness correction");
 const analyzed = analyzeObserverDialogueLearning({
   character: observer, perception: {audible: [heard]}, memories: [first],
   verifiedReceiptHashes: [hashAgentRunValue(heard)],
