@@ -38,6 +38,12 @@ export function createMcpCapabilityAdapter({ callTool, resolveWorkspace } = {}) 
       ].join("\n"),
       cwd: ".",
       timeoutMs: 30000,
+      service_authorization: {
+        task_authorization_id: intent.task_authorization_id,
+        workstream_id: context.workstream_id,
+        goal: intent.goal,
+        service_name: action.input.service_name,
+      },
     } : { ...action.input };
     if(intent.bootstrap && action.capability==="workspace.create_isolated") {
       if(!binding || binding.workspace_id!=="dev_workspace_shared_repository_v1") failure("BOOTSTRAP_BINDING_REQUIRED");

@@ -2,9 +2,11 @@
 
 ## 啟用任務授權
 
-在 Nexa 主機建立專用 NTFS 目錄，透過 Windows ACL 授予工程授權操作員寫入權限，並授予 MCP 服務及 Pi worker 帳號讀取權限。目錄要位於專案、工程工作區及測試可寫範圍之外。若服務與操作員使用同一 Windows 帳號，先分離身分再啟用。將絕對路徑設為 `NEXA_PI_TASK_AUTHORIZATION_ROOT`。正式切換時設定 `NEXA_PI_REQUIRE_TASK_AUTHORIZATION=1`，使 Pi 的一般寫入、驗證、提交及檢查點要求有效授權。MCP 與 durable worker 會使用相同的設定。
+在 Nexa 主機的維護時段，透過已檢閱的發布版本，在提升權限的 64 位元 Windows PowerShell 執行 `scripts/register-mcp-powershell-admin-runner.ps1 -ScopedTaskAuthorizations`。它會沿用既有排程名稱，在 `Program Files` 建立受保護的授權庫。Windows ACL 允許管理員與 SYSTEM 寫入授權、撤銷記錄與收據。一般 MCP 和 Pi worker 程序只有供請求標記使用的收件匣可寫，同一個登入帳號可藉由一般與提升權限的 token 分工。
 
-工作台先用既有 Workstream 和 Workspace 流程建立作用中的獨立工作區。授權操作員在 Nexa 主機執行 `node scripts/manage-pi-task-authorization.mjs issue task.json`。`task.json` 提供 `goal`、`workspace_id`、`capabilities` 陣列，以及 UTC epoch 毫秒的 `expires_at_ms`。主機由工作區登錄資料解析工作流身分。授權記錄的 `task_authorization_id` 會寫入關聯 Pi 執行紀錄。
+將註冊結果的 `task_authorization_root` 設為 `NEXA_PI_TASK_AUTHORIZATION_ROOT`。正式切換時設定 `NEXA_PI_REQUIRE_TASK_AUTHORIZATION=1`，使 Pi 的一般寫入、驗證、提交及檢查點要求有效授權。從同一啟動環境啟動 MCP 與 durable worker。安裝完成後，先以一般程序確認授權目錄可讀、寫入受阻，再執行服務驗收。
+
+工作台先用既有 Workstream 和 Workspace 流程建立作用中的獨立工作區。授權操作員在已設定相同授權目錄的提升權限終端執行 `node scripts/manage-pi-task-authorization.mjs issue task.json`。`task.json` 提供 `goal`、`workspace_id`、`capabilities` 陣列，以及 UTC epoch 毫秒的 `expires_at_ms`。主機由工作區登錄資料解析工作流身分。授權記錄的 `task_authorization_id` 會寫入關聯 Pi 執行紀錄。
 
 同一個任務可以允許檔案讀取、列目錄、建立檔案、套用精確修補、Git 狀態與提交、指定測試和檢查點。各步驟仍由原 MCP handler 驗證工作區、路徑、Git HEAD、測試範圍和效果。
 
@@ -18,7 +20,9 @@
 
 ## 預先授權維護 Windows 服務
 
-維護已安裝的專案服務時，授權操作員在 `task.json` 的 `capabilities` 加入 `windows.service.ensure_running`，並在 `windows_services` 列出核准的服務名稱。GPT 交付的步驟以 `service_name` 指定其中一個目標。Pi 透過現有 `powershell_admin_run` 及已註冊的 Task Scheduler runner，確認服務狀態、啟動已停止的服務，並等待服務進入 `Running`。同一份授權可維護多個核准目標，工作區、到期、撤銷和 Journal 規則與一般步驟相同。請使用作業系統已註冊且受管理的開發服務名稱。
+維護已安裝的專案服務時，授權操作員在 `task.json` 的 `capabilities` 加入 `windows.service.ensure_running`，並在 `windows_services` 列出核准的服務名稱。GPT 交付的步驟以 `service_name` 指定其中一個目標。Pi 透過現有 `powershell_admin_run` 提交範圍標記。受保護的 Task Scheduler runner 從授權庫獨立核對目標、工作區、工作流、期限及撤銷狀態，再確認服務、啟動已停止的服務並等待 `Running`。同一份授權可維護多個核准目標。收件匣只接收範圍標記，通用管理員診斷由操作員在獨立的提權終端處理。
+
+提升權限的 runner 將收據寫入受保護目錄，收據識別碼與 Journal 子操作一致。若 MCP 程序在收據發布後中斷，Nexa 會對帳同一筆收據。可確認的成功或未派送失敗會結束原操作。收據缺失、範圍不符或服務派送後失敗時，Nexa 保留待對帳狀態，避免重新派送。
 
 ## 提交工程工作
 

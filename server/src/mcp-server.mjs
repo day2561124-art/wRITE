@@ -2064,7 +2064,7 @@ const toolDefinitions = [
   },
   {
     name: "powershell_admin_run",
-    description: "Run bounded elevated Windows PowerShell through the one-time registered protected Task Scheduler runner. Writer Workbench itself remains non-elevated; UAC stays enabled; cwd/timeout/output/safety limits and Development Journal recording still apply.",
+    description: "Run protected Windows maintenance through the registered Task Scheduler runner. Task-authorized service maintenance is independently checked by the elevated runner. Legacy diagnostic PowerShell remains available on compatible hosts with task enforcement disabled.",
     risk: "high-risk-write",
     annotations: { readOnlyHint: false },
     inputSchema: baseSchema({
@@ -2074,6 +2074,11 @@ const toolDefinitions = [
         maxLength: POWERSHELL_MAINTENANCE_COMMAND_MAX_CHARACTERS,
       },
       cwd: { type: "string", default: "." },
+      service_authorization: { type: "object", additionalProperties: false,
+        properties: { task_authorization_id: { type: "string", pattern: "^pi_task_[a-f0-9]{32}$" },
+          workstream_id: { type: "string", pattern: DEV_WORKSTREAM_ID_PATTERN_SOURCE },
+          goal: { type: "string", maxLength: 4096 }, service_name: { type: "string", maxLength: 80 } },
+        required: ["task_authorization_id", "workstream_id", "goal", "service_name"] },
       timeoutMs: {
         type: "integer",
         minimum: 1_000,
@@ -2081,7 +2086,12 @@ const toolDefinitions = [
         default: POWERSHELL_MAINTENANCE_DEFAULT_TIMEOUT_MS,
       },
     }, ["command"]),
-    handler: async (args) => jsonContent(await powershell_admin_run(args)),
+    handler: async (args) => {
+      if (args.service_authorization !== undefined ? !isPiManagedMcpCall() : process.env.NEXA_PI_REQUIRE_TASK_AUTHORIZATION === "1") {
+        throw markPowerShellPreDispatchFailure(new Error("SCOPED_ADMIN_AUTHORIZATION_REQUIRED"), "powershell_admin_run");
+      }
+      return jsonContent(await powershell_admin_run(args));
+    },
   },
   {
     name: "dev_git_status",

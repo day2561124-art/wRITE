@@ -122,6 +122,23 @@ const gitSha1Pattern = /^[a-f0-9]{40}$/u;
 const stageSet = new Set(DEV_JOURNAL_STAGES);
 const linkTypeSet = new Set(DEV_JOURNAL_LINK_TYPES);
 const terminalStageSet = new Set(["operation_completed", "operation_failed", "operation_recovered"]);
+
+function scopedAdminChildOutcome(started, terminal) {
+  const before = started.result;
+  const after = terminal?.result;
+  if (started.tool_name !== "powershell_admin_run" || started.operation_type !== "powershell_admin_maintenance"
+    || !/^[a-f0-9]{32}$/u.test(before?.scoped_admin_scope_binding ?? "") || !after
+    || !["operation_completed", "operation_recovered"].includes(terminal.stage)
+    || after.command_sha256 !== before.command_sha256 || after.scoped_admin_scope_binding !== before.scoped_admin_scope_binding
+    || after.scoped_request_id !== started.operation_id.slice("dev_operation_".length)
+    || after.task_authorization_id !== before.task_authorization_id || after.service_name !== before.service_name
+    || typeof after.scoped_admin_dispatch_started !== "boolean"
+    || (terminal.stage === "operation_recovered" && !/^[a-f0-9]{64}$/u.test(after.scoped_admin_receipt_sha256 ?? ""))) return null;
+  if (after.execution_ok === true && after.exit_code === 0) return "intended_effect_observed";
+  if (after.scoped_admin_dispatch_started === false && after.execution_ok === false
+    && ["SCOPED_ADMIN_AUTHORIZATION_DENIED", "SCOPED_ADMIN_SERVICE_FAILED"].includes(after.reason)) return "failed_no_effect";
+  return null;
+}
 const fixedGitExecutable = process.platform === "win32" ? "git.exe" : "git";
 const explicitWorkspaceMutationOperationTypes = new Set(["git_commit", "integration_apply"]);
 
@@ -648,6 +665,7 @@ export function createDevOperationJournalService({
   lockAcquireTimeoutMs = DEV_JOURNAL_LOCK_ACQUIRE_TIMEOUT_MS,
   executionPublicationHook,
   lifecycleEffectInspector,
+  scopedAdminEffectInspector,
   resolutionContextResolver,
   resolutionEvidenceRoot = projectRoot,
   isolationRecoveryAuthority,
@@ -1572,6 +1590,29 @@ export function createDevOperationJournalService({
         // A legacy child's declaration cannot prove a future shell had no effect.
         outcome = "ambiguous_effect";
         ambiguous = true;
+        if (started.tool_name === "powershell_admin_run" && started.result?.scoped_admin_scope_binding) {
+          try {
+            const { inspectScopedAdminRecovery } = await import("./mcp-powershell-maintenance-tools.mjs");
+            const result = await (scopedAdminEffectInspector ?? inspectScopedAdminRecovery)(started);
+            const observed = scopedAdminChildOutcome(started, { stage: "operation_recovered", result });
+            if (observed) { outcome = observed; ambiguous = false; lifecycleFacts = result; }
+          } catch { /* Preserve ambiguity if the protected result is unavailable. */ }
+        } else if (started.tool_name === "powershell_admin_run" && started.operation_type === "mcp_mutation") {
+          const current = await verify();
+          const children = current.events.filter(event => event.parent_operation_id === operationId && event.stage === "operation_started");
+          if (children.length === 1 && children[0].workspace_id === started.workspace_id && children[0].workstream_id === started.workstream_id) {
+            const child = children[0];
+            const childTerminal = current.events.find(event => event.operation_id === child.operation_id && terminalStageSet.has(event.stage));
+            const observed = scopedAdminChildOutcome(child, childTerminal);
+            if (observed) {
+              outcome = observed;
+              ambiguous = false;
+              lifecycleFacts = { scoped_admin_child_terminal_id: childTerminal.journal_event_id,
+                execution_ok: childTerminal.result.execution_ok, exit_code: childTerminal.result.exit_code,
+                reason: childTerminal.result.reason, timed_out: false };
+            }
+          }
+        }
       } else if (started.operation_type === "mcp_mutation") {
         // Absence of child evidence never proves that an arbitrary handler had no effect.
         const current = await verify();
@@ -2252,25 +2293,26 @@ function verifiedMcpTestResult(events,started,terminal) {
       const shell = isPowerShellOperation({tool_name: context.tool_name, operation_type: "mcp_mutation"});
       const childStarts = events => events.filter(event => event.parent_operation_id === admission.operation_id
         && event.stage === "operation_started");
-      const terminatedIsolatedChild = (events, children) => {
+      const witnessedNoEffectChild = (events, children) => {
         if (children.length !== 1) return false;
         const [child] = children;
+        const terminal = events.find(event => event.operation_id === child.operation_id && event.stage === "operation_completed");
+        if (!terminal || terminal.result.command_sha256 !== child.result?.command_sha256) return false;
+        if (child.tool_name === "powershell_admin_run") return scopedAdminChildOutcome(child, terminal) === "failed_no_effect";
         return child.tool_name === "powershell_run" && child.operation_type === "powershell_maintenance"
           && child.result?.isolation_mode === "appcontainer" && child.result.workspace_writes === false
-          && events.some(event => event.operation_id === child.operation_id && event.stage === "operation_completed"
-            && event.result?.isolation_mode === "appcontainer" && event.result.workspace_writes === false
-            && event.result.command_sha256 === child.result.command_sha256
-            && event.result.input_manifest_sha256 === child.result.input_manifest_sha256
-            && event.result.job_terminated === true && event.result.cleanup_pending === false);
+          && terminal.result.isolation_mode === "appcontainer" && terminal.result.workspace_writes === false
+          && terminal.result.input_manifest_sha256 === child.result.input_manifest_sha256
+          && terminal.result.job_terminated === true && terminal.result.cleanup_pending === false;
       };
       const dispatchEvidenceChanged = new Error("POWERSHELL_DISPATCH_EVIDENCE_CHANGED");
-      const recordFailure = async (noEffect, isolated = false) => {
+      const recordFailure = async (noEffect, childWitness = false) => {
         try {
           return await fail(admission.operation_id, {
             result: { outcome: noEffect ? "failed_no_effect" : "ambiguous_effect", reconciliation_required: !noEffect },
             beforeAppend: shell && noEffect ? snapshot => {
               const children = childStarts(snapshot.events);
-              if (isolated ? !terminatedIsolatedChild(snapshot.events, children) : children.length !== 0) throw dispatchEvidenceChanged;
+              if (childWitness ? !witnessedNoEffectChild(snapshot.events, children) : children.length !== 0) throw dispatchEvidenceChanged;
             } : undefined,
           });
         } catch (error) {
@@ -2310,14 +2352,14 @@ function verifiedMcpTestResult(events,started,terminal) {
       if (value?.isError === true || (!completedCommandObservation && (payload?.ok === false || payload?.execution_ok === false))) {
         const verification = await verify();
         const children = childStarts(verification.events);
-        const isolatedNoEffect = shell && terminatedIsolatedChild(verification.events, children);
-        const noEffect = shell ? isolatedNoEffect || children.length === 0 && isPowerShellPreDispatchFailure(value, admission)
+        const childWitness = shell && witnessedNoEffectChild(verification.events, children);
+        const noEffect = shell ? childWitness || children.length === 0 && isPowerShellPreDispatchFailure(value, admission)
           : (children.length === 0 && ["dev_create_file", "dev_apply_patch"].includes(context.tool_name))
           || (children.length === 0 && isWorkstreamPrewriteFailure(value, {tool_name: context.tool_name, operation_id: admission.operation_id}))
           || children.length > 0 && children.every((child) => verification.events.some((event) =>
           event.operation_id === child.operation_id && terminalStageSet.has(event.stage)
           && ["failed_no_effect", "no_effect_observed"].includes(event.result?.outcome)));
-        await recordFailure(noEffect, isolatedNoEffect);
+        await recordFailure(noEffect, childWitness);
       } else {
         const verification = await verify();
         const children = verification.events.filter((event) => event.parent_operation_id === admission.operation_id
