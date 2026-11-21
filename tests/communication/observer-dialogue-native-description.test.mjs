@@ -341,6 +341,11 @@ async function run(scenario) {
         actor_motivation_basis_count: directGoalView.motivation_basis.length,
         bystander_motivation_basis_count: otherGoalView.motivation_basis.length,
         actor_existing_goals_count: directGoalView.existing_goals.length,
+        actor_learned_dialogue_memories_count: learned(final).length,
+        actor_subjective_claim_history_refs: (final.subjective_claim_history ?? [])
+          .filter(ref => ref.character === actor).length,
+        actor_subjective_belief_revision_history_refs: (final.subjective_belief_revision_history ?? [])
+          .filter(ref => ref.character === actor).length,
       }));
 
       // RED C2→C3 bridge: the same real-world evidence must reach the
@@ -359,6 +364,16 @@ async function run(scenario) {
       "Precondition: C2 actually dispatched this character's World-grounded question.");
 
       const ownMind = cognitivePackets.find(packet => packet.character === actor);
+      const currentMind = ownMind?.cognition?.autonomous_opportunity?.current_mind ?? {};
+      // Read-only diagnostic: distinguish a C2 trigger with a genuine
+      // subject-specific internal context from a bare generic trigger kind.
+      console.log(JSON.stringify({
+        scenario: "c2_question_context_readonly_audit",
+        current_mind_keys: Object.keys(currentMind).sort(),
+        current_mind_mentions_question_subject: JSON.stringify(currentMind).includes("計時器"),
+        current_mind_mentions_followup: JSON.stringify(currentMind).includes("查"),
+        received_trigger_kinds: ownMind?.cognition?.autonomous_opportunity?.trigger_kinds ?? [],
+      }));
       // The regular Native Brain packet already uses this exact CB-C3 field.
       // The independent C2 path must reuse it, not invent a duplicate API.
       const goalView = ownMind?.native_goal_decision;
