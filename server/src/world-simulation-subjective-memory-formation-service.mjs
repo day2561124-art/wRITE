@@ -514,6 +514,8 @@ function memoryRecordFor({
         ? {testimony_speaker: dialogueBinding.source.speaker} : {}),
       ...(dialogueBinding.retracts_memory_id
         ? {retracts_memory_id: dialogueBinding.retracts_memory_id} : {}),
+      ...(Array.isArray(dialogueBinding.retracts_memory_ids)
+        ? {retracts_memory_ids: dialogueBinding.retracts_memory_ids.slice(0, 16)} : {}),
       ...(dialogueBinding.panel_reading ? {panel_reading: dialogueBinding.panel_reading} : {}),
       statement_kind: dialogueBinding.panel_reading ? dialoguePanelStatement
         : dialogueBinding.detail ? "perceived_statement_not_verified"
