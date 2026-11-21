@@ -28,6 +28,7 @@ import { POWERSHELL_EFFECT_RESOLUTION, REVIEWED_POWERSHELL_EFFECT_PROFILE, isPow
 import { REVIEWED_PI_WORKER_REFRESH, isReviewedPiWorkerRefresh, reviewedPiWorkerRefreshResult } from "./mcp-pi-worker-refresh-recovery.mjs";
 import { TRPG_LAUNCH_RESOLUTION, TRPG_LAUNCH_RESOLUTION_TOOL, TRPG_LAUNCH_OUTCOME, validateTrpgLaunchResolution } from "./mcp-trpg-interrupted-launch-resolution.mjs";
 import { restartResolutionKind, restartResolutionTool, restartParentId, restartChildId, validateRestartProof, validateRestartResolution } from "./mcp-trpg-gateway-restart-resolution.mjs";
+import { TRPG_RESUME_KIND, TRPG_RESUME_TOOL, TRPG_RESUME_RESULT, trpgResumeProofs, validateTrpgResumeResolution, verifyTrpgResumeEvidence } from "./mcp-trpg-supervisor-resume-resolution.mjs";
 import { isPowerShellPreDispatchFailure } from "./mcp-powershell-predispatch-failure.mjs";
 import { projectPaths, projectRoot } from "./project-paths.mjs";
 import { createWorkspaceSnapshotAuthorityIpcClient } from "./mcp-workspace-snapshot-authority-ipc.mjs";
@@ -1008,7 +1009,9 @@ export function createDevOperationJournalService({
     if(head.stdout.trim()!=="570563664d351017d87dd0f13961ed5f7d34e4ab")fail();
   }
 
-  const validateResolution=(events,input)=>input?.resolution_kind===TRPG_LAUNCH_RESOLUTION
+  const validateResolution=(events,input)=>input?.resolution_kind===TRPG_RESUME_KIND
+    ?validateTrpgResumeResolution(events,input)
+    :input?.resolution_kind===TRPG_LAUNCH_RESOLUTION
     ?validateTrpgLaunchResolution(events,input)
     :input?.resolution_kind===INTEGRATION_PREFLIGHT_RESOLUTION
     ?validateIntegrationPreflightResolution(events,input)
@@ -1045,15 +1048,17 @@ export function createDevOperationJournalService({
         resolved.set(restartChildId, event);
         continue;
       }
-      const {started,terminal,archived}=validateResolution(events,proof??{});
+      const {started,terminal,archived}=validateResolution(
+        proof?.resolution_kind === TRPG_RESUME_KIND ? events.filter(entry => entry.sequence < event.sequence) : events,
+        proof??{});
       const admission=events.find(e=>e.operation_id===event.operation_id&&e.stage==="operation_started");
       const workerRefresh=proof.resolution_kind==="completed_powershell_observation"&&proof.operation_id===REVIEWED_PI_WORKER_REFRESH.operation_id;
       if (archived && (event !== archived.receipt || admission !== archived.admission))
         throw new Error("INVALID_TERMINAL_RESOLUTION");
-      if((["completed_git_commit", WORKSTREAM_STALE_RESOLUTION, WORKSTREAM_COMMITTED_RESOLUTION, WORKSTREAM_METADATA_LIMIT_RESOLUTION, ISOLATION_RESOLUTION, POWERSHELL_EFFECT_RESOLUTION, INTEGRATION_PREFLIGHT_RESOLUTION, TRPG_LAUNCH_RESOLUTION].includes(proof.resolution_kind) || proof.resolution_kind==="completed_powershell_observation"&&[REVIEWED_INTERRUPTED_LAUNCHER.operation_id,REVIEWED_PI_WORKER_REFRESH.operation_id].includes(proof.operation_id)) && (
+      if((["completed_git_commit", WORKSTREAM_STALE_RESOLUTION, WORKSTREAM_COMMITTED_RESOLUTION, WORKSTREAM_METADATA_LIMIT_RESOLUTION, ISOLATION_RESOLUTION, POWERSHELL_EFFECT_RESOLUTION, INTEGRATION_PREFLIGHT_RESOLUTION, TRPG_LAUNCH_RESOLUTION, TRPG_RESUME_KIND].includes(proof.resolution_kind) || proof.resolution_kind==="completed_powershell_observation"&&[REVIEWED_INTERRUPTED_LAUNCHER.operation_id,REVIEWED_PI_WORKER_REFRESH.operation_id].includes(proof.operation_id)) && (
         admission?.reconciliation_key !== "resolution:" + started.operation_id
         || admission?.request_fingerprint_sha256 !== sha256Text(canonicalJson(proof))
-        || admission?.tool_name !== (proof.resolution_kind === TRPG_LAUNCH_RESOLUTION ? TRPG_LAUNCH_RESOLUTION_TOOL : proof.resolution_kind === "completed_powershell_observation" ? "pi.journal.resolve_completed_powershell" : proof.resolution_kind === INTEGRATION_PREFLIGHT_RESOLUTION ? "pi.journal.resolve_integration_preflight" : proof.resolution_kind === ISOLATION_RESOLUTION ? ISOLATION_RESOLUTION_TOOL : proof.resolution_kind === POWERSHELL_EFFECT_RESOLUTION ? "pi.journal.resolve_powershell_effect" : proof.resolution_kind === WORKSTREAM_COMMITTED_RESOLUTION
+        || admission?.tool_name !== (proof.resolution_kind === TRPG_RESUME_KIND ? TRPG_RESUME_TOOL : proof.resolution_kind === TRPG_LAUNCH_RESOLUTION ? TRPG_LAUNCH_RESOLUTION_TOOL : proof.resolution_kind === "completed_powershell_observation" ? "pi.journal.resolve_completed_powershell" : proof.resolution_kind === INTEGRATION_PREFLIGHT_RESOLUTION ? "pi.journal.resolve_integration_preflight" : proof.resolution_kind === ISOLATION_RESOLUTION ? ISOLATION_RESOLUTION_TOOL : proof.resolution_kind === POWERSHELL_EFFECT_RESOLUTION ? "pi.journal.resolve_powershell_effect" : proof.resolution_kind === WORKSTREAM_COMMITTED_RESOLUTION
           ? "pi.journal.resolve_workstream_committed" : proof.resolution_kind === WORKSTREAM_METADATA_LIMIT_RESOLUTION ? "pi.journal.resolve_workstream_metadata_limit" : proof.resolution_kind === WORKSTREAM_STALE_RESOLUTION
           ? "pi.journal.resolve_workstream_stale" : "pi.journal.resolve_completed_git_commit")
         || event.tool_name !== admission.tool_name || admission.sequence <= terminal.sequence || event.sequence <= admission.sequence
@@ -1065,7 +1070,7 @@ export function createDevOperationJournalService({
         || event.parent_operation_id!==started.operation_id || admission.parent_operation_id!==started.operation_id
         || event.workspace_id!==started.workspace_id || admission.workspace_id!==started.workspace_id
         || event.workstream_id!==started.workstream_id || admission.workstream_id!==started.workstream_id
-        || event.reconciles_event_id!==terminal.journal_event_id || event.result.outcome!==(proof.resolution_kind===TRPG_LAUNCH_RESOLUTION ? TRPG_LAUNCH_OUTCOME : workerRefresh?"failed_intended_effect_observed":
+        || event.reconciles_event_id!==terminal.journal_event_id || event.result.outcome!==(proof.resolution_kind===TRPG_RESUME_KIND ? TRPG_RESUME_RESULT.outcome : proof.resolution_kind===TRPG_LAUNCH_RESOLUTION ? TRPG_LAUNCH_OUTCOME : workerRefresh?"failed_intended_effect_observed":
           (["completed_child_create","completed_powershell_observation","completed_git_commit",WORKSTREAM_COMMITTED_RESOLUTION,POWERSHELL_EFFECT_RESOLUTION].includes(proof.resolution_kind) || proof.resolution_kind===ISOLATION_RESOLUTION&&proof.observation.classification==="completed")
             ?"intended_effect_observed":"no_effect_observed")
         || (workerRefresh&&Object.entries(reviewedPiWorkerRefreshResult).some(([key,value])=>event.result[key]!==value))
@@ -1073,6 +1078,8 @@ export function createDevOperationJournalService({
           ||event.result.shell_exit_code_observed!==false||Object.hasOwn(event.result,"exit_code")))
         || (proof.resolution_kind===TRPG_LAUNCH_RESOLUTION &&
           (event.result.shell_exit_code_observed!==false || Object.hasOwn(event.result,"exit_code")))
+        || (proof.resolution_kind===TRPG_RESUME_KIND && (Object.hasOwn(event.result,"exit_code")
+          || Object.entries(TRPG_RESUME_RESULT).some(([key,value]) => event.result[key] !== value)))
         || resolved.has(started.operation_id))throw new Error("INVALID_TERMINAL_RESOLUTION");
       resolved.set(started.operation_id,event);
     }
@@ -1759,27 +1766,44 @@ export function createDevOperationJournalService({
   // Publish only an exact, semantically valid resolver event already durable on
   // disk. Recheck original identities, dead owners, profile and frozen physical
   // evidence before head CAS. No generic missing-file/no-child inference.
-  async function recoverPowershellResolutionTail(proof){
+  async function recoverTerminalResolutionTail(proofs, { tool, assertEvidence }) {
     const {eventsPath}=await ensureStorageRoot(storageRoot);
     const handle=await acquireJournalLock(lockPath,{timeoutMs:lockAcquireTimeoutMs});
     try{
       const head=await readHead(headPath),files=await listEventFiles(eventsPath);
-      if(files.length!==head.latest_sequence+1)throw Error('UNSAFE_POWERSHELL_PUBLICATION_TAIL');
+      if(files.length!==head.latest_sequence+1)throw Error('UNSAFE_TERMINAL_RESOLUTION_PUBLICATION_TAIL');
       const last=parseEvent(await eventReader(path.join(eventsPath,files.at(-1)),'utf8'));
+      const proof=proofs.find(item=>canonicalJson(item)===last.result?.resolution_record);
+      if(!proof)throw Error('UNSAFE_TERMINAL_RESOLUTION_PUBLICATION_TAIL');
       const physicalHead={schema_version:DEV_JOURNAL_SCHEMA_VERSION,latest_sequence:last.sequence,latest_event_id:last.journal_event_id,latest_event_hash:last.event_hash};
       const snapshot=await verifySnapshotExtension({eventsPath,base:{head:emptyHead(),files:[],events:[],versions:[]},snapshot:{head:physicalHead,files}});
       const prefix=snapshot.events.slice(0,head.latest_sequence),prefixLast=prefix.at(-1);
       if(head.latest_event_hash!==(prefixLast?.event_hash??null)||head.latest_event_id!==(prefixLast?.journal_event_id??null)
-        ||last.operation_type!=='pi_terminal_resolution'||last.tool_name!=="pi.journal.resolve_powershell_effect"
+        ||last.operation_type!=='pi_terminal_resolution'||last.tool_name!==tool
         ||last.result?.resolution_record!==canonicalJson(proof)||last.parent_operation_id!==proof.operation_id
         ||last.diagnostic.hostname!==os.hostname()||isProcessRunning(last.diagnostic.owner_pid)
-        ||!['operation_started','operation_completed'].includes(last.stage))throw Error('UNSAFE_POWERSHELL_PUBLICATION_TAIL');
-      assertPowershellResolutionQuiescent(classifyVerifiedSnapshot({head,events:prefix}),proof);
-      await inspectPowershellTarget(snapshot.events,proof);
+        ||!['operation_started','operation_completed'].includes(last.stage))throw Error('UNSAFE_TERMINAL_RESOLUTION_PUBLICATION_TAIL');
+      await assertEvidence(classifyVerifiedSnapshot({head,events:prefix}),snapshot.events,proof);
       classifyVerifiedSnapshot({head:physicalHead,events:snapshot.events});
       await verifySnapshotExtension({eventsPath,base:snapshot,snapshot:{head:physicalHead,files}});
       await atomicWriteJson(headPath,physicalHead);verifiedSnapshot=null;
     }finally{await releaseJournalLock(handle,lockPath);}
+  }
+
+  async function assertTrpgResumeEvidence(snapshot, proof, options) {
+    const facts = validateTrpgResumeResolution(snapshot.events, proof, options);
+    const hostname = os.hostname().toLowerCase();
+    if (facts.owners.some(event => event.diagnostic.hostname.toLowerCase() !== hostname
+      || isProcessRunning(event.diagnostic.owner_pid))) throw new Error("RESOLUTION_OWNER_STILL_ACTIVE");
+    for (const id of [...snapshot.active_operations, ...snapshot.dangling_operations]) {
+      const start = snapshot.events.find(event => event.operation_id === id && event.stage === "operation_started");
+      if (start?.tool_name !== TRPG_RESUME_TOOL || start.parent_operation_id !== proof.operation_id
+        || start.result.resolution_record !== canonicalJson(proof) || start.diagnostic.hostname.toLowerCase() !== hostname
+        || start.diagnostic.owner_pid !== process.pid && isProcessRunning(start.diagnostic.owner_pid)) {
+        throw new Error("RESOLUTION_OWNER_STILL_ACTIVE");
+      }
+    }
+    await verifyTrpgResumeEvidence();
   }
 
   async function resolveTerminalMutation(input={}, resolutionKind=null, {dryRun=false,isolationLease=null}={}) {
@@ -1791,10 +1815,11 @@ export function createDevOperationJournalService({
     const workstreamStale=workstreamMetadata||resolutionKind===WORKSTREAM_STALE_RESOLUTION;
     const workstreamCommitted=resolutionKind===WORKSTREAM_COMMITTED_RESOLUTION;
     const powershellEffect=resolutionKind===POWERSHELL_EFFECT_RESOLUTION;
+    const trpgResume=resolutionKind===TRPG_RESUME_KIND;
     const integrationPreflight=resolutionKind===INTEGRATION_PREFLIGHT_RESOLUTION;
     const interruptedLauncher=completedPowershell&&input.operation_id===REVIEWED_INTERRUPTED_LAUNCHER.operation_id;
     const evidenceBound=completedGit||workstreamStale||workstreamCommitted||powershellEffect||integrationPreflight||interruptedLauncher;
-    const resolutionFields=isolation?["resolution_kind","original_request","observation","observation_sha256","authority_receipt"]:completedChild?["resolution_kind","expected_child_terminal_hash","observed_sha256"]
+    const resolutionFields=trpgResume?["resolution_kind","supervisor_log_sha256"]:isolation?["resolution_kind","original_request","observation","observation_sha256","authority_receipt"]:completedChild?["resolution_kind","expected_child_terminal_hash","observed_sha256"]
       :completedPowershell?["resolution_kind","expected_child_terminal_hash","expected_command_sha256","observed_exit_code"]
         :powershellEffect?["resolution_kind","parent_operation_id","parent_terminal_hash","child_operation_id","child_terminal_hash",
           "pi_claim_event_hash","test_started_event_hash","test_terminal_event_hash","profile_id"]
@@ -1831,8 +1856,10 @@ export function createDevOperationJournalService({
       if(existing.result.resolution_record!==canonicalJson(input))throw new Error("RESOLUTION_DECISION_CONFLICT");
       return {reconciled:true,event:existing};
     }
+    const checkTrpgResume = snapshot => assertTrpgResumeEvidence(snapshot, input);
+    if (trpgResume) await checkTrpgResume(verification);
     await checkIsolation(verification);
-    if(terminal.diagnostic.hostname!==os.hostname()||isProcessRunning(terminal.diagnostic.owner_pid))
+    if(!trpgResume&&(terminal.diagnostic.hostname!==os.hostname()||isProcessRunning(terminal.diagnostic.owner_pid)))
       throw new Error("RESOLUTION_OWNER_STILL_ACTIVE");
     const checkRecoveryEvidence=async snapshot=>{
       if(!integrationPreflight&&!interruptedLauncher)return;
@@ -1881,7 +1908,7 @@ export function createDevOperationJournalService({
       if(canonicalJson(actual)!==canonicalJson(childDone.targets[0].after))throw new Error("RESOLUTION_PHYSICAL_STATE_CHANGED");
     }
     if(dryRun)return {verified:true,operation_id:started.operation_id,
-      ...(powershellEffect?{observed_effect:"detached_all_gate_completed",shell_exit_code_observed:false}
+      ...(trpgResume?TRPG_RESUME_RESULT:powershellEffect?{observed_effect:"detached_all_gate_completed",shell_exit_code_observed:false}
         :(workstreamStale||workstreamCommitted)?{transaction_id:input.transaction_id}:{observed_commit:input.observed_commit})};
     const key="resolution:"+started.operation_id;
     const fingerprint=sha256Text(canonicalJson(input));
@@ -1889,13 +1916,13 @@ export function createDevOperationJournalService({
     let admission=verification.events.find(e=>e.reconciliation_key===key&&e.stage==="operation_started");
     if(!admission)try {
       admission=await append({operation_id:operationIdGenerator(),stage:"operation_started",
-        operation_type:"pi_terminal_resolution",tool_name:integrationPreflight?"pi.journal.resolve_integration_preflight":isolation?ISOLATION_RESOLUTION_TOOL:powershellEffect?"pi.journal.resolve_powershell_effect":completedChild?"pi.journal.resolve_completed_child_create"
+        operation_type:"pi_terminal_resolution",tool_name:trpgResume?TRPG_RESUME_TOOL:integrationPreflight?"pi.journal.resolve_integration_preflight":isolation?ISOLATION_RESOLUTION_TOOL:powershellEffect?"pi.journal.resolve_powershell_effect":completedChild?"pi.journal.resolve_completed_child_create"
           :completedPowershell?"pi.journal.resolve_completed_powershell"
             :completedGit?"pi.journal.resolve_completed_git_commit"
               :workstreamCommitted?"pi.journal.resolve_workstream_committed"
               :workstreamMetadata?"pi.journal.resolve_workstream_metadata_limit":workstreamStale?"pi.journal.resolve_workstream_stale":"pi.journal.resolve_no_child_create",
         workspace_id:started.workspace_id,workstream_id:started.workstream_id,parent_operation_id:started.operation_id,
-        reconciliation_key:key,request_fingerprint_sha256:fingerprint,result:{resolution_record:canonicalJson(input)}}, {beforeAppend:(integrationPreflight||interruptedLauncher)?checkRecoveryEvidence:powershellEffect?checkShell:checkIsolation});
+        reconciliation_key:key,request_fingerprint_sha256:fingerprint,result:{resolution_record:canonicalJson(input)}}, {beforeAppend:trpgResume?checkTrpgResume:(integrationPreflight||interruptedLauncher)?checkRecoveryEvidence:powershellEffect?checkShell:checkIsolation});
       if(isolation)await isolationResolutionPublicationHook?.("after_admission");
       if(powershellEffect)await powershellResolutionPublicationHook?.("after_admission");
     }catch(error){if(error.code!=="RECONCILIATION_EXISTING_OPERATION")throw error;
@@ -1922,9 +1949,10 @@ export function createDevOperationJournalService({
     let event;
     try{event=await complete(admission.operation_id,{reconciles_event_id:terminal.journal_event_id,
       result:{outcome:(completedChild||completedPowershell||completedGit||workstreamCommitted||powershellEffect||isolation&&input.observation.classification==='completed')?"intended_effect_observed":"no_effect_observed",reconciliation_required:false,resolution_record:canonicalJson(input),
+        ...(trpgResume?TRPG_RESUME_RESULT:{}),
         ...(isolation&&input.observation.classification==='completed'?input.observation.witness.binding:{}),
         ...(powershellEffect?{observed_effect:"detached_all_gate_completed",shell_exit_code_observed:false}:{})},
-      ...((integrationPreflight||interruptedLauncher)?{beforeAppend:checkRecoveryEvidence}:isolation?{beforeAppend:checkIsolation}:powershellEffect?{beforeAppend:checkShell}:{}),
+      ...(trpgResume?{beforeAppend:checkTrpgResume}:(integrationPreflight||interruptedLauncher)?{beforeAppend:checkRecoveryEvidence}:isolation?{beforeAppend:checkIsolation}:powershellEffect?{beforeAppend:checkShell}:{}),
       ...(completedGit?{links:[{relation:"committed_by",commit:input.observed_commit}]}:{})});}
     catch(error){verification=await verify();event=resolvedTerminals(verification.events).get(started.operation_id);if(!event)throw error;}
     if(isolation)await isolationResolutionPublicationHook?.("after_completed");
@@ -2009,10 +2037,38 @@ export function createDevOperationJournalService({
     if(!isObject(input)||Object.keys(input).sort().join(',')!==fields.sort().join(',')||input.resolution_kind!==POWERSHELL_EFFECT_RESOLUTION)throw Error('INVALID_TERMINAL_RESOLUTION');
     input=JSON.parse(canonicalJson(input));
     const freeze=value=>{if(value&&typeof value==='object'){Object.values(value).forEach(freeze);Object.freeze(value);}return value;};freeze(input);
-    try{await verify();}catch(error){if(isTransientJournalVerificationError(error))throw error;await recoverPowershellResolutionTail(input);}
+    try{await verify();}catch(error){if(isTransientJournalVerificationError(error))throw error;
+      await recoverTerminalResolutionTail([input],{tool:"pi.journal.resolve_powershell_effect",assertEvidence:async(snapshot,events)=>{
+        assertPowershellResolutionQuiescent(snapshot,input);await inspectPowershellTarget(events,input);
+      }});}
     return resolveTerminalMutation(input,POWERSHELL_EFFECT_RESOLUTION);
   }
   const inspectPowershellEffectMutation=input=>resolveTerminalMutation(input,POWERSHELL_EFFECT_RESOLUTION,{dryRun:true});
+
+  async function reconcileTrpgResume({ apply = false } = {}) {
+    const proofs = trpgResumeProofs();
+    if (!apply) {
+      const snapshot = await verify();
+      const resolved = resolvedTerminals(snapshot.events);
+      for (const proof of proofs) {
+        if (!resolved.has(proof.operation_id)) await assertTrpgResumeEvidence(snapshot, proof, { requireChildReceipt: false });
+      }
+      return { observations: proofs.map(proof => ({ operation_id: proof.operation_id,
+        resolution_event_id: resolved.get(proof.operation_id)?.journal_event_id ?? null })), status: statusFromVerification(snapshot) };
+    }
+    try { await verify(); }
+    catch (error) {
+      if (isTransientJournalVerificationError(error)) throw error;
+      await recoverTerminalResolutionTail(proofs,{tool:TRPG_RESUME_TOOL,
+        assertEvidence:(snapshot,events,proof)=>assertTrpgResumeEvidence(snapshot,proof)});
+    }
+    const observations = [];
+    for (const proof of proofs) {
+      const result = await resolveTerminalMutation(proof, TRPG_RESUME_KIND);
+      observations.push({ operation_id: proof.operation_id, resolution_event_id: result.event?.journal_event_id ?? null });
+    }
+    return { observations, status: await status() };
+  }
 
   async function markDegraded(reason = "terminal_journal_append_failed") {
     explicitDegraded = true;
@@ -2167,7 +2223,8 @@ function verifiedMcpTestResult(events,started,terminal) {
       reconciliation_key: started.reconciliation_key ?? null,
       request_fingerprint_sha256: started.request_fingerprint_sha256 ?? null,
       terminal: Boolean(terminal), outcome: terminal?.stage ?? "dangling",
-      reconciliation_state: resolution?.tool_name === restartResolutionTool ? "failed_observed" : state, recovered: terminal?.stage === "operation_recovered",
+      reconciliation_state: resolution?.tool_name === TRPG_RESUME_TOOL ? "partial_effect_observed"
+        : resolution?.tool_name === restartResolutionTool ? "failed_observed" : state, recovered: terminal?.stage === "operation_recovered",
       safe_to_reinitiate: resolution?.tool_name !== restartResolutionTool && noEffect && !ambiguous, reinitiate_requires_new_key: resolution?.tool_name !== restartResolutionTool && noEffect && !ambiguous,
       automatic_replay_allowed: false, original_result: originalResult,
       resolution_event_id: resolution?.journal_event_id ?? null, events,
@@ -2464,6 +2521,7 @@ function verifiedMcpTestResult(events,started,terminal) {
     resolveWorkspaceIsolationMutation,
     resolvePowershellEffectMutation,
     inspectPowershellEffectMutation,
+    reconcileTrpgResume,
     markDegraded,
     getOperation,
     executeReconciled,

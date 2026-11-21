@@ -12,7 +12,7 @@ const lightweightReads = new Set([
 const ordinaryCapabilities = new Set([
   "filesystem.read", "filesystem.list", "filesystem.write", "filesystem.patch",
   "git.status", "git.commit", "verification.focused", "verification.affected",
-  "host.powershell", "workspace.create_checkpoint",
+  "host.powershell", "workspace.create_checkpoint", "windows.service.ensure_running",
 ]);
 function fail(code) { throw Object.assign(new Error(code), { code }); }
 function exact(value, required, optional = []) {
@@ -116,7 +116,9 @@ export async function adaptAuthorizedPiRequest(source, { resolveWorkspace } = {}
     mutation_plan: actions.filter(action => capabilityDefinition(action.capability).effect).map(action => ({
       step_id: action.step_id,
       target: action.capability.startsWith("filesystem.") ? action.input.path
-        : action.capability === "host.powershell" ? "dev_workspace_shared_repository_v1" : context.workspace_id,
+        : action.capability === "host.powershell" ? "dev_workspace_shared_repository_v1"
+        : action.capability === "windows.service.ensure_running" && typeof action.input.service_name === "string"
+          ? `windows_service:${action.input.service_name.toLowerCase()}` : context.workspace_id,
       expected_change: "Execute the exact GPT-authorized " + action.capability + " input",
       input_sha256: hashExecutionInput(action.input),
     })),

@@ -6,7 +6,11 @@
 
 工作台先用既有 Workstream 和 Workspace 流程建立作用中的獨立工作區。授權操作員在 Nexa 主機執行 `node scripts/manage-pi-task-authorization.mjs issue task.json`。`task.json` 提供 `goal`、`workspace_id`、`capabilities` 陣列，以及 UTC epoch 毫秒的 `expires_at_ms`。主機由工作區登錄資料解析工作流身分。授權記錄的 `task_authorization_id` 會寫入關聯 Pi 執行紀錄。
 
-同一個任務可以允許檔案讀取、列目錄、建立檔案、套用精確修補、Git 狀態與提交、指定測試和檢查點。各步驟仍由原 MCP handler 驗證工作區、路徑、Git HEAD、測試範圍和效果。PowerShell 的工作目錄只能限制起始位置，無法隔離子程序或系統存取。任務授權只涵蓋具工作區邊界的既有操作。管理員 PowerShell 仍走既有 Task Scheduler 與確認流程。
+同一個任務可以允許檔案讀取、列目錄、建立檔案、套用精確修補、Git 狀態與提交、指定測試和檢查點。各步驟仍由原 MCP handler 驗證工作區、路徑、Git HEAD、測試範圍和效果。PowerShell 的工作目錄只約束起始位置。通用命令需要另行建立可驗證的程序和檔案隔離。
+
+## 預先授權維護 Windows 服務
+
+維護已安裝的專案服務時，授權操作員在 `task.json` 的 `capabilities` 加入 `windows.service.ensure_running`，並在 `windows_services` 列出核准的服務名稱。GPT 交付的步驟以 `service_name` 指定其中一個目標。Pi 透過現有 `powershell_admin_run` 及已註冊的 Task Scheduler runner，確認服務狀態、啟動已停止的服務，並等待服務進入 `Running`。同一份授權可維護多個核准目標，工作區、到期、撤銷和 Journal 規則與一般步驟相同。請使用作業系統已註冊且受管理的開發服務名稱。
 
 ## 提交工程工作
 
@@ -33,7 +37,9 @@
 
 `dev_workspace_journal_status` 提供未對帳終態的操作與事件識別碼。候選分支套用了本機已使用的歷史收據讀取驗證，範圍涵蓋 Pi worker 更新及兩次 TRPG 啟動事件。這些事件仍使用原始雜湊和歷史順序驗證。
 
-正式 Journal 查核基準為序列 `66036`。序列 `65527` 已有對帳收據。未結案的是同一次 TRPG 啟動的子操作 `dev_operation_7d331e6fcd994db98a23a25f83a16483` 與父操作 `dev_operation_d11a295a8f864caaa4e733ecaf551257`。獨立主機日誌記錄 `SUPERVISOR_START`、`CHILD_START` 和 `READY`。原 PowerShell 結束碼與指定草稿橋接驗證仍缺證明。正式結案需使用支援相應證據的 Journal 寫入者與讀取者，追加觀察結果並維持禁止重播原命令。
+正式 Journal 查核基準為序列 `66036`。序列 `65527` 已有對帳收據。剩餘的一對同次 TRPG 啟動操作是 `dev_operation_7d331e6fcd994db98a23a25f83a16483` 與 `dev_operation_d11a295a8f864caaa4e733ecaf551257`。獨立主機日誌記錄 `SUPERVISOR_START`、`CHILD_START` 和 `READY`。收據保留 PowerShell 結束碼和草稿橋接結果為未知，禁止重播。
+
+候選版已在完整 Journal 複本追加這一對收據，驗證原有事件雜湊、操作狀態與冪等重試。正式 Nexa 的 Journal 讀寫程序都切換到支援該收據的版本後，從正式安裝目錄執行 `node scripts/reconcile-trpg-supervisor-resume.mjs --inspect`。檢查樣本及結果後可用 `--apply` 追加對帳，並覆核 `chain_verified=true`、`health=healthy` 和 `reconciliation_required=false`。
 
 ## Git 整合基準
 

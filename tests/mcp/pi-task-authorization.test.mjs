@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createDevOperationJournalService } from "../../server/src/mcp-development-journal-tools.mjs";
+import { createPowerShellMaintenanceTool } from "../../server/src/mcp-powershell-maintenance-tools.mjs";
 import { adaptAuthorizedPiRequest } from "../../server/src/pi-execution-policy.mjs";
 import { createPiProductionExecutionController } from "../../server/src/pi-production-execution-controller.mjs";
 import { createPiProductionRouteStore } from "../../server/src/pi-production-execution-route.mjs";
@@ -31,6 +32,18 @@ async function fixture(t) {
   await route.change({ mode: "pi_default", expected_revision: 0, decision_id: "gpt-task-policy", gate_hash: "a".repeat(64) },
     { validateGate: async () => true });
   const calls = [];
+  const adminCalls = [];
+  let adminError;
+  const admin = createPowerShellMaintenanceTool({ elevated: true, platform: "win32",
+    workspaceContextResolver: async () => ({ ...workspace, root }),
+    journalApi: { begin: journal.begin, complete: journal.complete, fail: journal.fail, degrade: journal.markDegraded },
+    executor: async ({ command, cwd, timeoutMs }) => {
+      adminCalls.push(command);
+      return { elevated: true, execution_ok: true, ok: true, command_sha256: "a".repeat(64), cwd,
+        timeout_ms: timeoutMs, exit_code: 0, timed_out: false, duration_ms: 1,
+        stdout: "service_running", stderr: "", stdout_truncated: false, stderr_truncated: false, reason: null };
+    },
+  });
   let workstreamState = "active";
   const controller = () => createPiProductionExecutionController({ journal, route,
     authorizeTask: createPiTaskPolicy({ store: createStore(), required: true }),
@@ -39,6 +52,10 @@ async function fixture(t) {
       queryOperation: async () => assert.fail("A normal response must not reconcile"),
       callTool: async ({name, arguments: args}) => {
         calls.push(name);
+        if (name === "powershell_admin_run") {
+          try { return { content: [{ type: "text", text: JSON.stringify(await admin(args)) }] }; }
+          catch (error) { adminError = error; throw error; }
+        }
         const file = path.join(root, "fixture.txt");
         if (name === "dev_create_file") await writeFile(file, args.content, { flag: "wx" });
         if (name === "dev_apply_patch") {
@@ -53,7 +70,7 @@ async function fixture(t) {
     request_kind: "autonomous_engineering", intent_id, goal, workspace_id: context.workspace_id,
     task_authorization_id: grant.task_authorization_id, requested_actions, ...overrides,
   }, { resolveWorkspace: async () => workspace });
-  return { store, grant, journal, calls, controller, intent, setTime: value => { now = value; },
+  return { store, grant, journal, calls, adminCalls, adminError: () => adminError, controller, intent, setTime: value => { now = value; },
     setWorkstreamState: value => { workstreamState = value; } };
 }
 
@@ -117,6 +134,35 @@ test("revocation and paused workstreams stop queued effects after a worker resta
   assert.equal(blocked.state.last_error.code, "PERMISSION_DENIED");
   assert.deepEqual(f.calls, []);
   assert.equal((await later.inspect({ operation_id: submitted.state.operation_id, context })).state.status, "BLOCKED");
+});
+
+test("one elevated grant covers two exact services and reuses the protected PowerShell tool", async t => {
+  const f = await fixture(t);
+  const capability = "windows.service.ensure_running";
+  const service = (step_id, service_name) => ({ step_id, capability, input: { service_name } });
+  const issue = { ...context, goal, capabilities: [capability], expires_at_ms: 200 };
+  await assert.rejects(f.store.issue(issue), { code: "PERMISSION_DENIED" });
+  const authorized = await f.store.issue({ ...issue, windows_services: ["NexaDev", "NexaWorker"] });
+  assert.equal(authorized.permission_level, "workspace_with_admin_service");
+  const override = { task_authorization_id: authorized.task_authorization_id };
+  const wrongService = await f.intent("service-denied", [service("service", "Unrelated")], override);
+  await assert.rejects(f.controller().submit(wrongService), { code: "PERMISSION_DENIED" });
+  const wrongGrant = await f.intent("service-standard-grant", [service("service", "NexaDev")]);
+  await assert.rejects(f.controller().submit(wrongGrant), { code: "PERMISSION_DENIED" });
+  await assert.rejects(f.intent("service-wildcard", [service("service", "Nexa*")], override), { code: "INVALID_WINDOWS_SERVICE_NAME" });
+  const work = await f.intent("service-task", [service("service", "NEXADEV"), service("worker", "NexaWorker")], override);
+  const completed = await f.controller().execute(work);
+  assert.equal(f.adminError(), undefined, f.adminError()?.stack);
+  assert.equal(completed.state.status, "COMPLETED", JSON.stringify(completed.state.last_error));
+  assert.deepEqual(f.calls, ["powershell_admin_run", "powershell_admin_run"]);
+  assert.match(f.adminCalls[0], /Get-Service -Name 'NEXADEV'/u);
+  assert.match(f.adminCalls[1], /Get-Service -Name 'NexaWorker'/u);
+  assert.equal((await f.journal.listOperations({ operation_type: "powershell_admin_maintenance" })).total, 2);
+  await f.store.revoke(authorized.task_authorization_id);
+  assert.equal((await f.controller().execute(work)).state.operation_id, completed.state.operation_id);
+  assert.equal(f.adminCalls.length, 2);
+  await assert.rejects(f.controller().submit(await f.intent("service-revoked", [service("service", "NexaDev")], override)),
+    { code: "PERMISSION_DENIED" });
 });
 
 test("verified Journal health reports the unresolved terminal identity", async t => {

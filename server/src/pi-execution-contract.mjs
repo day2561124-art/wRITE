@@ -9,11 +9,12 @@ export const REQUIRED_DECISION_BOUNDARIES = Object.freeze([
 ]);
 export const PERMISSIONS = Object.freeze(["read", "workspace_create", "write", "tests", "commit", "integrate", "push"]);
 export const PI_TASK_AUTHORIZATION_ID = /^pi_task_[a-f0-9]{32}$/u;
+export const WINDOWS_SERVICE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,79}$/u;
 const suites = ["mcp", "mcp_core", "mcp_pi_postseal", "mcp_infrastructure", "mcp_reliability", "mcp_tunnel",
   "communication", "world_simulation", "cognition", "memory_retrieval"];
-function descriptor(capability, tool, permission, effect, required, optional = [], scope = "workspace") {
+function descriptor(capability, tool, permission, effect, required, optional = [], scope = "workspace", inputProperties) {
   return Object.freeze({ capability, tool, permission, effect, required: Object.freeze(required),
-    optional: Object.freeze(optional), scope });
+    optional: Object.freeze(optional), scope, ...(inputProperties ? { inputProperties } : {}) });
 }
 export const CAPABILITY_DEFINITIONS = Object.freeze([
   descriptor("filesystem.read", "dev_read_file", "read", false, ["path"], ["maxBytes"]),
@@ -48,6 +49,8 @@ export const CAPABILITY_DEFINITIONS = Object.freeze([
   descriptor("git.status", "dev_git_status", "read", false, [], ["includeUntracked"]),
   descriptor("host.powershell", "powershell_run", "write", true, ["command"], ["cwd", "timeoutMs"], "host_maintenance"),
   descriptor("workspace.powershell", "powershell_run", "write", true, ["command"], ["cwd", "timeoutMs"], "workspace_shell"),
+  descriptor("windows.service.ensure_running", "powershell_admin_run", "write", true, ["service_name"], [], "workspace",
+    Object.freeze({ service_name: Object.freeze({ type: "string", pattern: WINDOWS_SERVICE_NAME.source, maxLength: 80 }) })),
   descriptor("git.commit", "dev_git_commit", "commit", true, ["message", "paths", "expectedHead"]),
   descriptor("git.integrate", "dev_workspace_integrate", "integrate", true,
     ["integration_candidate_id", "expected_revision"], [], "candidate"),
@@ -157,6 +160,7 @@ function validateInput(action, context, bootstrap = false) {
     normalizePiWorkstreamBootstrap({bootstrap_id:action.idempotency_key,...action.input});
   }
   const input = action.input;
+  if ("service_name" in input && (typeof input.service_name !== "string" || !WINDOWS_SERVICE_NAME.test(input.service_name))) fail("INVALID_WINDOWS_SERVICE_NAME");
   if ("path" in input) relativePath(input.path);
   if ("maxBytes" in input) integer(input.maxBytes, 1, 8192);
   if ("maxEntries" in input) integer(input.maxEntries, 1, 50);
@@ -241,6 +245,8 @@ export function createExecutionIntent(input) {
     validateInput(action, intent.context, bootstrap);
     const plan = plans.get(action.step_id);
     if (definition.effect) {
+      if (action.capability === "windows.service.ensure_running" && (intent.task_authorization_id === undefined
+        || plan?.target !== `windows_service:${action.input.service_name.toLowerCase()}`)) fail("WINDOWS_SERVICE_AUTHORIZATION_REQUIRED");
       if (action.capability === "workspace.create_checkpoint"
         && !bootstrap && intent.context.workspace_id === "dev_workspace_shared_repository_v1") fail("ISOLATED_WORKSPACE_REQUIRED");
       if (typeof action.idempotency_key !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(action.idempotency_key)
