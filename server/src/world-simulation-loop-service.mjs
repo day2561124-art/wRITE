@@ -4907,8 +4907,23 @@ export async function scheduleWorldSimulationAutonomousCognitionOpportunities(
   );
   await assertWorldSimulationSession(sessionId, options);
   const snapshot = await getWorldSimulationState(sessionId, options);
+  // Only committed World lineage establishes that a question was spoken.
+  // Confirm history and state are one consistent revision before projection.
+  const committedHistory = await getWorldSimulationHistory(sessionId, options);
+  const latestTurn = array(committedHistory.turns).at(-1);
+  const rechecked = await getWorldSimulationState(sessionId, options);
+  if (snapshot.revision !== rechecked.revision
+    || snapshot.state_hash !== rechecked.state_hash
+    || (snapshot.revision > 0 && (latestTurn?.revision_to !== snapshot.revision
+      || latestTurn?.next_state_hash !== snapshot.state_hash))) {
+    const error = new Error("C2 committed-question projection requires a consistent World revision and history.");
+    error.code = "WORLD_SIMULATION_AUTONOMOUS_COGNITION_HISTORY_STALE";
+    throw error;
+  }
   const projection = projectWorldSimulationAutonomousCognitionOpportunities({
     world_state: snapshot.state,
+    state_revision: snapshot.revision,
+    committed_world_history: committedHistory,
     simulation_time:
       input.simulation_time
       ?? snapshot.state?.simulation_time
