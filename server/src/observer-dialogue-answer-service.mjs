@@ -77,8 +77,10 @@ export function planDialogueCountdownAnswer({character, target, request, display
     return {
       character, purpose: "回答倒數時間", addressee: target.partner, mode: "direct",
       communication_opportunity: "respond", public_content: content,
-      ...(source ? {claim_kind: "uncertain_hypothesis", claim_source_kind: source} : {}),
-      surface_realization: {schema_version: "cc5-mandarin-clause-request-v1", semantic_anchor: content, clause},
+      ...(source ? {claim_kind: "uncertain_hypothesis", claim_source_kind: source}
+        : {unresolved_question_followup: true}),
+      surface_realization: {schema_version: "cc5-mandarin-clause-request-v1",
+        semantic_anchor: content, clause: source ? clause : {...clause, punctuation: "。"}},
     };
   }
   if (display && list(cognition?.perception?.observed).slice(0, 32).includes(display.content)) {

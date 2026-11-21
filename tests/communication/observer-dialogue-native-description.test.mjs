@@ -7,6 +7,7 @@ import { buildCharacterCommunicationActionCandidate } from "../../server/src/cha
 import { beginWorldSimulationSession } from "../../server/src/world-simulation-session-service.mjs";
 import {
   createWorldSimulationCharacterRuntimeManager, replayWorldSimulationCommittedCharacterExperiences, runWorldSimulationTurn,
+  scheduleWorldSimulationAutonomousCognitionOpportunities,
 } from "../../server/src/world-simulation-loop-service.mjs";
 import { getWorldSimulationHistory, getWorldSimulationState } from "../../server/src/world-simulation-state-service.mjs";
 
@@ -289,6 +290,25 @@ async function run(scenario) {
       laterSpeech = (await runExchange("-again"))[3];
     }
     const final = (await getWorldSimulationState(sid, options)).state;
+    if (conflict) {
+      // Expected-red Native acceptance: a committed statement of uncertainty
+      // should surface the corresponding question without the caller forging
+      // pending_internal_cues. An idle trigger is not enough.
+      const worldHistory = await getWorldSimulationHistory(sid, options);
+      const answerTurn = worldHistory.turns.at(-1);
+      assert.ok(answerTurn.action_outcomes.some(row =>
+        row.actor === actor && row.result === "communication_emitted"
+        && row.communication_event?.surface_text === answers.conflict_speech
+        && row.communication_event?.speech_act === "acknowledge_unresolved_question"),
+      "Precondition: the speaker-owned pending-check intention must be selected, emitted, and punctuated as a statement.");
+      const next = await scheduleWorldSimulationAutonomousCognitionOpportunities({
+        world_simulation_session_id: sid,
+        runtime_context_by_character: {[actor]: {idle: true}},
+      }, options);
+      const ownOpportunity = next.scheduler_projection.opportunities.find(item => item.character === actor);
+      assert.ok(ownOpportunity?.trigger_kinds.includes("unresolved_question"),
+        "Native gap: a World-committed 'need to check' response did not yield an evidence-backed unresolved question; C2 only sees caller-provided cues or generic idle-with-goal.");
+    }
     assert.equal(learned(final).length, conflict || encodedPanel ? 3 : 2);
     assert.ok(!final.memories[other].some(memory => memory.internal_provenance?.dialogue_learning_version === observerDialogueLearningVersion));
     console.log(JSON.stringify({scenario, short_reply_heard: receivedShortReply, recovered_expected_fact: shouldRecover,
@@ -299,4 +319,4 @@ async function run(scenario) {
 }
 
 const selectedScenario = process.argv[2] ?? process.env.DIALOGUE_CLARIFICATION_CASE;
-await Promise.all((selectedScenario ? [selectedScenario] : ["recalled_speech", "historical_panel_speech"]).map(run));
+await Promise.all((selectedScenario ? [selectedScenario] : ["recalled_speech", "historical_panel_speech", "conflict_speech"]).map(run));

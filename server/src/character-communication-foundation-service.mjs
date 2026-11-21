@@ -249,6 +249,16 @@ export function planCharacterCommunication(characterInput = {}) {
   const addressee = string(goal.addressee, 240);
   if (!purpose || !addressee || character === addressee) fail("Purpose and distinct addressee are required.");
   const mode = goal.mode;
+  // An explicitly authored unresolved-question acknowledgement may schedule
+  // later cognition only after the corresponding speech is World-committed.
+  // It does not itself establish a new goal, action, fact or obligation.
+  if (goal.unresolved_question_followup != null
+    && (goal.unresolved_question_followup !== true
+      || mode !== "direct"
+      || goal.communication_opportunity !== "respond"
+      || goal.claim_kind != null
+      || goal.turn_invitation_intent != null))
+    fail("Unresolved-question followup requires a direct, non-factual speaker acknowledgement.");
   if (!["direct", "indirect", "silence", "nonverbal"].includes(mode))
     fail("Communication mode must be an explicit character-goal decision.");
   if (goal.turn_invitation_intent != null && mode !== "direct")
@@ -518,7 +528,9 @@ export function planCharacterCommunication(characterInput = {}) {
       ...opportunityField,
       external_action: "speech",
       message: {
-        speech_act: turnInvitation ? "invite_next_turn"
+        speech_act: goal.unresolved_question_followup === true
+          ? "acknowledge_unresolved_question"
+          : turnInvitation ? "invite_next_turn"
           : claimKind === "attributed_testimony"
           ? "report_testimony"
           : claimKind === "explicit_assumption"

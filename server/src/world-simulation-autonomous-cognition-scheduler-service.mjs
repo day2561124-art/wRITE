@@ -182,6 +182,43 @@ function explicitInternalEvidence(runtimeContext, character) {
   return evidence;
 }
 
+// Only authoritative, already committed World history can supply this cue
+// in Native scheduling. An intention expressed but not selected/emitted is
+// not a cognition trigger, and the scheduler never treats speech as truth.
+function committedUnresolvedQuestionEvidence(worldHistory, character, revision) {
+  if (!Number.isSafeInteger(revision) || revision < 0) return [];
+  const evidence = [];
+  const recent = array(object(worldHistory).turns).slice(-256);
+  for (const turn of recent) {
+    if (!Number.isSafeInteger(turn?.revision_to)
+      || turn.revision_to > revision) continue;
+    for (const selected of array(turn.selected_action_intents)) {
+      if (!sameCharacter(selected?.character, character)
+        || selected?.selection !== "candidate_action_intent"
+        || selected?.candidate?.action_id !== selected?.action_id
+        || selected?.candidate?.communication?.channel !== "speech"
+        || selected?.candidate?.communication?.message?.speech_act
+          !== "acknowledge_unresolved_question") continue;
+      const matched = array(turn.action_outcomes).filter((outcome) =>
+        sameCharacter(outcome?.actor, character)
+        && outcome?.action_id === selected.action_id
+        && outcome?.result === "communication_emitted"
+        && outcome?.communication_event?.channel === "speech"
+        && outcome?.communication_event?.speech_act === "acknowledge_unresolved_question");
+      if (matched.length !== 1) continue;
+      evidence.push({
+        trigger_kind: "unresolved_question",
+        evidence_ref: stableOpaqueRef("committed_question", character, {
+          turn_id: turn.turn_id,
+          action_id: selected.action_id,
+          revision_to: turn.revision_to,
+        }),
+      });
+    }
+  }
+  return evidence.slice(-12);
+}
+
 function dueTemporalEvidence(runtimeContext, character, nowMs) {
   if (nowMs === null) return [];
   const evidence = [];
@@ -276,6 +313,8 @@ export function buildWorldSimulationAutonomousCognitionSchedulerContract() {
     explicit_temporal_cue_supported: true,
     time_passage_alone_triggers_cognition: false,
     committed_goal_idle_trigger_supported: true,
+    committed_world_uncertainty_speech_cue_supported: true,
+    committed_speech_is_not_verification_or_goal_commitment: true,
     challenged_plan_trigger_supported: true,
     applicable_plan_cue_trigger_supported: true,
     repeated_unconsumed_evidence_has_stable_opportunity_identity: true,
@@ -369,6 +408,9 @@ export function projectWorldSimulationAutonomousCognitionOpportunities(input = {
     }
 
     evidence.push(...explicitInternalEvidence(runtimeContext, character));
+    evidence.push(...committedUnresolvedQuestionEvidence(
+      input.committed_world_history, character, input.state_revision,
+    ));
     evidence.push(...dueTemporalEvidence(runtimeContext, character, nowMs));
 
     if (evidence.length === 0) continue;

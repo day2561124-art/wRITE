@@ -91,6 +91,49 @@ const consumedProjection =
   });
 assert.equal(consumedProjection.opportunity_count, 0);
 
+// A committed question is evidence, not a selected investigation or a
+// guarantee that a check was physically performed. The speech must have been
+// selected AND emitted in the same exact World history turn.
+const uncertainAction = {
+  action_id: "communication_question_1",
+  communication: {channel: "speech", message: {speech_act: "acknowledge_unresolved_question"}},
+};
+const uncertainTurn = {
+  turn_id: "committed_question_1", revision_to: 1,
+  selected_action_intents: [{character: "閒置角色", selection: "candidate_action_intent",
+    action_id: uncertainAction.action_id, candidate: uncertainAction}],
+  action_outcomes: [{actor: "閒置角色", action_id: uncertainAction.action_id,
+    result: "communication_emitted",
+    communication_event: {channel: "speech", speech_act: "acknowledge_unresolved_question"}}],
+};
+const committedQuestionInput = {
+  world_state: baseWorldState,
+  state_revision: 1,
+  committed_world_history: {turns: [uncertainTurn]},
+};
+const question = projectWorldSimulationAutonomousCognitionOpportunities(committedQuestionInput);
+assert.equal(question.opportunity_count, 1);
+assert.deepEqual(question.opportunities[0].trigger_kinds, ["unresolved_question"]);
+assert.equal(question.opportunities[0].selected_action, null);
+assert.equal(question.opportunities[0].world_mutation, null);
+assert.deepEqual(projectWorldSimulationAutonomousCognitionOpportunities(committedQuestionInput),
+  question, "Committed question identity should remain stable without heartbeat thoughts");
+assert.equal(projectWorldSimulationAutonomousCognitionOpportunities({
+  ...committedQuestionInput,
+  consumed_opportunity_ids: [question.opportunities[0].opportunity_id],
+}).opportunity_count, 0);
+for (const tamper of [
+  {...uncertainTurn, selected_action_intents: []},
+  {...uncertainTurn, action_outcomes: []},
+  {...uncertainTurn, action_outcomes: [{...uncertainTurn.action_outcomes[0], result: "blocked"}]},
+  {...uncertainTurn, action_outcomes: [{...uncertainTurn.action_outcomes[0], actor: "無事角色"}]},
+  {...uncertainTurn, revision_to: 2},
+]) {
+  assert.equal(projectWorldSimulationAutonomousCognitionOpportunities({
+    ...committedQuestionInput, committed_world_history: {turns: [tamper]},
+  }).opportunity_count, 0, "A missing, mismatched or future World commit cannot mint a question cue");
+}
+
 const quietProjection =
   projectWorldSimulationAutonomousCognitionOpportunities({
     world_state: baseWorldState,
