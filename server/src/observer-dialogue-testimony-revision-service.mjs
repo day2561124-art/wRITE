@@ -45,6 +45,39 @@ export function findTestimonyRetraction({source, memories, referent, detail}) {
   return existing[0].memory_id;
 }
 
+// An omitted subject can be recovered only from one recent, recognized
+// statement by this same witness. Never borrow another person's correction.
+export function findEllipticalLocationCorrection({source, memories, observedAt}) {
+  if (source?.channel !== "understood_testimony" || !source.speaker || !source.receipt_hash) return null;
+  const body = revisedTestimonyBody(source.text);
+  const matched = /^(?:是|在|放在)([^，,。！？!?]{2,48})[。！!]?$/.exec(body ?? "");
+  const place = matched?.[1]?.trim();
+  const currentTime = Date.parse(observedAt ?? "");
+  if (!place || !Number.isFinite(currentTime) || /(?:可能|大概|應該|也許)/u.test(place)) return null;
+  const candidates = list(memories).filter(record => learned(record)
+    && record?.content?.detail_type === "location" && record.content.testimony_speaker === source.speaker
+    && record.internal_provenance?.dialogue_source_channel === "understood_testimony"
+    && typeof record.content.referent_name === "string" && /^learned_[a-f0-9]{24}$/u.test(record.content.referent_id));
+  const referents = [...new Set(candidates.map(record => record.content.referent_id))];
+  const active = referents.flatMap(referent => activeTestimonyClaims(memories, referent, "location"))
+    .filter(record => record.content.testimony_speaker === source.speaker
+      && record.internal_provenance?.dialogue_source_channel === "understood_testimony"
+      && typeof record.content.referent_name === "string");
+  const recent = active.filter(record => {
+    const when = Date.parse(record.encoded_at ?? "");
+    return Number.isFinite(when) && currentTime >= when && currentTime - when <= 10 * 60 * 1000;
+  });
+  if (recent.length !== 1) return null;
+  const [prior] = recent;
+  return {
+    referent_id: prior.content.referent_id,
+    referent_name: prior.content.referent_name,
+    referent_aliases: list(prior.content.referent_aliases),
+    detail: {detail_type: "location", lesson: prior.content.referent_name + "放在" + place + "。"},
+    retracts_memory_id: prior.memory_id,
+  };
+}
+
 export function singleUncontestedTestimony(memories, referent, detailType) {
   const active = activeTestimonyClaims(memories, referent, detailType);
   if (!active.length) return null;
