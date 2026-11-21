@@ -1,0 +1,19 @@
+name: Repeated testimony focused validation
+on:
+  push:
+    branches:
+      - fix/repeated-witness-retractions
+jobs:
+  witness-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: node tests/communication/observer-dialogue-testimony-revision.test.mjs
+      - run: node tests/communication/observer-dialogue-native-repeated-revision.test.mjs
+      - run: node tests/communication/observer-dialogue-native-revision.test.mjs
