@@ -327,15 +327,19 @@ async function run(scenario) {
       "Precondition: C2 actually dispatched this character's World-grounded question.");
 
       const ownMind = cognitivePackets.find(packet => packet.character === actor);
-      const goalView = ownMind?.cognition?.native_goal_decision_view
-        ?? ownMind?.native_goal_decision_view;
+      // The regular Native Brain packet already uses this exact CB-C3 field.
+      // The independent C2 path must reuse it, not invent a duplicate API.
+      const goalView = ownMind?.native_goal_decision;
       assert.equal(goalView?.version, nativeGoalDecisionViewVersion,
-        "Native C2→C3 gap: an independently triggered thought cannot inspect its same-character bounded goal decision view.");
+        "Native C2→C3 gap: a World-triggered autonomous thought lacks the existing Native goal decision interface.");
       assert.equal(goalView.character, actor);
       assert.equal(goalView.bounded_view_only, true);
       assert.equal(goalView.world_truth_exposed, false);
       assert.equal(goalView.source_event_ids_exposed, false);
       assert.equal(goalView.goal_ids_exposed, false);
+      assert.equal(ownMind.boundaries.native_goal_decision_explicit_intent_only, true);
+      assert.equal(ownMind.boundaries.native_goal_decision_world_write_authority, false);
+      assert.equal(ownMind.boundaries.native_goal_decision_action_authority, false);
       assert.equal(thought.durable_cognitive_write_performed, false,
         "Providing a C3 decision view alone must not silently commit any goal.");
     }
