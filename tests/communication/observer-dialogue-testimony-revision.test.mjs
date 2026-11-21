@@ -3,7 +3,7 @@ import { hashAgentRunValue } from "../../server/src/agent-run-service.mjs";
 import { analyzeObserverDialogueLearning, learnedDialogueMemoryStage, observerDialogueLearningVersion } from "../../server/src/observer-dialogue-learning-service.mjs";
 import { buildCharacterCommunicationActionCandidate } from "../../server/src/character-communication-foundation-service.mjs";
 import { planDialogueLocationAnswer } from "../../server/src/observer-dialogue-location-answer-service.mjs";
-import { activeTestimonyClaims, findTestimonyRetraction, revisedTestimonyBody,
+import { activeTestimonyClaims, findEllipticalLocationCorrection, findTestimonyRetraction, revisedTestimonyBody,
   singleUncontestedTestimony } from "../../server/src/observer-dialogue-testimony-revision-service.mjs";
 
 const observer = "值班員", witness = "陳叔", other = "季文", name = "霧橋出入簿";
@@ -27,6 +27,17 @@ const speaking = (text, speaker = witness) => ({channel: "understood_testimony",
 const detail = {lesson: revised, detail_type: "location"};
 assert.equal(revisedTestimonyBody(line), revised);
 assert.equal(revisedTestimonyBody(revised), null);
+const brief = "我剛才說錯了，是西側醫務櫃。";
+const briefSource = speaking(brief);
+assert.equal(findEllipticalLocationCorrection({source: briefSource, memories:[first],
+  observedAt:"2026-11-20T08:01:00Z"})?.detail.lesson, revised);
+assert.equal(findEllipticalLocationCorrection({source: speaking(brief, other), memories:[first],
+  observedAt:"2026-11-20T08:01:00Z"}), null);
+assert.equal(findEllipticalLocationCorrection({source: briefSource, memories:[first],
+  observedAt:"2026-11-20T10:30:00Z"}), null);
+assert.equal(findEllipticalLocationCorrection({source: briefSource,
+  memories:[first,record("other-item", witness, "星夜日誌放在圖書室。")],
+  observedAt:"2026-11-20T08:01:00Z"}), null, "Ambiguous subject must not be guessed");
 assert.equal(findTestimonyRetraction({source: speaking(line), memories: [first],
   referent, detail}), first.memory_id);
 assert.equal(findTestimonyRetraction({source: speaking(revised), memories: [first],
@@ -58,6 +69,13 @@ const binding = analyzed.bindings.get("auditory:0");
 assert.equal(binding?.detail?.lesson, revised);
 assert.equal(binding?.source?.speaker, witness);
 assert.equal(binding?.retracts_memory_id, first.memory_id);
+const abbreviated = {...heard, semantic_content: brief};
+const abbreviatedAnalysis = analyzeObserverDialogueLearning({
+  character: observer, perception: {simulation_time:"2026-11-20T08:01:00Z",audible:[abbreviated]},
+  memories:[first],verifiedReceiptHashes:[hashAgentRunValue(abbreviated)],
+});
+assert.equal(abbreviatedAnalysis.bindings.get("auditory:0")?.detail?.lesson, revised);
+assert.equal(abbreviatedAnalysis.bindings.get("auditory:0")?.retracts_memory_id, first.memory_id);
 const notAnOfficialCorrection = analyzeObserverDialogueLearning({
   character: observer, perception: {audible: [{...heard, semantic_content: revised}]},
   memories: [first], verifiedReceiptHashes: [hashAgentRunValue({...heard, semantic_content: revised})],
