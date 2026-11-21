@@ -8,7 +8,9 @@ import { beginWorldSimulationSession } from "../../server/src/world-simulation-s
 import {
   createWorldSimulationCharacterRuntimeManager, replayWorldSimulationCommittedCharacterExperiences, runWorldSimulationTurn,
   scheduleWorldSimulationAutonomousCognitionOpportunities,
+  dispatchWorldSimulationAutonomousCognitionOpportunities,
 } from "../../server/src/world-simulation-loop-service.mjs";
+import { nativeGoalDecisionViewVersion } from "../../server/src/world-simulation-motivation-goal-integration-service.mjs";
 import { getWorldSimulationHistory, getWorldSimulationState } from "../../server/src/world-simulation-state-service.mjs";
 
 const actor = "收聽者";
@@ -307,7 +309,35 @@ async function run(scenario) {
       }, options);
       const ownOpportunity = next.scheduler_projection.opportunities.find(item => item.character === actor);
       assert.ok(ownOpportunity?.trigger_kinds.includes("unresolved_question"),
-        "Native gap: a World-committed 'need to check' response did not yield an evidence-backed unresolved question; C2 only sees caller-provided cues or generic idle-with-goal.");
+        "Precondition: committed uncertain speech must generate an unresolved-question C2 cue.");
+
+      // RED C2→C3 bridge: the same real-world evidence must reach the
+      // character's bounded motivational decision interface. Do not invent a
+      // pending cue, inject a current_goal, or choose a ready-made action.
+      const cognitivePackets = [];
+      const thought = await dispatchWorldSimulationAutonomousCognitionOpportunities({
+        world_simulation_session_id: sid,
+        runtime_context_by_character: {[actor]: {idle: true}},
+      }, {...options, characterBrain: async packet => {
+        if (packet.character === actor) cognitivePackets.push(structuredClone(packet));
+        return {disposition: "autonomous_question_noted"};
+      }});
+      assert.ok(thought.dispatches.some(row =>
+        row.character === actor && row.trigger_kinds.includes("unresolved_question")),
+      "Precondition: C2 actually dispatched this character's World-grounded question.");
+
+      const ownMind = cognitivePackets.find(packet => packet.character === actor);
+      const goalView = ownMind?.cognition?.native_goal_decision_view
+        ?? ownMind?.native_goal_decision_view;
+      assert.equal(goalView?.version, nativeGoalDecisionViewVersion,
+        "Native C2→C3 gap: an independently triggered thought cannot inspect its same-character bounded goal decision view.");
+      assert.equal(goalView.character, actor);
+      assert.equal(goalView.bounded_view_only, true);
+      assert.equal(goalView.world_truth_exposed, false);
+      assert.equal(goalView.source_event_ids_exposed, false);
+      assert.equal(goalView.goal_ids_exposed, false);
+      assert.equal(thought.durable_cognitive_write_performed, false,
+        "Providing a C3 decision view alone must not silently commit any goal.");
     }
     assert.equal(learned(final).length, conflict || encodedPanel ? 3 : 2);
     assert.ok(!final.memories[other].some(memory => memory.internal_provenance?.dialogue_learning_version === observerDialogueLearningVersion));
