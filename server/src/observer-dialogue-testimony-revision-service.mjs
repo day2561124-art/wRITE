@@ -105,9 +105,15 @@ export function findEllipticalLocationCorrection({source, memories, observedAt})
   };
 }
 
-export function singleUncontestedTestimony(memories, referent, detailType) {
+// Agreement allows any legitimately recovered supporting episode to be
+// used. Do not privilege the first witness when that episode has faded.
+export function uncontestedTestimonyClaims(memories, referent, detailType) {
   const active = activeTestimonyClaims(memories, referent, detailType);
-  if (!active.length) return null;
+  if (!active.length) return [];
   const facts = new Set(active.map(record => normalize(record.content.lesson)));
-  return facts.size === 1 ? active[0] : null;
+  return facts.size === 1 ? active : [];
+}
+
+export function singleUncontestedTestimony(memories, referent, detailType) {
+  return uncontestedTestimonyClaims(memories, referent, detailType)[0] ?? null;
 }

@@ -1,4 +1,4 @@
-import { singleUncontestedTestimony } from "./observer-dialogue-testimony-revision-service.mjs";
+import { uncontestedTestimonyClaims } from "./observer-dialogue-testimony-revision-service.mjs";
 import { observerDialogueLearningVersion } from "./observer-dialogue-learning-service.mjs";
 
 const list = value => Array.isArray(value) ? value : [];
@@ -30,9 +30,11 @@ export function planDialogueLocationAnswer({character, target, request, cognitio
   const uncertain = () => goal("我不確定，得再查一下。",
     {topic: "我不確定", omit_subject: true, predicate: "得再查一下"});
   if (request.referent_collision) return uncertain();
-  const memory = singleUncontestedTestimony(memories, request.referent, "location");
-  if (!memory || memory.internal_provenance?.dialogue_learning_version !== observerDialogueLearningVersion
-      || !memoryAdmitted(cognition, retrieval, memory)) return uncertain();
+  // All active claims must agree before speaking, but the answer must be
+  // supported by whichever particular episode the memory kernel recovered.
+  const memory = uncontestedTestimonyClaims(memories, request.referent, "location")
+    .find(record => memoryAdmitted(cognition, retrieval, record));
+  if (!memory || memory.internal_provenance?.dialogue_learning_version !== observerDialogueLearningVersion) return uncertain();
   const name = memory.content.referent_name;
   const lesson = memory.content.lesson?.normalize("NFKC").trim();
   if (typeof name !== "string" || !name || typeof lesson !== "string"
