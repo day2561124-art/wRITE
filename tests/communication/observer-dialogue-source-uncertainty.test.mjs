@@ -3,6 +3,7 @@ import { hashAgentRunValue } from "../../server/src/agent-run-service.mjs";
 import { buildCharacterCommunicationActionCandidate } from "../../server/src/character-communication-foundation-service.mjs";
 import {
   analyzeObserverDialogueLearning, learnedDialogueMemoryStage, observerDialogueLearningVersion,
+  observerLearningObservations,
 } from "../../server/src/observer-dialogue-learning-service.mjs";
 import { planDialogueLocationAnswer } from "../../server/src/observer-dialogue-location-answer-service.mjs";
 import { activeTestimonyClaims, findEllipticalLocationCorrection, findTestimonyRetractions,
@@ -75,6 +76,10 @@ const observed=claim("memory_visual",east,{speaker:null,channel:"observed_text"}
 assert.equal(reply([observed],observed)?.surface_realization?.clause?.topic,
   "我看到的線索是",
   "A visual clue must not be misreported as somebody's testimony or direct proof of an object's location");
+assert.equal(observerLearningObservations({observed:[east]},observer)[0]?.channel,"observed_text");
+assert.equal(observerLearningObservations({audible:[east]},observer)[0]?.channel,"heard_text");
+assert.equal(reply([observed,corrected],corrected)?.public_content,"我不確定，得再查一下。",
+  "A named witness cannot erase contradictory independently seen evidence");
 const overheard=claim("memory_unattributed",east,{speaker:null,channel:"heard_text"});
 assert.equal(reply([overheard],overheard)?.surface_realization?.clause?.topic,
   "我聽到的說法是");
