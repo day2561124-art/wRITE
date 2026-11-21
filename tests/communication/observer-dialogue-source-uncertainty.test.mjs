@@ -90,7 +90,7 @@ assert.equal(findEllipticalLocationCorrection({source:lateSource,memories:[first
   observedAt:"2026-11-20T10:00:00Z"}),null,
   "A bare correction cannot silently infer a forgotten subject two months later");
 assert.deepEqual(findTestimonyRetractions({source:{...lateSource,text:"我剛才說錯了，"+basement},
-  memories:[first,corrected],referent:ref,detail:{detail_type:"location",lesson:basement}},
+  memories:[first,corrected],referent:ref,detail:{detail_type:"location",lesson:basement}}),
   [corrected.memory_id],"An explicit named correction is not subject to the elliptical time limit");
 // A newly misidentified speaker has no trusted witness receipt.
 const misidentified={kind:"understood_utterance",schema_version:"cc2-listener-understood-utterance-v1",
