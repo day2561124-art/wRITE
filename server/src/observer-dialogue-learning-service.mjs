@@ -305,7 +305,7 @@ function resolveClarificationFragment(reply, sources, registry) {
 // objects or the text of another character. A candidate binding is ephemeral.
 export function analyzeObserverDialogueLearning({
   character, perception, memories, previousReferent, pausedReferent, verifiedReceiptHashes, clarificationReply,
-  allowDialogueContinuation, answerCorrection,
+  allowDialogueContinuation, answerCorrection, observationTime,
 }) {
   const sources = observerLearningObservations(perception, character, verifiedReceiptHashes);
   const registry = localRegistry(memories);
@@ -319,7 +319,7 @@ export function analyzeObserverDialogueLearning({
   for (const source of sources) {
     const {text} = source;
     const elliptical = findEllipticalLocationCorrection({source, memories,
-      observedAt: perception?.simulation_time});
+      observedAt: observationTime ?? perception?.simulation_time});
     if (elliptical && registry.has(elliptical.referent_id)) {
       found.push(focusOn(elliptical.referent_id, text));
       bindings.set(sourceKey(source), {source, ...elliptical});
