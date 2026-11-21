@@ -8,7 +8,12 @@ import { beginWorldSimulationSession } from "../../server/src/world-simulation-s
 import {
   createWorldSimulationCharacterRuntimeManager, replayWorldSimulationCommittedCharacterExperiences, runWorldSimulationTurn,
   scheduleWorldSimulationAutonomousCognitionOpportunities,
+  dispatchWorldSimulationAutonomousCognitionOpportunities,
 } from "../../server/src/world-simulation-loop-service.mjs";
+import {
+  buildWorldSimulationNativeGoalDecisionView,
+  nativeGoalDecisionViewVersion,
+} from "../../server/src/world-simulation-motivation-goal-integration-service.mjs";
 import { getWorldSimulationHistory, getWorldSimulationState } from "../../server/src/world-simulation-state-service.mjs";
 
 const actor = "收聽者";
@@ -218,6 +223,15 @@ async function run(scenario) {
         characterCommunicationListenerInterpretationResolver: async view => interpret(view, actor, shortReply, !repeatQuestion),
         characterBrain: async packet => {
           if (packet.character === actor) {
+            if (conflict) {
+              // GREEN control: the same actor already receives canonical CB-C3
+              // goal decisions in an ordinary Native event turn.
+              assert.equal(packet.native_goal_decision?.version, nativeGoalDecisionViewVersion);
+              assert.equal(packet.native_goal_decision.character, actor);
+              assert.equal(packet.native_goal_decision.world_truth_exposed, false);
+              assert.equal(packet.boundaries.native_goal_decision_explicit_intent_only, true);
+              assert.equal(packet.boundaries.native_goal_decision_world_write_authority, false);
+            }
             const serialized = JSON.stringify(packet.cognition.working_context);
             receivedShortReply = packet.perception.audible.some(item => item?.kind === "understood_utterance" && item.semantic_content === shortReply);
             if (!conflict) {
@@ -291,9 +305,8 @@ async function run(scenario) {
     }
     const final = (await getWorldSimulationState(sid, options)).state;
     if (conflict) {
-      // Expected-red Native acceptance: a committed statement of uncertainty
-      // should surface the corresponding question without the caller forging
-      // pending_internal_cues. An idle trigger is not enough.
+      // The committed uncertain utterance alone must wake C2. No caller
+      // idle flag or pending internal cue is allowed in this Native test.
       const worldHistory = await getWorldSimulationHistory(sid, options);
       const answerTurn = worldHistory.turns.at(-1);
       assert.ok(answerTurn.action_outcomes.some(row =>
@@ -303,11 +316,79 @@ async function run(scenario) {
       "Precondition: the speaker-owned pending-check intention must be selected, emitted, and punctuated as a statement.");
       const next = await scheduleWorldSimulationAutonomousCognitionOpportunities({
         world_simulation_session_id: sid,
-        runtime_context_by_character: {[actor]: {idle: true}},
       }, options);
       const ownOpportunity = next.scheduler_projection.opportunities.find(item => item.character === actor);
-      assert.ok(ownOpportunity?.trigger_kinds.includes("unresolved_question"),
-        "Native gap: a World-committed 'need to check' response did not yield an evidence-backed unresolved question; C2 only sees caller-provided cues or generic idle-with-goal.");
+      assert.deepEqual(ownOpportunity?.trigger_kinds, ["unresolved_question"],
+        "Precondition: only committed uncertain speech, not a manually supplied idle cue, must wake C2.");
+      assert.equal(next.scheduler_projection.opportunity_count, 1,
+        "No unrelated character may receive the speaker's private unresolved-question opportunity.");
+
+      // Independent test-side observation, not a runtime injection:
+      // determine whether the existing Phase68D evidence catalog has a
+      // legal motivational basis even before wiring C2 to the C3 view.
+      const directGoalView = buildWorldSimulationNativeGoalDecisionView({
+        world_state: final, character: actor, turn_id: "diagnostic_future_c2_goal_turn",
+      });
+      const otherGoalView = buildWorldSimulationNativeGoalDecisionView({
+        world_state: final, character: other, turn_id: "diagnostic_future_c2_goal_turn",
+      });
+      assert.equal(directGoalView.character, actor);
+      assert.equal(directGoalView.world_truth_exposed, false);
+      assert.equal(directGoalView.source_event_ids_exposed, false);
+      assert.equal(directGoalView.goal_ids_exposed, false);
+      console.log(JSON.stringify({
+        scenario: "c2_goal_basis_readonly_audit",
+        actor_motivation_basis_count: directGoalView.motivation_basis.length,
+        bystander_motivation_basis_count: otherGoalView.motivation_basis.length,
+        actor_existing_goals_count: directGoalView.existing_goals.length,
+        actor_learned_dialogue_memories_count: learned(final).length,
+        actor_subjective_claim_history_refs: (final.subjective_claim_history ?? [])
+          .filter(ref => ref.character === actor).length,
+        actor_subjective_belief_revision_history_refs: (final.subjective_belief_revision_history ?? [])
+          .filter(ref => ref.character === actor).length,
+      }));
+
+      // RED C2→C3 bridge: the same real-world evidence must reach the
+      // character's bounded motivational decision interface. Do not invent a
+      // pending cue, inject a current_goal, or choose a ready-made action.
+      const cognitivePackets = [];
+      const thought = await dispatchWorldSimulationAutonomousCognitionOpportunities({
+        world_simulation_session_id: sid,
+      }, {...options, characterBrain: async packet => {
+        if (packet.character === actor) cognitivePackets.push(structuredClone(packet));
+        return {disposition: "autonomous_question_noted"};
+      }});
+      assert.equal(thought.dispatch_count, 1);
+      assert.ok(thought.dispatches.some(row =>
+        row.character === actor && JSON.stringify(row.trigger_kinds) === JSON.stringify(["unresolved_question"])),
+      "Precondition: C2 dispatched only this character's World-grounded question without an idle cue.");
+
+      const ownMind = cognitivePackets.find(packet => packet.character === actor);
+      const currentMind = ownMind?.cognition?.autonomous_opportunity?.current_mind ?? {};
+      // Read-only diagnostic: distinguish a C2 trigger with a genuine
+      // subject-specific internal context from a bare generic trigger kind.
+      console.log(JSON.stringify({
+        scenario: "c2_question_context_readonly_audit",
+        current_mind_keys: Object.keys(currentMind).sort(),
+        current_mind_mentions_question_subject: JSON.stringify(currentMind).includes("計時器"),
+        current_mind_mentions_followup: JSON.stringify(currentMind).includes("查"),
+        received_trigger_kinds: ownMind?.cognition?.autonomous_opportunity?.trigger_kinds ?? [],
+      }));
+      // The regular Native Brain packet already uses this exact CB-C3 field.
+      // The independent C2 path must reuse it, not invent a duplicate API.
+      const goalView = ownMind?.native_goal_decision;
+      assert.equal(goalView?.version, nativeGoalDecisionViewVersion,
+        "Native C2→C3 gap: a World-triggered autonomous thought lacks the existing Native goal decision interface.");
+      assert.equal(goalView.character, actor);
+      assert.equal(goalView.bounded_view_only, true);
+      assert.equal(goalView.world_truth_exposed, false);
+      assert.equal(goalView.source_event_ids_exposed, false);
+      assert.equal(goalView.goal_ids_exposed, false);
+      assert.equal(ownMind.boundaries.native_goal_decision_explicit_intent_only, true);
+      assert.equal(ownMind.boundaries.native_goal_decision_world_write_authority, false);
+      assert.equal(ownMind.boundaries.native_goal_decision_action_authority, false);
+      assert.equal(thought.durable_cognitive_write_performed, false,
+        "Providing a C3 decision view alone must not silently commit any goal.");
     }
     assert.equal(learned(final).length, conflict || encodedPanel ? 3 : 2);
     assert.ok(!final.memories[other].some(memory => memory.internal_provenance?.dialogue_learning_version === observerDialogueLearningVersion));
