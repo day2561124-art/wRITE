@@ -101,52 +101,51 @@ if ($ScopedTaskAuthorizations) {
             throw 'The scoped runner installation target is invalid.'
         }
     }
-    Copy-Item -LiteralPath $sourceRunner -Destination $protectedRunner -Force
     $config = [ordered]@{ schema_version = 2; expected_user_sid = $identity.User.Value }
-    [IO.File]::WriteAllText($configPath, ($config | ConvertTo-Json -Compress) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
     $requestRoot = $protectedRoot
 }
 else {
-New-Item -ItemType Directory -Path $protectedRoot -Force | Out-Null
-New-Item -ItemType Directory -Path (Join-Path $requestRoot 'requests') -Force | Out-Null
-New-Item -ItemType Directory -Path (Join-Path $requestRoot 'results') -Force | Out-Null
-New-Item -ItemType Directory -Path (Join-Path $requestRoot 'temp') -Force | Out-Null
+    New-Item -ItemType Directory -Path $protectedRoot -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $requestRoot 'requests') -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $requestRoot 'results') -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $requestRoot 'temp') -Force | Out-Null
 
-# Protect the directory before creating or replacing protected files.
-& icacls.exe $protectedRoot /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' "*$($identity.User.Value):(OI)(CI)RX" /C | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    throw 'Could not protect the elevated runner directory ACL.'
-}
-
-# Upgrade path for registrations created by an older ACL layout.
-# Only these two fixed files are ever taken over; recursion is intentionally forbidden.
-foreach ($protectedFile in @($protectedRunner, $configPath)) {
-    if (-not (Test-Path -LiteralPath $protectedFile -PathType Leaf)) { continue }
-
-    & takeown.exe /F $protectedFile /A | Out-Null
+    # Protect the directory before creating or replacing protected files.
+    & icacls.exe $protectedRoot /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' "*$($identity.User.Value):(OI)(CI)RX" /C | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        throw "Could not take ownership of existing elevated runner file: $protectedFile"
+        throw 'Could not protect the elevated runner directory ACL.'
     }
 
-    & icacls.exe $protectedFile /inheritance:r /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F' "*$($identity.User.Value):RX" /C | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "Could not repair existing elevated runner file ACL: $protectedFile"
+    # Upgrade path for registrations created by an older ACL layout.
+    # Only these two fixed files are ever taken over; recursion is intentionally forbidden.
+    foreach ($protectedFile in @($protectedRunner, $configPath)) {
+        if (-not (Test-Path -LiteralPath $protectedFile -PathType Leaf)) { continue }
+
+        & takeown.exe /F $protectedFile /A | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not take ownership of existing elevated runner file: $protectedFile"
+        }
+
+        & icacls.exe $protectedFile /inheritance:r /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F' "*$($identity.User.Value):RX" /C | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not repair existing elevated runner file ACL: $protectedFile"
+        }
+    }
+
+    $config = [ordered]@{
+        schema_version = 1
+        expected_user_sid = $identity.User.Value
+        expected_user_name = $identity.Name
+        request_root = [IO.Path]::GetFullPath($requestRoot)
+        allowed_roots = @(
+            $repoRoot,
+            [IO.Path]::GetFullPath($worktreesRoot)
+        )
+        registered_at = [DateTime]::UtcNow.ToString('o')
     }
 }
 
 Copy-Item -LiteralPath $sourceRunner -Destination $protectedRunner -Force
-
-$config = [ordered]@{
-    schema_version = 1
-    expected_user_sid = $identity.User.Value
-    expected_user_name = $identity.Name
-    request_root = [IO.Path]::GetFullPath($requestRoot)
-    allowed_roots = @(
-        $repoRoot,
-        [IO.Path]::GetFullPath($worktreesRoot)
-    )
-    registered_at = [DateTime]::UtcNow.ToString('o')
-}
 $configJson = $config | ConvertTo-Json -Depth 4
 [IO.File]::WriteAllText(
     $configPath,
@@ -155,12 +154,13 @@ $configJson = $config | ConvertTo-Json -Depth 4
 )
 
 # Reassert explicit file ACLs after replacement. The normal user receives RX only.
-foreach ($protectedFile in @($protectedRunner, $configPath)) {
-    & icacls.exe $protectedFile /inheritance:r /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F' "*$($identity.User.Value):RX" /C | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "Could not protect elevated runner file ACL: $protectedFile"
+if (-not $ScopedTaskAuthorizations) {
+    foreach ($protectedFile in @($protectedRunner, $configPath)) {
+        & icacls.exe $protectedFile /inheritance:r /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F' "*$($identity.User.Value):RX" /C | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not protect elevated runner file ACL: $protectedFile"
+        }
     }
-}
 }
 
 $powershellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
