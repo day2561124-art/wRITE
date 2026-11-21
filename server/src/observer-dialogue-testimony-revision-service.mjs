@@ -14,11 +14,14 @@ export function revisedTestimonyBody(text) {
 }
 
 export function activeTestimonyClaims(memories, referent, detailType) {
+  // The link saying a witness withdrew a claim survives even if the
+  // observer later becomes uncertain about the correction's precise content
+  // or who uttered it. Filtering doubtful memories before following revision
+  // links would resurrect the statement that was explicitly withdrawn.
   const claims = list(memories).filter(record => learned(record)
     && record?.content?.referent_id === referent
     && record?.content?.detail_type === detailType
-    && typeof record?.content?.lesson === "string" && record.content.lesson.trim()
-    && !record.possibly_incorrect && !record.source_confused);
+    && typeof record?.content?.lesson === "string" && record.content.lesson.trim());
   const byId = new Map(claims.map(record => [record.memory_id, record]));
   const retracted = new Set();
   for (const record of claims) {
@@ -36,7 +39,11 @@ export function activeTestimonyClaims(memories, referent, detailType) {
       }
     }
   }
-  return claims.filter(record => !retracted.has(record.memory_id));
+  // A doubtful leaf in the correction chain is not a settled answer.
+  // Retraction history is preserved, while only credible, unretracted
+  // testimony can be recalled as an answer.
+  return claims.filter(record => !retracted.has(record.memory_id)
+    && !record.possibly_incorrect && !record.source_confused);
 }
 
 // A witness can repeat one location without creating a second competing
