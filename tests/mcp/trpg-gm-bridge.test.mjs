@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {loadTRPGGMBridge,trpgPublicToolDefinition,isTRPGTransportTrusted,createWorkbenchTransportBoundary} from '../../server/src/mcp-trpg-gm-bridge.mjs';
+import {createTRPGGMBridgeRegistration,loadTRPGGMBridge,trpgPublicToolDefinition,isTRPGTransportTrusted,createWorkbenchTransportBoundary} from '../../server/src/mcp-trpg-gm-bridge.mjs';
 const name='trpg.gm.get_round_context',write='trpg.gm.commit_round_result';
 let calls=0,disabled=0;
 const tool=(n=name)=>({name:n,description:'synthetic',risk:n===write?'high-risk-write':'read',annotations:{readOnlyHint:n!==write},inputSchema:{type:'object',properties:{},additionalProperties:false},handler:async args=>{calls++;return {content:[{type:'text',text:JSON.stringify(args)}]};}});
@@ -21,9 +21,39 @@ assert.equal((await loadTRPGGMBridge({load:async()=>({loadWriterWorkbenchBridge:
 const uncertain=await loadTRPGGMBridge({load:provider([{...tool(write),handler:async()=>{throw Error('SYNTHETIC_PRIVATE_ARGUMENT');}}]),disabled:false});
 const result=await uncertain.callTool(write,{private:'SYNTHETIC_PRIVATE_ARGUMENT'});assert.equal(result.isError,true);assert.ok(!JSON.stringify(result).includes('SYNTHETIC_PRIVATE_ARGUMENT'));
 const source=readFileSync(new URL('../../server/src/mcp-server.mjs',import.meta.url),'utf8');
-assert.ok(source.includes('toolDefinitions.push(...trpgGMBridge.tools)'));
-assert.ok(source.indexOf('return trpgGMBridge.callTool(name, args)')<source.indexOf('const mutationArgs = args;'));
+assert.ok(source.includes('chatgptDeveloperToolNames.add(tool.name)'));
+assert.ok(source.indexOf('return trpgGMRegistration.current.callTool(name, args)')<source.indexOf('const mutationArgs = args;'));
 assert.ok(source.includes('if (trpgGMToolNames.has(tool.name)) return trpgPublicToolDefinition(tool)'));
+
+const registered=new Map();
+const failures=[];
+let attempts=0;
+const registration=createTRPGGMBridgeRegistration({enabled:true,
+ register:tools=>{for(const t of tools){assert.equal(registered.has(t.name),false);registered.set(t.name,t);}},
+ load:()=>loadTRPGGMBridge({disabled:false,onDisabled:reason=>failures.push(reason),load:async()=>{
+  attempts++;
+  if(attempts===1)throw Error('GATEWAY_AUTHORIZATION_FAILED');
+  if(attempts===2)throw Error('SYNTHETIC_PRIVATE_CONFIGURATION');
+  return provider([tool(),tool(write)])();
+ }}),
+});
+assert.equal(registration.current.status,'disabled');
+const [first,concurrent]=await Promise.all([registration.ensure(),registration.ensure()]);
+assert.equal(first,concurrent);
+assert.equal(first.status,'unavailable');
+assert.equal(attempts,1);
+assert.equal(registered.size,0);
+assert.equal((await registration.ensure()).status,'unavailable');
+assert.deepEqual(failures,['GATEWAY_AUTHORIZATION_FAILED','BRIDGE_LOAD_FAILED']);
+assert.equal((await registration.ensure()).status,'ready');
+assert.deepEqual([...registered.keys()],[name,write]);
+assert.equal((await registration.current.callTool(name,{})).isError,undefined);
+assert.equal(await registration.ensure(),registration.current);
+assert.equal(attempts,3);
+
+const excluded=createTRPGGMBridgeRegistration({enabled:false,load:()=>assert.fail('disabled profile loaded GM provider'),register:()=>assert.fail('disabled profile registered GM tools')});
+assert.equal((await excluded.ensure()).status,'disabled');
+assert.deepEqual(excluded.current.tools,[]);
 console.log('TRPG GM bridge contracts passed: scope, profiles, confidential dispatch, uncertainty, no Writer journal.');
 
 assert.equal(isTRPGTransportTrusted({ipc:false,trustedLocalOwner:false}),true);

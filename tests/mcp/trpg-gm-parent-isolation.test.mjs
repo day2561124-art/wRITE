@@ -47,7 +47,12 @@ test('GM-only child tool lists do not acquire parent engineering actions; parent
   assert.equal(await access(path.join(f.directory,'unexpected-parent-integration')).then(()=>true,()=>false),false);
   assert.deepEqual((await gm.listTools()).tools.map(t=>t.name),gmNames);
   const engineering=await f.connect();const names=(await engineering.listTools()).tools.map(t=>t.name);assert.ok(names.includes('dev_mcp_reload'));assert.ok(names.includes('dev_workspace_integrate'));
-  const reloaded=await engineering.callTool({name:'dev_mcp_reload',arguments:{}});assert.equal(JSON.parse(reloaded.content[0].text).reloaded,true,'independent engineering connection keeps its existing parent reload');
+  const reloaded=JSON.parse((await engineering.callTool({name:'dev_mcp_reload',arguments:{}})).content[0].text);
+  assert.equal(reloaded.reloaded,true,'independent engineering connection keeps its existing parent reload');
+  assert.notEqual(reloaded.child_pid,reloaded.previous_child_pid);
+  assert.deepEqual((await engineering.listTools({_meta:{workbench_purpose:'GM'}})).tools.map(t=>t.name),gmNames);
+  const afterReload=await engineering.callTool({name:gmNames[0],arguments:{}});
+  assert.equal(JSON.parse(afterReload.content[0].text).child_pid,reloaded.child_pid);
  }finally{await f.stop();}
 });
 

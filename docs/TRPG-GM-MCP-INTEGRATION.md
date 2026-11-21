@@ -5,6 +5,8 @@ The trusted loader imports only E:\TRPG\apps\gm-adapter\dist\writer-workbench.js
 Absent private E:\TRPG\config\writer-workbench.json disables TRPG; no game data is read.
 Pi workers, isolated journal tests and chatgpt_public do not load the bridge.
 Only validated trpg.gm.* names are registered for full/chatgpt_developer.
+Bridge registration runs after transport authorization. A later authenticated list or GM call retries registration after a load failure. During the failure, a known GM call returns `TRPG_GM_BRIDGE_UNAVAILABLE` and the catalog omits GM tools. Host diagnostics expose only fixed reason codes.
+For `GATEWAY_AUTHORIZATION_FAILED`, check the existing gateway and the campaign-bound credential's expiry, revocation and binding. Use the TRPG credential rotation procedure to keep the existing owner and scopes, verify the successor, then update the private configuration. A child that never registered the bridge can recover on its next authorized GM request. A child that already registered the old credential needs a child reload to load the successor. Verify with a read of the authorized campaign and a rejected out-of-scope read.
 TRPG tools dispatch through the bound handler map before Writer audit/story/engineering processing.
 Do not store game requests/results in Writer journals or pass private game text into development tools.
 All GM authorization, revocation, campaign scope, transaction audit and idempotency remain inside TRPG.
