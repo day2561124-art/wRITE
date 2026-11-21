@@ -10,7 +10,10 @@ import {
   scheduleWorldSimulationAutonomousCognitionOpportunities,
   dispatchWorldSimulationAutonomousCognitionOpportunities,
 } from "../../server/src/world-simulation-loop-service.mjs";
-import { nativeGoalDecisionViewVersion } from "../../server/src/world-simulation-motivation-goal-integration-service.mjs";
+import {
+  buildWorldSimulationNativeGoalDecisionView,
+  nativeGoalDecisionViewVersion,
+} from "../../server/src/world-simulation-motivation-goal-integration-service.mjs";
 import { getWorldSimulationHistory, getWorldSimulationState } from "../../server/src/world-simulation-state-service.mjs";
 
 const actor = "收聽者";
@@ -319,6 +322,26 @@ async function run(scenario) {
       const ownOpportunity = next.scheduler_projection.opportunities.find(item => item.character === actor);
       assert.ok(ownOpportunity?.trigger_kinds.includes("unresolved_question"),
         "Precondition: committed uncertain speech must generate an unresolved-question C2 cue.");
+
+      // Independent test-side observation, not a runtime injection:
+      // determine whether the existing Phase68D evidence catalog has a
+      // legal motivational basis even before wiring C2 to the C3 view.
+      const directGoalView = buildWorldSimulationNativeGoalDecisionView({
+        world_state: final, character: actor, turn_id: "diagnostic_future_c2_goal_turn",
+      });
+      const otherGoalView = buildWorldSimulationNativeGoalDecisionView({
+        world_state: final, character: other, turn_id: "diagnostic_future_c2_goal_turn",
+      });
+      assert.equal(directGoalView.character, actor);
+      assert.equal(directGoalView.world_truth_exposed, false);
+      assert.equal(directGoalView.source_event_ids_exposed, false);
+      assert.equal(directGoalView.goal_ids_exposed, false);
+      console.log(JSON.stringify({
+        scenario: "c2_goal_basis_readonly_audit",
+        actor_motivation_basis_count: directGoalView.motivation_basis.length,
+        bystander_motivation_basis_count: otherGoalView.motivation_basis.length,
+        actor_existing_goals_count: directGoalView.existing_goals.length,
+      }));
 
       // RED C2→C3 bridge: the same real-world evidence must reach the
       // character's bounded motivational decision interface. Do not invent a
