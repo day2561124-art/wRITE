@@ -40,8 +40,11 @@ export function planDialogueLocationAnswer({character, target, request, cognitio
   const place = lesson.slice(name.length + "放在".length).replace(/[。！!]$/u, "").trim();
   if (!place || place.length > 48 || /[？?]/u.test(place)) return uncertain();
   const speaker = memory.content.testimony_speaker;
+  const revised = Boolean(memory.content.retracts_memory_id)
+    || (Array.isArray(memory.content.retracts_memory_ids)
+      && memory.content.retracts_memory_ids.length > 0);
   const topic = typeof speaker === "string" && speaker.trim()
-    ? speaker + (memory.content.retracts_memory_id ? "後來說" : "說") : "我記得有人說";
+    ? speaker + (revised ? "後來說" : "說") : "我記得有人說";
   return goal(lesson, {topic, subject: name, predicate: "放在", object: place, punctuation: "。"},
     "retrieved_memory");
 }
