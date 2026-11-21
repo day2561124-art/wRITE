@@ -25,6 +25,9 @@ import { WORKSTREAM_STALE_RESOLUTION, validateWorkstreamStaleResolution, inspect
 import { WORKSTREAM_METADATA_LIMIT_RESOLUTION, validateWorkstreamMetadataLimitResolution, inspectWorkstreamMetadataLimitResolution } from "./mcp-workstream-metadata-limit-resolution.mjs";
 import { WORKSTREAM_COMMITTED_RESOLUTION, validateWorkstreamCommittedResolution, inspectWorkstreamCommittedResolution } from "./mcp-workstream-committed-resolution.mjs";
 import { POWERSHELL_EFFECT_RESOLUTION, REVIEWED_POWERSHELL_EFFECT_PROFILE, isPowerShellOperation, isUnprovenPowerShellRecovery, validatePowershellEffectResolution, inspectPowershellEffectResolution, archivedPowerShellCwdResolution } from "./mcp-powershell-recovery-resolution.mjs";
+import { REVIEWED_PI_WORKER_REFRESH, isReviewedPiWorkerRefresh, reviewedPiWorkerRefreshResult } from "./mcp-pi-worker-refresh-recovery.mjs";
+import { TRPG_LAUNCH_RESOLUTION, TRPG_LAUNCH_RESOLUTION_TOOL, TRPG_LAUNCH_OUTCOME, validateTrpgLaunchResolution } from "./mcp-trpg-interrupted-launch-resolution.mjs";
+import { restartResolutionKind, restartResolutionTool, restartParentId, restartChildId, validateRestartProof, validateRestartResolution } from "./mcp-trpg-gateway-restart-resolution.mjs";
 import { isPowerShellPreDispatchFailure } from "./mcp-powershell-predispatch-failure.mjs";
 import { projectPaths, projectRoot } from "./project-paths.mjs";
 import { createWorkspaceSnapshotAuthorityIpcClient } from "./mcp-workspace-snapshot-authority-ipc.mjs";
@@ -848,7 +851,7 @@ export function createDevOperationJournalService({
       ||!sha256Pattern.test(input.expected_command_sha256??"")||!Number.isSafeInteger(input.observed_exit_code)
       ||child.result?.command_sha256!==input.expected_command_sha256||done.result?.command_sha256!==input.expected_command_sha256
       ||child.result?.cwd!==done.result?.cwd||child.result?.elevated!==expectedElevated||done.result?.elevated!==expectedElevated
-      ||child.result?.timeout_ms!==done.result?.timeout_ms||done.result?.execution_ok!==true||(done.result?.timed_out!==false&&!isReviewedInterruptedLauncherReceipt(started,done,input))
+      ||child.result?.timeout_ms!==done.result?.timeout_ms||done.result?.execution_ok!==true||(done.result?.timed_out!==false&&!isReviewedInterruptedLauncherReceipt(started,done,input)&&!isReviewedPiWorkerRefresh(events,started,terminal,child,done,input))
       ||done.result?.exit_code!==input.observed_exit_code
       ||events.some(e=>e.parent_operation_id===child.operation_id&&e.stage==="operation_started")
       ||input.decision_owner!=="GPT"||!/^gpt-[A-Za-z0-9._:-]{1,120}$/u.test(input.decision_id??"")
@@ -1005,7 +1008,9 @@ export function createDevOperationJournalService({
     if(head.stdout.trim()!=="570563664d351017d87dd0f13961ed5f7d34e4ab")fail();
   }
 
-  const validateResolution=(events,input)=>input?.resolution_kind===INTEGRATION_PREFLIGHT_RESOLUTION
+  const validateResolution=(events,input)=>input?.resolution_kind===TRPG_LAUNCH_RESOLUTION
+    ?validateTrpgLaunchResolution(events,input)
+    :input?.resolution_kind===INTEGRATION_PREFLIGHT_RESOLUTION
     ?validateIntegrationPreflightResolution(events,input)
     :input?.resolution_kind===POWERSHELL_EFFECT_RESOLUTION
     ?validatePowershellEffectResolution(events,input,powershellEffectProfile)
@@ -1030,14 +1035,25 @@ export function createDevOperationJournalService({
       if(event.operation_type!=="pi_terminal_resolution"||!terminalStageSet.has(event.stage))continue;
       if(event.stage!=="operation_completed")continue;
       const proof=JSON.parse(event.result?.resolution_record??"null");
+      if (proof?.resolution_kind === restartResolutionKind) {
+        validateRestartProof(proof);
+        validateRestartResolution({ events, receipt: event,
+          admission: events.find(e => e.operation_id === event.operation_id && e.stage === "operation_started"),
+          proofText: canonicalJson(proof), proofHash: sha256Text(canonicalJson(proof)) });
+        if (resolved.has(restartParentId) || resolved.has(restartChildId)) throw Error("DUPLICATE_TRPG_RESTART_RESOLUTION");
+        resolved.set(restartParentId, event);
+        resolved.set(restartChildId, event);
+        continue;
+      }
       const {started,terminal,archived}=validateResolution(events,proof??{});
       const admission=events.find(e=>e.operation_id===event.operation_id&&e.stage==="operation_started");
+      const workerRefresh=proof.resolution_kind==="completed_powershell_observation"&&proof.operation_id===REVIEWED_PI_WORKER_REFRESH.operation_id;
       if (archived && (event !== archived.receipt || admission !== archived.admission))
         throw new Error("INVALID_TERMINAL_RESOLUTION");
-      if((["completed_git_commit", WORKSTREAM_STALE_RESOLUTION, WORKSTREAM_COMMITTED_RESOLUTION, WORKSTREAM_METADATA_LIMIT_RESOLUTION, ISOLATION_RESOLUTION, POWERSHELL_EFFECT_RESOLUTION, INTEGRATION_PREFLIGHT_RESOLUTION].includes(proof.resolution_kind) || proof.resolution_kind==="completed_powershell_observation"&&proof.operation_id===REVIEWED_INTERRUPTED_LAUNCHER.operation_id) && (
+      if((["completed_git_commit", WORKSTREAM_STALE_RESOLUTION, WORKSTREAM_COMMITTED_RESOLUTION, WORKSTREAM_METADATA_LIMIT_RESOLUTION, ISOLATION_RESOLUTION, POWERSHELL_EFFECT_RESOLUTION, INTEGRATION_PREFLIGHT_RESOLUTION, TRPG_LAUNCH_RESOLUTION].includes(proof.resolution_kind) || proof.resolution_kind==="completed_powershell_observation"&&[REVIEWED_INTERRUPTED_LAUNCHER.operation_id,REVIEWED_PI_WORKER_REFRESH.operation_id].includes(proof.operation_id)) && (
         admission?.reconciliation_key !== "resolution:" + started.operation_id
         || admission?.request_fingerprint_sha256 !== sha256Text(canonicalJson(proof))
-        || admission?.tool_name !== (proof.resolution_kind === "completed_powershell_observation" ? "pi.journal.resolve_completed_powershell" : proof.resolution_kind === INTEGRATION_PREFLIGHT_RESOLUTION ? "pi.journal.resolve_integration_preflight" : proof.resolution_kind === ISOLATION_RESOLUTION ? ISOLATION_RESOLUTION_TOOL : proof.resolution_kind === POWERSHELL_EFFECT_RESOLUTION ? "pi.journal.resolve_powershell_effect" : proof.resolution_kind === WORKSTREAM_COMMITTED_RESOLUTION
+        || admission?.tool_name !== (proof.resolution_kind === TRPG_LAUNCH_RESOLUTION ? TRPG_LAUNCH_RESOLUTION_TOOL : proof.resolution_kind === "completed_powershell_observation" ? "pi.journal.resolve_completed_powershell" : proof.resolution_kind === INTEGRATION_PREFLIGHT_RESOLUTION ? "pi.journal.resolve_integration_preflight" : proof.resolution_kind === ISOLATION_RESOLUTION ? ISOLATION_RESOLUTION_TOOL : proof.resolution_kind === POWERSHELL_EFFECT_RESOLUTION ? "pi.journal.resolve_powershell_effect" : proof.resolution_kind === WORKSTREAM_COMMITTED_RESOLUTION
           ? "pi.journal.resolve_workstream_committed" : proof.resolution_kind === WORKSTREAM_METADATA_LIMIT_RESOLUTION ? "pi.journal.resolve_workstream_metadata_limit" : proof.resolution_kind === WORKSTREAM_STALE_RESOLUTION
           ? "pi.journal.resolve_workstream_stale" : "pi.journal.resolve_completed_git_commit")
         || event.tool_name !== admission.tool_name || admission.sequence <= terminal.sequence || event.sequence <= admission.sequence
@@ -1049,11 +1065,14 @@ export function createDevOperationJournalService({
         || event.parent_operation_id!==started.operation_id || admission.parent_operation_id!==started.operation_id
         || event.workspace_id!==started.workspace_id || admission.workspace_id!==started.workspace_id
         || event.workstream_id!==started.workstream_id || admission.workstream_id!==started.workstream_id
-        || event.reconciles_event_id!==terminal.journal_event_id || event.result.outcome!==(
+        || event.reconciles_event_id!==terminal.journal_event_id || event.result.outcome!==(proof.resolution_kind===TRPG_LAUNCH_RESOLUTION ? TRPG_LAUNCH_OUTCOME : workerRefresh?"failed_intended_effect_observed":
           (["completed_child_create","completed_powershell_observation","completed_git_commit",WORKSTREAM_COMMITTED_RESOLUTION,POWERSHELL_EFFECT_RESOLUTION].includes(proof.resolution_kind) || proof.resolution_kind===ISOLATION_RESOLUTION&&proof.observation.classification==="completed")
             ?"intended_effect_observed":"no_effect_observed")
+        || (workerRefresh&&Object.entries(reviewedPiWorkerRefreshResult).some(([key,value])=>event.result[key]!==value))
         || (proof.resolution_kind===POWERSHELL_EFFECT_RESOLUTION && (event.result.observed_effect!=="detached_all_gate_completed"
           ||event.result.shell_exit_code_observed!==false||Object.hasOwn(event.result,"exit_code")))
+        || (proof.resolution_kind===TRPG_LAUNCH_RESOLUTION &&
+          (event.result.shell_exit_code_observed!==false || Object.hasOwn(event.result,"exit_code")))
         || resolved.has(started.operation_id))throw new Error("INVALID_TERMINAL_RESOLUTION");
       resolved.set(started.operation_id,event);
     }
@@ -1095,11 +1114,12 @@ export function createDevOperationJournalService({
     const resolutions = resolvedTerminals(events);
     // Legacy shell declarations remain legal history, never fresh physical
     // proof. getOperation independently refuses their replay/reinitiation.
-    const ambiguousTerminal = events.some((event) => (
+    const ambiguousTerminalEvents = events.filter((event) => (
       !resolutions.has(event.operation_id) &&
       terminalStageSet.has(event.stage)
       && (event.result?.outcome === "ambiguous_effect" || event.result?.reconciliation_required === true)
     ));
+    const ambiguousTerminal = ambiguousTerminalEvents.length > 0;
     const chainDegraded = dangling.length > 0 || ambiguousTerminal;
     runtimeHealth = explicitDegraded || chainDegraded ? "degraded" : "healthy";
     reconciliationRequired = explicitDegraded || chainDegraded;
@@ -1114,6 +1134,16 @@ export function createDevOperationJournalService({
       dangling_operations: dangling,
       active_operations: active,
       ambiguous_terminal: ambiguousTerminal,
+      ambiguous_terminal_count: ambiguousTerminalEvents.length,
+      ambiguous_terminal_operations: ambiguousTerminalEvents.slice(0, DEV_JOURNAL_MAX_QUERY_RESULTS).map(event => ({
+        operation_id: event.operation_id,
+        operation_type: event.operation_type,
+        tool_name: event.tool_name,
+        workspace_id: event.workspace_id,
+        workstream_id: event.workstream_id,
+        terminal_event_id: event.journal_event_id,
+        terminal_sequence: event.sequence,
+      })),
     };
   }
 
@@ -1689,11 +1719,6 @@ export function createDevOperationJournalService({
       result: input.result ?? {},
     }, {beforeAppend:input.beforeAppend});
     noteMutationTerminal(event);
-    if (!explicitDegraded) {
-      runtimeHealth = "healthy";
-      reconciliationRequired = false;
-      lastHealthError = null;
-    }
     return event;
   }
 
@@ -2008,6 +2033,8 @@ export function createDevOperationJournalService({
       dangling_operations: verification.dangling_operations.slice(0, DEV_JOURNAL_MAX_QUERY_RESULTS),
       active_operation_count: verification.active_operations.length,
       active_operations: verification.active_operations.slice(0, DEV_JOURNAL_MAX_QUERY_RESULTS),
+      ambiguous_terminal_count: verification.ambiguous_terminal_count,
+      ambiguous_terminal_operations: verification.ambiguous_terminal_operations,
       reconciliation_required: reconciliationRequired,
       last_health_error: lastHealthError,
       storage: "server_owned_per_event_files",
@@ -2039,6 +2066,8 @@ export function createDevOperationJournalService({
           dangling_operations: [],
           active_operation_count: null,
           active_operations: [],
+          ambiguous_terminal_count: null,
+          ambiguous_terminal_operations: [],
           reconciliation_required: reconciliationRequired,
           last_health_error: `${error.code}: ${error.message}`,
           storage: "server_owned_per_event_files",
@@ -2055,6 +2084,8 @@ export function createDevOperationJournalService({
         dangling_operations: [],
         active_operation_count: null,
         active_operations: [],
+        ambiguous_terminal_count: null,
+        ambiguous_terminal_operations: [],
         reconciliation_required: true,
         last_health_error: lastHealthError,
         storage: "server_owned_per_event_files",
@@ -2123,9 +2154,10 @@ function verifiedMcpTestResult(events,started,terminal) {
     const observedTerminal = resolution ?? terminal;
     const ambiguous = !resolution && (terminal?.result?.outcome === "ambiguous_effect" || terminal?.result?.reconciliation_required === true || isUnprovenPowerShellRecovery(terminal));
     const noEffect = ["failed_no_effect", "no_effect_observed"].includes(observedTerminal?.result?.outcome);
-    const intended = terminal?.stage === "operation_completed"
-      || ["intended_effect_observed", "failed_intended_effect_observed"].includes(observedTerminal?.result?.outcome);
-    const state = ambiguous ? "recovery_required" : noEffect ? "no_effect" : intended ? "completed"
+    const observedFailedRefresh = resolution?.result?.observed_effect === reviewedPiWorkerRefreshResult.observed_effect;
+    const intended = !observedFailedRefresh && (terminal?.stage === "operation_completed"
+      || ["intended_effect_observed", "failed_intended_effect_observed"].includes(observedTerminal?.result?.outcome));
+    const state = ambiguous ? "recovery_required" : observedFailedRefresh ? "failed_observed" : noEffect ? "no_effect" : intended ? "completed"
       : terminal ? "recovery_required" : verification.active_operations.includes(started.operation_id) ? "active" : "dangling";
     const childTestResult = state === "completed" && !resolution ? verifiedMcpTestResult(verification.events,started,terminal) : null;
     const originalResult = childTestResult ? {...observedTerminal.result,...childTestResult} : observedTerminal?.result ?? null;
@@ -2135,8 +2167,8 @@ function verifiedMcpTestResult(events,started,terminal) {
       reconciliation_key: started.reconciliation_key ?? null,
       request_fingerprint_sha256: started.request_fingerprint_sha256 ?? null,
       terminal: Boolean(terminal), outcome: terminal?.stage ?? "dangling",
-      reconciliation_state: state, recovered: terminal?.stage === "operation_recovered",
-      safe_to_reinitiate: noEffect && !ambiguous, reinitiate_requires_new_key: noEffect && !ambiguous,
+      reconciliation_state: resolution?.tool_name === restartResolutionTool ? "failed_observed" : state, recovered: terminal?.stage === "operation_recovered",
+      safe_to_reinitiate: resolution?.tool_name !== restartResolutionTool && noEffect && !ambiguous, reinitiate_requires_new_key: resolution?.tool_name !== restartResolutionTool && noEffect && !ambiguous,
       automatic_replay_allowed: false, original_result: originalResult,
       resolution_event_id: resolution?.journal_event_id ?? null, events,
     };

@@ -127,7 +127,15 @@ test("read route is finite, workspace-bound and cannot admit shell or mutation",
     await assert.rejects(guardPiDirectExecution({ route, tool, params, mutation: false, resolveWorkspace: binding }), { code: "PI_EXECUTION_INTENT_REQUIRED" });
   }
   await assert.rejects(guardPiDirectExecution({ route, tool: "dev_read_file", params, mutation: true, resolveWorkspace: binding }), { code: "PI_EXECUTION_INTENT_REQUIRED" });
-  await assert.rejects(guardPiDirectExecution({ route, tool: "dev_read_file", params: {}, resolveWorkspace: binding }), { code: "PI_EXECUTION_INTENT_REQUIRED" });
+  const shared = "dev_workspace_shared_repository_v1";
+  await guardPiDirectExecution({ route, tool: "dev_read_file", params: { arguments: { path: "package.json" } },
+    resolveWorkspace: async (args, options) => {
+      assert.deepEqual(args, { workspace_id: shared });
+      assert.deepEqual(options, { mutation: false });
+      return { workspace_id: shared };
+    } });
+  await assert.rejects(guardPiDirectExecution({ route, tool: "dev_pi_execute_readonly", params: {}, resolveWorkspace: binding }), { code: "PI_EXECUTION_INTENT_REQUIRED" });
+  await assert.rejects(guardPiDirectExecution({ route, tool: "dev_read_file", params: { arguments: { workspace_id: null } }, resolveWorkspace: binding }), { code: "PI_EXECUTION_INTENT_REQUIRED" });
   await assert.rejects(guardPiDirectExecution({ route, tool: "dev_read_file", params, resolveWorkspace: async () => ({ workspace_id: "other" }) }), { code: "WORKSPACE_IDENTITY_MISMATCH" });
   await assert.rejects(guardPiDirectExecution({ route: { inspect: async () => { throw Error("corrupt route"); } }, tool: "dev_read_file", params, resolveWorkspace: binding }), /corrupt route/);
 });

@@ -8,6 +8,7 @@ export const REQUIRED_DECISION_BOUNDARIES = Object.freeze([
   "unsafe_ambiguous_mutation",
 ]);
 export const PERMISSIONS = Object.freeze(["read", "workspace_create", "write", "tests", "commit", "integrate", "push"]);
+export const PI_TASK_AUTHORIZATION_ID = /^pi_task_[a-f0-9]{32}$/u;
 const suites = ["mcp", "mcp_core", "mcp_pi_postseal", "mcp_infrastructure", "mcp_reliability", "mcp_tunnel",
   "communication", "world_simulation", "cognition", "memory_retrieval"];
 function descriptor(capability, tool, permission, effect, required, optional = [], scope = "workspace") {
@@ -200,12 +201,14 @@ function validateInput(action, context, bootstrap = false) {
 export function createExecutionIntent(input) {
   const intent = jsonCopy(input).value;
   fields(intent, ["schema_version", "intent_id", "goal", "context", "constraints", "requested_actions",
-    "mutation_plan", "verification", "completion_conditions", "permissions", "decision_boundaries"], ["bootstrap"]);
+    "mutation_plan", "verification", "completion_conditions", "permissions", "decision_boundaries"], ["bootstrap", "task_authorization_id"]);
   if (intent.schema_version !== 1) fail("UNSUPPORTED_INTENT_VERSION");
   string(intent.intent_id, 128); string(intent.goal, 4096);
   fields(intent.context, ["project_id", "workstream_id", "workspace_id"]);
   if(intent.bootstrap!==undefined && intent.bootstrap!==true) fail("INVALID_BOOTSTRAP_INTENT");
   const bootstrap=intent.bootstrap===true;
+  if (intent.task_authorization_id !== undefined && (bootstrap || typeof intent.task_authorization_id !== "string"
+    || !PI_TASK_AUTHORIZATION_ID.test(intent.task_authorization_id))) fail("INVALID_TASK_AUTHORIZATION_ID");
   if(bootstrap && (intent.context.workstream_id!==null || intent.context.workspace_id!=="dev_workspace_shared_repository_v1")) fail("INVALID_BOOTSTRAP_CONTEXT");
   if (intent.context.project_id !== "writer_workbench" || (!bootstrap && !workstreamPattern.test(intent.context.workstream_id))
     || !workspacePattern.test(intent.context.workspace_id)) fail("INVALID_EXECUTION_CONTEXT");

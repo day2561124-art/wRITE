@@ -12,7 +12,7 @@ const lightweightReads = new Set([
 const ordinaryCapabilities = new Set([
   "filesystem.read", "filesystem.list", "filesystem.write", "filesystem.patch",
   "git.status", "git.commit", "verification.focused", "verification.affected",
-  "host.powershell",
+  "host.powershell", "workspace.create_checkpoint",
 ]);
 function fail(code) { throw Object.assign(new Error(code), { code }); }
 function exact(value, required, optional = []) {
@@ -25,7 +25,9 @@ function exact(value, required, optional = []) {
 // The existing handler still owns path, symlink, secret, size and sandbox checks.
 export async function admitPiLightweightRead({ tool, mutation, params, resolveWorkspace }) {
   if (mutation !== false || !lightweightReads.has(tool) || typeof resolveWorkspace !== "function") return false;
-  const workspace_id = params?.arguments?.workspace_id;
+  const supplied = params?.arguments?.workspace_id;
+  if (supplied === undefined && tool === "dev_pi_execute_readonly") return false;
+  const workspace_id = supplied === undefined ? "dev_workspace_shared_repository_v1" : supplied;
   if (typeof workspace_id !== "string" || !workspacePattern.test(workspace_id)) return false;
   const context = await resolveWorkspace({ workspace_id }, { mutation: false });
   if (context?.workspace_id !== workspace_id) fail("WORKSPACE_IDENTITY_MISMATCH");
@@ -41,7 +43,7 @@ export async function adaptAuthorizedPiRequest(source, { resolveWorkspace } = {}
     hashExecutionInput(source);
     exact(source, ["request_kind", "intent_id", "goal", "workspace_id"],
       ["schema_version", "constraints", "completion_conditions", "permissions",
-        "requested_actions", "command", "cwd", "timeoutMs"]);
+        "requested_actions", "command", "cwd", "timeoutMs", "task_authorization_id"]);
     if (source.schema_version !== undefined && source.schema_version !== 1) fail("UNSUPPORTED_INTENT_VERSION");
     const usesCommand = source.command !== undefined;
     if (usesCommand === (source.requested_actions !== undefined)
@@ -70,6 +72,7 @@ export async function adaptAuthorizedPiRequest(source, { resolveWorkspace } = {}
     return adaptAuthorizedPiRequest({
       schema_version: 1, request_kind: "authorized_engineering",
       intent_id: source.intent_id, goal: source.goal, workspace_id: source.workspace_id,
+      ...(source.task_authorization_id === undefined ? {} : { task_authorization_id: source.task_authorization_id }),
       constraints: source.constraints ?? [],
       requested_actions, permissions: inferred,
       completion_conditions: source.completion_conditions ?? [
@@ -79,7 +82,7 @@ export async function adaptAuthorizedPiRequest(source, { resolveWorkspace } = {}
   if (source?.request_kind !== "authorized_engineering") return createExecutionIntent(source);
   hashExecutionInput(source); // Existing bounded, accessor-free JSON validation.
   exact(source, ["schema_version", "request_kind", "intent_id", "goal", "workspace_id",
-    "constraints", "requested_actions", "permissions", "completion_conditions"], ["decision_boundaries"]);
+    "constraints", "requested_actions", "permissions", "completion_conditions"], ["decision_boundaries", "task_authorization_id"]);
   if (source.schema_version !== 1 || typeof source.workspace_id !== "string"
     || !workspacePattern.test(source.workspace_id)
     || source.workspace_id === "dev_workspace_shared_repository_v1") fail("ISOLATED_WORKSPACE_REQUIRED");
@@ -107,6 +110,7 @@ export async function adaptAuthorizedPiRequest(source, { resolveWorkspace } = {}
     || (mutation && context.mutation_allowed !== true)) fail("WORKSPACE_IDENTITY_MISMATCH");
   return createExecutionIntent({
     schema_version: 1, intent_id: source.intent_id, goal: source.goal,
+    ...(source.task_authorization_id === undefined ? {} : { task_authorization_id: source.task_authorization_id }),
     context: { project_id: "writer_workbench", workspace_id: context.workspace_id, workstream_id: context.workstream_id },
     constraints: source.constraints, requested_actions: actions, permissions,
     mutation_plan: actions.filter(action => capabilityDefinition(action.capability).effect).map(action => ({

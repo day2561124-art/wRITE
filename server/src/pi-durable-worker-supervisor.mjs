@@ -17,7 +17,9 @@ export function createPiDurableWorkerSupervisor({spawnProcess=spawn,root=project
    key.startsWith('WRITER_WORKBENCH_ISOLATED_TEST_')||key==='WRITER_WORKBENCH_TEST_JOURNAL_GROUP'));
   const worker=spawnProcess(process.execPath,[path.join(root,'server/src/mcp-server.mjs'),'--pi-worker'],{
    cwd:root,windowsHide:true,stdio:['ignore','ignore','pipe','ipc'],
-   env:controlledProcessEnvironment({...testEnvironment,MCP_TOOL_PROFILE:'chatgpt_developer'}),
+   env:controlledProcessEnvironment({...testEnvironment,MCP_TOOL_PROFILE:'chatgpt_developer',
+    NEXA_PI_TASK_AUTHORIZATION_ROOT:process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT,
+    NEXA_PI_REQUIRE_TASK_AUTHORIZATION:process.env.NEXA_PI_REQUIRE_TASK_AUTHORIZATION}),
   });
   const started=Date.now();child=worker;publish({state:'starting',pid:worker.pid??null});
   // Child errors contain no commands or caller-selected data in this channel.

@@ -2100,7 +2100,7 @@ const toolDefinitions = [
   },
   {
     name: "dev_pi_execute_intent",
-    description: "Default engineering ingress. For routine work, request_kind=autonomous_engineering accepts intent_id, goal, registered isolated workspace_id and either a command (non-elevated host PowerShell) or requested_actions; Pi derives mechanical contract fields and permissions while retaining durable authorization, audit and risk checks. request_kind=authorized_engineering and the full ExecutionIntent contract remain supported. request_kind=reconcile_only needs the exact operation identity and context. High-risk capabilities retain the full contract. Duplicate intents return durable state.",
+    description: "Default engineering ingress. Routine work accepts intent_id, goal, registered isolated workspace_id, requested_actions, and the operator-issued task_authorization_id. Pi derives mechanical contract fields for autonomous_engineering. Legacy autonomous PowerShell, authorized_engineering, and full ExecutionIntent inputs remain subject to server policy. reconcile_only needs the exact operation identity and context. Duplicate intents return durable state.",
     risk: "high-risk-write",
     annotations: { readOnlyHint: false },
     inputSchema: baseSchema({ intent_json: { type: "string", minLength: 1, maxLength: 524288 } }, ["intent_json"]),
@@ -2116,7 +2116,7 @@ const toolDefinitions = [
   },
   {
     name: "dev_pi_execution_status",
-    description: "Read persisted production route and optionally one Pi operation by exact registered workspace/workstream identity. This observational entry does not select implementation, migrate legacy operations or dispatch tools.",
+    description: "Read the production route, an exact Pi operation with its evidence, or a registered workspace's recent Pi operations and checkpoints. Use workstream_id and workspace_id without an operation selector for paginated history. This read does not dispatch tools.",
     risk: "read",
     annotations: { readOnlyHint: true },
     inputSchema: baseSchema({
@@ -2125,12 +2125,25 @@ const toolDefinitions = [
       operation_id: { type: "string", pattern: "^pi_operation_[a-f0-9]{32}$", maxLength: 64 },
       workstream_id: { type: "string", pattern: DEV_WORKSTREAM_ID_PATTERN_SOURCE, maxLength: 64 },
       workspace_id: { type: "string", pattern: DEV_WORKSPACE_EXECUTION_ID_PATTERN_SOURCE, maxLength: 64 },
+      history_limit: { type: "integer", minimum: 1, maximum: 25 },
+      before_sequence: { type: "integer", minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
     }),
     handler: async args => {
       if (Object.keys(args).length === 0) {
         const route = await piProductionController.status();
         return jsonContent({ route, default_path: route.revision > 0 ? "GPT -> Pi -> MCP" : "GPT -> MCP", legacy_migration: false, decision_owner: "GPT", execution_owner: "Pi", tool_owner: "MCP" });
       }
+      if (!args.operation_id && !args.intent_id && !args.bootstrap && args.workstream_id && args.workspace_id) {
+        const workstream = await dev_workspace_get_workstream({workstream_id: args.workstream_id});
+        if (workstream.workspace_id !== args.workspace_id) throw new Error("WORKSPACE_CONTEXT_MISMATCH");
+        const context = { project_id: "writer_workbench", workspace_id: args.workspace_id, workstream_id: args.workstream_id };
+        const [history, checkpoints] = await Promise.all([
+          piProductionController.listOperations({ context, limit: args.history_limit, before_sequence: args.before_sequence }),
+          dev_workspace_list_checkpoints({ workspace_id: args.workspace_id, workstream_id: args.workstream_id, state: "active", limit: 10 }),
+        ]);
+        return jsonContent({ workstream, ...history, checkpoints });
+      }
+      if (args.history_limit !== undefined || args.before_sequence !== undefined) throw new Error("PI_OPERATION_CONTEXT_REQUIRED");
       if ((!args.operation_id === !args.intent_id) || (args.bootstrap
         ? args.workstream_id!==undefined || args.workspace_id!==undefined
         : !args.workstream_id || !args.workspace_id)) throw new Error("PI_OPERATION_CONTEXT_REQUIRED");
@@ -5954,7 +5967,7 @@ async function dispatch(message) {
         },
       },
       serverInfo,
-      instructions: "Use tools/list and tools/call. Engineering routing is governed by dev_pi_execution_status. When pi_default is active, submit exact GPT-authored ExecutionIntent JSON through dev_pi_execute_intent; GPT decides, Pi schedules and records, MCP executes. Direct engineering tools are explicit diagnostic/emergency fallback only and require params._meta.pi_fallback with purpose, reason and GPT decision_id; mutations also require a reconciliation_key. Never infer success or automatically fall back after a Pi failure. High-risk writes retain their explicit confirmation guards." + (trpgGMBridge.instruction ? " TRPG GM: " + trpgGMBridge.instruction : ""),
+      instructions: "Use tools/list and tools/call. Bounded development file and Git reads can run directly against their authorized workspace. Engineering routing is governed by dev_pi_execution_status. When pi_default is active, submit GPT-authored work through dev_pi_execute_intent with the operator-issued task_authorization_id when required. GPT decides, Pi schedules and records, MCP executes. Other direct engineering tools use diagnostic/emergency fallback metadata and mutations require a reconciliation_key. Consult persisted operation evidence after a Pi failure. High-risk writes retain their explicit confirmation guards." + (trpgGMBridge.instruction ? " TRPG GM: " + trpgGMBridge.instruction : ""),
     });
   }
 

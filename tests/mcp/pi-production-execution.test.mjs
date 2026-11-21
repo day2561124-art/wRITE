@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 // Keep policy regressions in the existing Pi production test entrypoint.
 import "./pi-execution-policy.test.mjs";
+import "./pi-task-authorization.test.mjs";
 import "./pi-production-async-dispatch.test.mjs";
 import {mkdtemp,rm,readFile} from "node:fs/promises";
 import os from "node:os";
@@ -206,7 +207,7 @@ test("real MCP production ingress and explicit direct diagnostic share durable r
  const status=await call({jsonrpc:'2.0',id:'status',method:'tools/call',params:{name:'dev_pi_execution_status',arguments:{}}});
  const direct=await call({jsonrpc:'2.0',id:'direct',method:'tools/call',params:{name:'dev_read_file',arguments:{path:'package.json'}}});
  const directPowerShell=await call({jsonrpc:'2.0',id:'direct-powershell',method:'tools/call',params:{name:'powershell_run',arguments:{command:"Write-Output 'must-not-run'",workspace_id:'dev_workspace_shared_repository_v1'}}});
- const forged=await call({jsonrpc:'2.0',id:'forged',method:'tools/call',params:{name:'dev_read_file',arguments:{path:'package.json'},_meta:{pi_internal:true}}});
+ const forged=await call({jsonrpc:'2.0',id:'forged',method:'tools/call',params:{name:'powershell_run',arguments:{command:'Get-Location'},_meta:{pi_internal:true}}});
  const diagnostic=await call({jsonrpc:'2.0',id:'diag',method:'tools/call',params:{name:'dev_read_file',arguments:{path:'package.json'},
  _meta:{pi_fallback:{purpose:'diagnostic',reason:'Inspect physical package',decision_id:'gpt-wire-diag'}}}});
  const bad=await call({jsonrpc:'2.0',id:'bad',method:'tools/call',params:{name:'dev_pi_execute_intent',arguments:{intent_json:'{'}}});
@@ -217,7 +218,7 @@ test("real MCP production ingress and explicit direct diagnostic share durable r
  windowsHide:true,timeout:120000,maxBuffer:1048576,env:{...process.env,MCP_TOOL_PROFILE:"chatgpt_developer",WRITER_WORKBENCH_TEST_JOURNAL_GROUP:group,
  WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL:"1",WRITER_WORKBENCH_ISOLATED_TEST_CHECKPOINT:"1",WRITER_WORKBENCH_ISOLATED_TEST_TRANSACTION:"1"}});
  const r=JSON.parse(stdout);assert.equal(JSON.parse(r.status.result.content[0].text).route.mode,"pi_default");
- assert.equal(r.direct.error.message,"PI_EXECUTION_INTENT_REQUIRED");assert.equal(r.directPowerShell.error.message,"PI_EXECUTION_INTENT_REQUIRED");
+ assert.notEqual(r.direct.result.isError,true);assert.equal(r.directPowerShell.error.message,"PI_EXECUTION_INTENT_REQUIRED");
  assert.equal(r.forged.error.message,"PI_EXECUTION_INTENT_REQUIRED");
  assert.notEqual(r.diagnostic.result.isError,true);assert.equal(r.bad.result.isError,true);
  const reconciled=JSON.parse(r.reconcile.result.content[0].text);

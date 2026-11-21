@@ -47,6 +47,8 @@ export function createPiReliableMcpAdapter({callTool,queryOperation,resolveWorks
       const workspace=await timedRequest(()=>resolveWorkspace({workspace_id:context.workspace_id},{mutation:step.effect}),queryTimeoutMs);
       if(!workspace||workspace.workspace_id!==context.workspace_id||workspace.workstream_id!==context.workstream_id)
         reliableFailure("PERMISSION_DENIED");
+      if(intent.task_authorization_id!==undefined&&workspace.workstream_state!=="active")
+        reliableFailure("PERMISSION_DENIED");
       if(step.effect&&(workspace.workspace_type!=="isolated_worktree"||workspace.state!=="active"))
         reliableFailure("PERMISSION_DENIED");
     } else {
@@ -61,12 +63,12 @@ export function createPiReliableMcpAdapter({callTool,queryOperation,resolveWorks
     // The transport deadline starts at dispatch, after durable authorization.
     // A slow Journal read must not leave a timed-out callback that sends later.
     await options.authorizeDispatch?.();
+    const action=intent.requested_actions.find(x=>x.step_id===stepId);
     const evidence=reliableJson(await timedRequest(()=>{
       return callTool({name:step.tool,arguments:step.arguments,
         ...(step.effect?{_meta:{reconciliation_key:step.idempotency_key}}:{})},
-        {authorizeDispatch:options.authorizeDispatch});
+        {authorizeDispatch:options.authorizeDispatch,action});
     },step.tool==='dev_run_tests'?longRequestTimeoutMs:requestTimeoutMs));
-    const action=intent.requested_actions.find(x=>x.step_id===stepId);
     const facts=observations(evidence);
     const deduped=facts.find(x=>x?.reconciled===true);
     if(deduped&&(deduped.reconciliation_key!==step.idempotency_key

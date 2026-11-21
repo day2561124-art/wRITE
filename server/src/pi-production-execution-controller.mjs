@@ -1,6 +1,7 @@
 import {AsyncLocalStorage} from "node:async_hooks";
 import {traceSpan} from "./mcp-request-tracing.mjs";
 import {admitPiLightweightRead} from "./pi-execution-policy.mjs";
+import {createPiTaskPolicy} from "./pi-task-authorization.mjs";
 import {createExecutionIntent} from "./pi-execution-contract.mjs";
 import {createPiReliableExecutionStore} from "./pi-reliable-execution-store.mjs";
 import {createPiReliableExecutionEngine} from "./pi-reliable-execution-engine.mjs";
@@ -24,8 +25,8 @@ export async function guardPiDirectExecution({route,tool,mutation=false,params={
  const authorizeDispatch=managed.getStore();
  if(typeof authorizeDispatch==="function"){await authorizeDispatch();return;}
  if((await route.inspect()).revision===0)return;
- if(await admitPiLightweightRead({tool,mutation,params,resolveWorkspace}))return;
  const p=params._meta?.pi_fallback;
+ if(p===undefined&&await admitPiLightweightRead({tool,mutation,params,resolveWorkspace}))return;
  if(!p||Object.keys(p).sort().join(",")!=="decision_id,purpose,reason"||!["diagnostic","emergency"].includes(p.purpose)
   ||typeof p.reason!=="string"||!p.reason.trim()||p.reason.length>256||!/^gpt-[A-Za-z0-9._:-]{1,120}$/u.test(p.decision_id))reliableFailure("PI_EXECUTION_INTENT_REQUIRED");
  if(mutation&&!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(params._meta?.reconciliation_key??""))reliableFailure("FALLBACK_IDEMPOTENCY_REQUIRED");
@@ -48,7 +49,7 @@ export function projectVerifiedPiJournalHistory(events){
  const route=validatePiProductionRouteHistory(routes);
  return {projections,routes,route};
 }
-export function createPiProductionExecutionController({journal=defaultJournal,route=null,transport,retryPolicy,executionHook,pendingLimit=128}={}){
+export function createPiProductionExecutionController({journal=defaultJournal,route=null,transport,retryPolicy,executionHook,pendingLimit=128,authorizeTask=createPiTaskPolicy()}={}){
   if(!Number.isSafeInteger(pendingLimit)||pendingLimit<1||pendingLimit>128)reliableFailure('INVALID_PENDING_LIMIT');
   const boundJournal=journal;
   // Avoid substituting the global Journal route for a test/client-supplied
@@ -94,15 +95,19 @@ export function createPiProductionExecutionController({journal=defaultJournal,ro
      reliableFailure('PI_DURABLE_QUEUE_FULL');
    if(existing){const first=history.find(e=>e.execution_projection.state.operation_id===existing.execution_projection.state.operation_id&&e.execution_projection.revision===1);
     if(stableJson(first?.execution_projection.command.production_binding)!==stableJson(binding))reliableFailure("PRODUCTION_ENROLLMENT_CONFLICT");return;}
+   await authorizeTask(intent);
    const current=validatePiProductionRouteHistory(allEvents.filter(e=>e.operation_type==="pi_production_route"&&e.stage==="operation_completed"));
    if(current.mode!=="pi_default"||current.revision!==binding.route_revision||current.route_hash!==binding.route_hash)reliableFailure("PRODUCTION_ROUTE_DISABLED");
   };
   const store=createPiReliableExecutionStore({journal:readJournal,productionBinding:binding,admissionGuard});
-  const adapter=createPiReliableMcpAdapter({...transport,callTool:async (params,{authorizeDispatch}={})=>{
+  const adapter=createPiReliableMcpAdapter({...transport,callTool:async (params,{authorizeDispatch,action}={})=>{
    if((await route.inspect()).mode!=="pi_default")reliableFailure("PERMISSION_DENIED");
    if(typeof authorizeDispatch!=="function")reliableFailure("DISPATCH_AUTHORITY_REQUIRED");
    await authorizeDispatch();
-   return runPiManagedMcpCall(()=>transport.callTool(params),authorizeDispatch);
+   return runPiManagedMcpCall(async()=>{
+    await authorizeTask(intent,[action]);
+    return transport.callTool(params);
+   },authorizeDispatch);
   }});
   return {intent,store,engine:createPiReliableExecutionEngine({store,adapter,...(retryPolicy?{retryPolicy}:{}),executionHook})};
  }
@@ -149,8 +154,31 @@ export function createPiProductionExecutionController({journal=defaultJournal,ro
   const operation=output(r);
   return includeRoute?{route:combined?.route??validatePiProductionRouteHistory(routeEvents),operation}:operation;
  }
+ async function listOperations({context,limit=10,before_sequence=Number.MAX_SAFE_INTEGER}){
+  if(!Number.isSafeInteger(limit)||limit<1||limit>25||!Number.isSafeInteger(before_sequence)||before_sequence<1)
+   reliableFailure("INVALID_PI_HISTORY_PAGE");
+  const combined=unifiedDefault?await unifiedSnapshot():null;
+  const history=combined?.projections??await createPiReliableExecutionStore({journal,recoverOnReadFailure:false}).readHistory();
+  const operations=new Map();
+  const contextKey=stableJson(context);
+  for(const {sequence,execution_projection:record} of history){
+   if(stableJson(record.intent.context)!==contextKey)continue;
+   const started_sequence=operations.get(record.state.operation_id)?.started_sequence??sequence;
+   if(started_sequence<before_sequence)operations.set(record.state.operation_id,{started_sequence,record});
+  }
+  const page=[...operations.values()].reverse().slice(0,limit);
+  return {
+   operations:page.map(({started_sequence,record})=>({
+    started_sequence,operation_id:record.state.operation_id,intent_id:record.intent.intent_id,
+    task_authorization_id:record.intent.task_authorization_id??null, goal:record.intent.goal,
+    status:record.state.status,completed_steps:record.state.completed_steps,
+    next_step:record.state.pending_steps[0]??null,last_error:record.state.last_error,
+   })),
+   next_before_sequence:operations.size>limit?page.at(-1).started_sequence:null,
+  };
+ }
  return Object.freeze({
-  submit,discover,
+  submit,discover,listOperations,
   status:async()=>{if(unifiedDefault)return (await unifiedSnapshot()).route;
    await createPiReliableExecutionStore({journal,recoverOnReadFailure:false}).readHistory();return route.inspect();},
   admit:async source=>{const {intent,store}=await prepare(source);return output(await store.admit(intent,...(retryPolicy?[{retry_policy:retryPolicy}]:[])));},
