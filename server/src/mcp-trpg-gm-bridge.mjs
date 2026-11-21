@@ -4,7 +4,9 @@ const attachmentName='trpg.gm.stage_scenario_attachment';
 const previewName='trpg.gm.preview_scenario_publish',publishName='trpg.gm.publish_scenario';
 const writeNames=new Set([attachmentName,previewName,publishName,'trpg.gm.claim_round','trpg.gm.commit_round_result']);
 const error=code=>({isError:true,content:[{type:'text',text:JSON.stringify({error:{code,retryable:false}})}]});
-const empty=()=>Object.freeze({tools:Object.freeze([]),instruction:'',callTool:async()=>error('TOOL_NOT_AUTHORIZED')});
+const empty=(status='disabled')=>Object.freeze({status,tools:Object.freeze([]),instruction:'',callTool:async()=>error('TOOL_NOT_AUTHORIZED')});
+const loadFailureCodes=new Set(['INVALID_BRIDGE_CONFIGURATION','INVALID_CREDENTIAL_FILE','INVALID_GATEWAY_ADDRESS','GATEWAY_AUTHORIZATION_FAILED']);
+export function isTRPGGMToolName(name){return readNames.has(name)||writeNames.has(name);}
 // The sole deployment path is the user's existing TRPG checkout. No tool input
 // or environment-selected module can redirect imports, credentials or endpoints.
 const loadModule=()=>import(pathToFileURL('E:\\TRPG\\apps\\gm-adapter\\dist\\writer-workbench.js').href);
@@ -13,7 +15,7 @@ export function isTRPGTransportTrusted({ipc=typeof process.send==='function',tru
  // Remote IPC needs a verified request token. Only an OS-owner process argument trusts the local Pi CLI.
  return ipc===false||trustedLocalOwner===true;
 }
-export async function loadTRPGGMBridge({load=loadModule,disabled=process.argv.includes('--pi-worker')||process.env.WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL==='1'||process.env.MCP_TOOL_PROFILE==='chatgpt_public'||!isTRPGTransportTrusted(),onDisabled=()=>process.stderr.write('TRPG_GM_BRIDGE_DISABLED\n')}={}){
+export async function loadTRPGGMBridge({load=loadModule,disabled=process.argv.includes('--pi-worker')||process.env.WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL==='1'||process.env.MCP_TOOL_PROFILE?.trim()==='chatgpt_public'||!isTRPGTransportTrusted(),onDisabled=reason=>process.stderr.write(`TRPG_GM_BRIDGE_UNAVAILABLE ${reason}\n`)}={}){
  if(disabled)return empty();
  try{
   const provider=await load(),bridge=await provider.loadWriterWorkbenchBridge();
@@ -25,13 +27,34 @@ export async function loadTRPGGMBridge({load=loadModule,disabled=process.argv.in
    if((!read&&!write)||byName.has(tool.name)||tool.risk!==(read?'read':'high-risk-write')||tool.annotations?.readOnlyHint!==read||tool.inputSchema?.type!=='object'||tool.inputSchema.additionalProperties!==false||typeof tool.handler!=='function')throw Error();
    byName.set(tool.name,tool);
   }
-  return Object.freeze({tools:Object.freeze([...byName.values()]),instruction:bridge.instruction,
+  return Object.freeze({status:'ready',tools:Object.freeze([...byName.values()]),instruction:bridge.instruction,
    async callTool(name,args){
     const tool=byName.get(name);if(!tool)return error('TOOL_NOT_AUTHORIZED');
     try{return await tool.handler(args);}
     catch{return {isError:true,content:[{type:'text',text:JSON.stringify({error:{code:'TRPG_GATEWAY_UNAVAILABLE',retryable:true,instruction:'Do not infer whether a write committed. Preserve the original command and idempotency key.'}})}]};}
    }});
- }catch{onDisabled();return empty();}
+ }catch(e){
+  onDisabled(loadFailureCodes.has(e?.message)?e.message:'BRIDGE_LOAD_FAILED');
+  return empty('unavailable');
+ }
+}
+
+/** Called after transport authorization. Only validated tools reach the registry. */
+export function createTRPGGMBridgeRegistration({enabled,register,load=()=>loadTRPGGMBridge({disabled:false})}){
+ let current=empty();
+ let pending;
+ return Object.freeze({
+  get current(){return current;},
+  async ensure(){
+   if(!enabled||current.tools.length)return current;
+   pending??=Promise.resolve().then(load).then(bridge=>{
+    if(bridge.tools.length)register(bridge.tools);
+    current=bridge;
+    return current;
+   }).finally(()=>{pending=undefined;});
+   return pending;
+  },
+ });
 }
 export function trpgPublicToolDefinition(tool){
  return {name:tool.name,description:'['+tool.risk+'] '+tool.description,inputSchema:tool.inputSchema,annotations:tool.annotations,
@@ -50,7 +73,7 @@ async function defaultSecurityLoader(){
 export function createWorkbenchTransportBoundary({ipc=typeof process.send==='function',trustedLocalOwner=process.argv.includes('--trusted-local-owner'),loadSecurity=defaultSecurityLoader}={}){
  const local=ipc===false||trustedLocalOwner===true;
  let security=null,loading=null,principal=null,gmOnly=false;
- const knownGM=name=>readNames.has(name)||writeNames.has(name);
+ const knownGM=isTRPGGMToolName;
  return Object.freeze({
   get local(){return local;},get gmOnly(){return gmOnly;},
   isToolAllowed(name){return !gmOnly||knownGM(name);},
