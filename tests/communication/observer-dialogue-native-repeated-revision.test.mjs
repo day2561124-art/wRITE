@@ -131,6 +131,14 @@ try {
   const answer=await play("answer",packet=>{
     const emitted=packet.candidate_action_intents.find(action=>
       action.communication?.surface_realization?.surface_text===expected);
+    if (!emitted) console.log("REPEAT_DIAG "+JSON.stringify({
+      candidateSpeech:packet.candidate_action_intents.filter(x=>x.communication?.surface_realization_complete)
+        .map(x=>x.communication.surface_realization.surface_text),
+      keys:Object.keys(packet),
+      cognitionKeys:Object.keys(packet.cognition??{}),
+      working_context:packet.cognition?.working_context??packet.subjective_cognition?.working_context??null,
+      memory_retrieval:packet.memory_retrieval??null,
+    }));
     assert.ok(emitted,"Expected corrected location to be recalled into answer candidate");
     return {action_id:emitted.action_id};
   });
