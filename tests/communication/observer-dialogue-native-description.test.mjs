@@ -305,9 +305,8 @@ async function run(scenario) {
     }
     const final = (await getWorldSimulationState(sid, options)).state;
     if (conflict) {
-      // Expected-red Native acceptance: a committed statement of uncertainty
-      // should surface the corresponding question without the caller forging
-      // pending_internal_cues. An idle trigger is not enough.
+      // The committed uncertain utterance alone must wake C2. No caller
+      // idle flag or pending internal cue is allowed in this Native test.
       const worldHistory = await getWorldSimulationHistory(sid, options);
       const answerTurn = worldHistory.turns.at(-1);
       assert.ok(answerTurn.action_outcomes.some(row =>
@@ -317,11 +316,12 @@ async function run(scenario) {
       "Precondition: the speaker-owned pending-check intention must be selected, emitted, and punctuated as a statement.");
       const next = await scheduleWorldSimulationAutonomousCognitionOpportunities({
         world_simulation_session_id: sid,
-        runtime_context_by_character: {[actor]: {idle: true}},
       }, options);
       const ownOpportunity = next.scheduler_projection.opportunities.find(item => item.character === actor);
-      assert.ok(ownOpportunity?.trigger_kinds.includes("unresolved_question"),
-        "Precondition: committed uncertain speech must generate an unresolved-question C2 cue.");
+      assert.deepEqual(ownOpportunity?.trigger_kinds, ["unresolved_question"],
+        "Precondition: only committed uncertain speech, not a manually supplied idle cue, must wake C2.");
+      assert.equal(next.scheduler_projection.opportunity_count, 1,
+        "No unrelated character may receive the speaker's private unresolved-question opportunity.");
 
       // Independent test-side observation, not a runtime injection:
       // determine whether the existing Phase68D evidence catalog has a
@@ -354,14 +354,14 @@ async function run(scenario) {
       const cognitivePackets = [];
       const thought = await dispatchWorldSimulationAutonomousCognitionOpportunities({
         world_simulation_session_id: sid,
-        runtime_context_by_character: {[actor]: {idle: true}},
       }, {...options, characterBrain: async packet => {
         if (packet.character === actor) cognitivePackets.push(structuredClone(packet));
         return {disposition: "autonomous_question_noted"};
       }});
+      assert.equal(thought.dispatch_count, 1);
       assert.ok(thought.dispatches.some(row =>
-        row.character === actor && row.trigger_kinds.includes("unresolved_question")),
-      "Precondition: C2 actually dispatched this character's World-grounded question.");
+        row.character === actor && JSON.stringify(row.trigger_kinds) === JSON.stringify(["unresolved_question"])),
+      "Precondition: C2 dispatched only this character's World-grounded question without an idle cue.");
 
       const ownMind = cognitivePackets.find(packet => packet.character === actor);
       const currentMind = ownMind?.cognition?.autonomous_opportunity?.current_mind ?? {};
