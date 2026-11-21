@@ -707,6 +707,9 @@ function solveSubjectiveMemoryFormation(context) {
     const existing = Array.isArray(existingRaw) ? cloneJson(existingRaw) : [];
     const dialogueBindings = context.learn_dialogue_referents
       ? analyzeObserverDialogueLearning({character, perception, memories: existing,
+        // The subjective observation may omit a timestamp. Bind only the
+        // current committed World clock, never a value supplied by the speaker.
+        observationTime: encodedAt,
         verifiedReceiptHashes: dialogueReceipts.get(character)}).bindings
       : null;
     const existingIds = new Set(existing.map((item) => String(item?.memory_id ?? item?.id ?? "")).filter(Boolean));
