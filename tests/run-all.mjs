@@ -981,6 +981,7 @@ const steps = [
   ["Native dialogue correction and shared context", ["tests/communication/observer-dialogue-native-continuation.test.mjs"]],
   ["Witness testimony revision and recall", ["tests/communication/observer-dialogue-testimony-revision.test.mjs"]],
   ["Testimony source uncertainty and delayed recall", ["tests/communication/observer-dialogue-source-uncertainty.test.mjs"]],
+  ["Corroborated witness memory accessibility", ["tests/communication/observer-dialogue-corroborated-recall.test.mjs"]],
   ["Native witness correction and retrieval", ["tests/communication/observer-dialogue-native-revision.test.mjs"]],
   ["Native repeated witness correction", ["tests/communication/observer-dialogue-native-repeated-revision.test.mjs"]],
   ["Native dialogue and prior panel memory", ["tests/communication/observer-dialogue-native-description.test.mjs"]],
