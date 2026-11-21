@@ -5,6 +5,7 @@ import { admitDialogueAnswerCorrection, admitDialogueClarificationReply, admitDi
   dialogueThreadAnchorsWithAudience, recentDialogueThreadAnchor, stageDialogueClarificationRequest } from "./observer-dialogue-clarification-service.mjs";
 import { buildCharacterCommunicationActionCandidate } from "./character-communication-foundation-service.mjs";
 import { planDialogueCountdownAnswer, projectDialogueCountdownDisplay, visibleDialogueCountdownPanel } from "./observer-dialogue-answer-service.mjs";
+import { planDialogueLocationAnswer } from "./observer-dialogue-location-answer-service.mjs";
 import { historicalDialoguePanelMemory } from "./observer-dialogue-panel-memory-service.mjs";
 import { committedPanelQuotes, isPanelRecheckQuestion, planPanelRecheckSpeech, recentPanelQuote,
   resolvePendingPanelRecheck, suggestPanelApproach } from "./observer-dialogue-panel-recheck-service.mjs";
@@ -6358,6 +6359,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
     const stagedMemoryRetrievalResolver = scopeConversationMemoryStage(
       learnedLookup ? view => learnedDialogueMemoryStage({
         ...view, request_field: learnedDialogue.request_field, historical_panel: historicalPanel,
+        conversation_referent: conversationScope.referent,
+        committed_referent_memories: characterMapValue(worldState.memories, character),
       })
         : conversationScope?.unresolved_description ? () => ({process_occurred: false})
           : typeof options.memoryRetrievalStageResolver === "function" ? options.memoryRetrievalStageResolver : null,
@@ -7777,11 +7780,17 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       });
     }
     if (dialogueAnswerTarget && characterCognition.communication_goal == null) {
-      const answerGoal = planDialogueCountdownAnswer({
-        character, target: dialogueAnswerTarget, request: dialogueAnswerRequest, display: dialogueAnswerDisplay,
-        cognition: characterCognition, retrieval: memoryRetrievalProcess, memories: characterMapValue(worldState.memories, character),
-        historicalPanel,
-      });
+      const answerGoal = dialogueAnswerRequest?.kind === "object_location"
+        ? planDialogueLocationAnswer({
+          character, target: dialogueAnswerTarget, request: dialogueAnswerRequest,
+          cognition: characterCognition, retrieval: memoryRetrievalProcess,
+          memories: characterMapValue(worldState.memories, character),
+        })
+        : planDialogueCountdownAnswer({
+          character, target: dialogueAnswerTarget, request: dialogueAnswerRequest, display: dialogueAnswerDisplay,
+          cognition: characterCognition, retrieval: memoryRetrievalProcess,
+          memories: characterMapValue(worldState.memories, character), historicalPanel,
+        });
       if (answerGoal) {
         characterCognition.communication_goal = answerGoal;
         const identity = answerGoal.claim_source_kind === "current_perception" ? dialogueAnswerDisplay?.identity
