@@ -148,6 +148,11 @@ const target = {observer, partner: other};
 const reply = planDialogueLocationAnswer({character: observer, target, request,
   memories: [first, second], retrieval: recovered(second), cognition: cognition(second)});
 assert.equal(reply?.surface_realization?.clause?.topic, witness + "後來說");
+const repeatedCorrectionReply = planDialogueLocationAnswer({character:observer,target,request,
+  memories:[first,second,repeated,chainFinal],
+  retrieval:recovered(chainFinal),cognition:cognition(chainFinal)});
+assert.equal(repeatedCorrectionReply?.surface_realization?.clause?.topic,witness+"後來說",
+  "Multi-retraction lineage must still be described as a witness's later correction");
 assert.equal(buildCharacterCommunicationActionCandidate({character: observer, cognition: {
   ...cognition(second), communication_goal: reply}})?.communication?.surface_realization?.surface_text,
   witness + "後來說，" + revised);
