@@ -40,11 +40,17 @@ export function planDialogueLocationAnswer({character, target, request, cognitio
   const place = lesson.slice(name.length + "放在".length).replace(/[。！!]$/u, "").trim();
   if (!place || place.length > 48 || /[？?]/u.test(place)) return uncertain();
   const speaker = memory.content.testimony_speaker;
+  const sourceChannel = memory.internal_provenance?.dialogue_source_channel;
   const revised = Boolean(memory.content.retracts_memory_id)
     || (Array.isArray(memory.content.retracts_memory_ids)
       && memory.content.retracts_memory_ids.length > 0);
-  const topic = typeof speaker === "string" && speaker.trim()
-    ? speaker + (revised ? "後來說" : "說") : "我記得有人說";
+  // Seeing a clue is not hearing testimony, and unverified overheard words
+  // must not acquire a named speaker or turn into firsthand object knowledge.
+  const topic = sourceChannel === "observed_text" ? "我看到的線索是"
+    : sourceChannel === "heard_text" ? "我聽到的說法是"
+    : sourceChannel === "understood_testimony" && typeof speaker === "string" && speaker.trim()
+      ? speaker + (revised ? "後來說" : "說")
+      : "我記得有這條線索";
   return goal(lesson, {topic, subject: name, predicate: "放在", object: place, punctuation: "。"},
     "retrieved_memory");
 }
