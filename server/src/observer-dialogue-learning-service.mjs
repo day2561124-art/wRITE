@@ -3,7 +3,8 @@ import { committedDescriptor, dialogueClarificationFragment, dialogueDescriptorQ
   dialogueDescription, matchesDescriptor, namedByDescription, sameDescriptor } from "./observer-dialogue-description-service.mjs";
 import { dialogueClarificationQuestion } from "./observer-dialogue-clarification-service.mjs";
 import { isDialoguePanelMemory } from "./observer-dialogue-panel-memory-service.mjs";
-import { findTestimonyRetraction, revisedTestimonyBody, singleUncontestedTestimony } from "./observer-dialogue-testimony-revision-service.mjs";
+import { findEllipticalLocationCorrection, findTestimonyRetraction, revisedTestimonyBody,
+  singleUncontestedTestimony } from "./observer-dialogue-testimony-revision-service.mjs";
 
 export const observerDialogueLearningVersion = "observer-dialogue-learning-v1";
 export function learnedDialogueLineageHash(record) {
@@ -317,6 +318,13 @@ export function analyzeObserverDialogueLearning({
   const inheritedQuestions = new Set();
   for (const source of sources) {
     const {text} = source;
+    const elliptical = findEllipticalLocationCorrection({source, memories,
+      observedAt: perception?.simulation_time});
+    if (elliptical && registry.has(elliptical.referent_id)) {
+      found.push(focusOn(elliptical.referent_id, text));
+      bindings.set(sourceKey(source), {source, ...elliptical});
+      continue;
+    }
     const namedMatch = nameMentions(text, registry);
     const named = namedMatch.entries;
     const lines = dialogueClauses(text);
