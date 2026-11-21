@@ -97,25 +97,8 @@ try {
   assert.equal(prior[0].content.testimony_speaker,witness);
   assert.equal(prior[0].content.lesson,original);
   await play("change",pick(update));
-  let heardUpdate = null;
-  await play("listen-update",packet=>{
-    heardUpdate = {simulation_time: packet.perception?.simulation_time,
-      heard: packet.perception?.audible?.map(item=>({
-        kind:item.kind, semantic_content:item.semantic_content,
-        speaker:item.speaker, observer:item.observer, schema_version:item.schema_version,
-        speaker_identity_recognized:item.speaker_identity_recognized,
-        speech_content_intelligible:item.speech_content_intelligible,
-      }))};
-    return "reject_all";
-  });
+  await play("listen-update",()=> "reject_all");
   const after=await learned();
-  console.log("TESTIMONY_DEBUG "+JSON.stringify({heardUpdate,
-    before:prior.map(record=>({lesson:record.content.lesson, timestamp:record.encoded_at,
-      speaker:record.content.testimony_speaker, name:record.content.referent_name,
-      referent:record.content.referent_id, source:record.internal_provenance?.dialogue_source_channel})),
-    after:after.map(record=>({lesson:record.content.lesson, timestamp:record.encoded_at,
-      speaker:record.content.testimony_speaker, name:record.content.referent_name,
-      referent:record.content.referent_id, retracts:record.content.retracts_memory_id}))}));
   assert.equal(after.length,2,"Correction should form a new memory, not overwrite old");
   assert.equal(after[1].content.retracts_memory_id,after[0].memory_id);
   assert.equal(after[0].content.lesson,original);
