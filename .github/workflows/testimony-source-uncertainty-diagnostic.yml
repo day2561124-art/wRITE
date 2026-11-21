@@ -1,0 +1,19 @@
+name: Testimony source uncertainty diagnostic
+on:
+  push:
+    branches:
+      - fix/testimony-source-uncertainty
+jobs:
+  witness-source-holdout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: node tests/communication/observer-dialogue-source-uncertainty.test.mjs
+      - run: node tests/communication/observer-dialogue-testimony-revision.test.mjs
+      - run: node tests/communication/observer-dialogue-native-repeated-revision.test.mjs
