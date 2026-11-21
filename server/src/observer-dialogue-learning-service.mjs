@@ -4,7 +4,7 @@ import { committedDescriptor, dialogueClarificationFragment, dialogueDescriptorQ
 import { dialogueClarificationQuestion } from "./observer-dialogue-clarification-service.mjs";
 import { isDialoguePanelMemory } from "./observer-dialogue-panel-memory-service.mjs";
 import { findEllipticalLocationCorrection, findTestimonyRetractions, revisedTestimonyBody,
-  singleUncontestedTestimony } from "./observer-dialogue-testimony-revision-service.mjs";
+  uncontestedTestimonyClaims } from "./observer-dialogue-testimony-revision-service.mjs";
 
 export const observerDialogueLearningVersion = "observer-dialogue-learning-v1";
 export function learnedDialogueLineageHash(record) {
@@ -485,11 +485,12 @@ export function learnedDialogueMemoryStage(view) {
     // The full committed evidence may veto a stale retrieval frontier.
     const all = Array.isArray(view.committed_referent_memories)
       ? view.committed_referent_memories : null;
-    const selected = !view.historical_panel && all && view.conversation_referent
-      ? singleUncontestedTestimony(all, view.conversation_referent, requestField) : null;
+    const matching = !view.historical_panel && all && view.conversation_referent
+      ? uncontestedTestimonyClaims(all, view.conversation_referent, requestField) : [];
+    const matchingIds = new Set(matching.map(record => record.memory_id));
     const record = !all || !view.conversation_referent || view.historical_panel
       ? (unique(eligible.map(item => normalize(item.content.lesson))).length === 1 ? eligible[0] : null)
-      : selected ? eligible.find(item => item.memory_id === selected.memory_id) ?? null : null;
+      : eligible.find(item => matchingIds.has(item.memory_id)) ?? null;
     return record ? {
       contacted_candidate_refs: [record.memory_id],
       recovered_selections: [{source_memory_ref: record.memory_id, content_kind: "detail",
