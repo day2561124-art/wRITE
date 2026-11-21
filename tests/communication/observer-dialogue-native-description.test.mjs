@@ -220,6 +220,15 @@ async function run(scenario) {
         characterCommunicationListenerInterpretationResolver: async view => interpret(view, actor, shortReply, !repeatQuestion),
         characterBrain: async packet => {
           if (packet.character === actor) {
+            if (conflict) {
+              // GREEN control: the same actor already receives canonical CB-C3
+              // goal decisions in an ordinary Native event turn.
+              assert.equal(packet.native_goal_decision?.version, nativeGoalDecisionViewVersion);
+              assert.equal(packet.native_goal_decision.character, actor);
+              assert.equal(packet.native_goal_decision.world_truth_exposed, false);
+              assert.equal(packet.boundaries.native_goal_decision_explicit_intent_only, true);
+              assert.equal(packet.boundaries.native_goal_decision_world_write_authority, false);
+            }
             const serialized = JSON.stringify(packet.cognition.working_context);
             receivedShortReply = packet.perception.audible.some(item => item?.kind === "understood_utterance" && item.semantic_content === shortReply);
             if (!conflict) {
