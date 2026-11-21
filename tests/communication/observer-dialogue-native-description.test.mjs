@@ -298,8 +298,9 @@ async function run(scenario) {
       const answerTurn = worldHistory.turns.at(-1);
       assert.ok(answerTurn.action_outcomes.some(row =>
         row.actor === actor && row.result === "communication_emitted"
-        && row.communication_event?.surface_text === answers.conflict_speech),
-      "Precondition: the uncertain response must actually be emitted and committed by World.");
+        && row.communication_event?.surface_text === answers.conflict_speech
+        && row.communication_event?.speech_act === "acknowledge_unresolved_question"),
+      "Precondition: the speaker-owned pending-check intention must be selected, emitted, and punctuated as a statement.");
       const next = await scheduleWorldSimulationAutonomousCognitionOpportunities({
         world_simulation_session_id: sid,
         runtime_context_by_character: {[actor]: {idle: true}},
