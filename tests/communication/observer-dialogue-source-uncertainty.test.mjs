@@ -73,8 +73,8 @@ assert.equal(singleUncontestedTestimony([first,later],ref,"location")?.memory_id
 // A direct visual clue is an observed text, not a named person's statement.
 const observed=claim("memory_visual",east,{speaker:null,channel:"observed_text"});
 assert.equal(reply([observed],observed)?.surface_realization?.clause?.topic,
-  "我看到的文字寫著",
-  "Visually observed words must not be misreported as something somebody said");
+  "我看到的線索是",
+  "A visual clue must not be misreported as somebody's testimony or direct proof of an object's location");
 const overheard=claim("memory_unattributed",east,{speaker:null,channel:"heard_text"});
 assert.equal(reply([overheard],overheard)?.surface_realization?.clause?.topic,
   "我聽到的說法是");
