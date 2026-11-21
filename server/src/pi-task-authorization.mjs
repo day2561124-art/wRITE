@@ -7,7 +7,7 @@ const project = "writer_workbench";
 const allowed = new Set([
   "filesystem.read", "filesystem.list", "filesystem.write", "filesystem.patch",
   "git.status", "git.commit", "verification.focused", "verification.affected",
-  "workspace.create_checkpoint", "windows.service.ensure_running",
+  "workspace.create_checkpoint", "windows.service.ensure_running", "workspace.powershell_isolated",
 ]);
 const maxRecordBytes = 16 * 1024;
 const unconfinedShell = new Set(["host.powershell", "workspace.powershell"]);

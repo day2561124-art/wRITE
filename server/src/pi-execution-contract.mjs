@@ -49,6 +49,7 @@ export const CAPABILITY_DEFINITIONS = Object.freeze([
   descriptor("git.status", "dev_git_status", "read", false, [], ["includeUntracked"]),
   descriptor("host.powershell", "powershell_run", "write", true, ["command"], ["cwd", "timeoutMs"], "host_maintenance"),
   descriptor("workspace.powershell", "powershell_run", "write", true, ["command"], ["cwd", "timeoutMs"], "workspace_shell"),
+  descriptor("workspace.powershell_isolated", "powershell_run", "write", true, ["command"], ["cwd", "timeoutMs", "sandbox_paths", "output_paths", "toolchain"]),
   descriptor("windows.service.ensure_running", "powershell_admin_run", "write", true, ["service_name"], [], "workspace",
     Object.freeze({ service_name: Object.freeze({ type: "string", pattern: WINDOWS_SERVICE_NAME.source, maxLength: 80 }) })),
   descriptor("git.commit", "dev_git_commit", "commit", true, ["message", "paths", "expectedHead"]),
@@ -160,6 +161,14 @@ function validateInput(action, context, bootstrap = false) {
     normalizePiWorkstreamBootstrap({bootstrap_id:action.idempotency_key,...action.input});
   }
   const input = action.input;
+  if (action.capability === "workspace.powershell_isolated" && input.cwd !== undefined) relativePath(input.cwd);
+  if ("toolchain" in input && input.toolchain !== "node") fail("INVALID_SANDBOX_TOOLCHAIN");
+  for (const [name, limit] of [["sandbox_paths", 64], ["output_paths", 8]]) {
+    if (name in input) {
+      strings(input[name], limit);
+      input[name].forEach(relativePath);
+    }
+  }
   if ("service_name" in input && (typeof input.service_name !== "string" || !WINDOWS_SERVICE_NAME.test(input.service_name))) fail("INVALID_WINDOWS_SERVICE_NAME");
   if ("path" in input) relativePath(input.path);
   if ("maxBytes" in input) integer(input.maxBytes, 1, 8192);
@@ -245,6 +254,9 @@ export function createExecutionIntent(input) {
     validateInput(action, intent.context, bootstrap);
     const plan = plans.get(action.step_id);
     if (definition.effect) {
+      if (action.capability === "workspace.powershell_isolated" && (intent.task_authorization_id === undefined
+        || plan?.target !== intent.context.workspace_id
+        || intent.context.workspace_id === "dev_workspace_shared_repository_v1")) fail("ISOLATED_TASK_AUTHORIZATION_REQUIRED");
       if (action.capability === "windows.service.ensure_running" && (intent.task_authorization_id === undefined
         || plan?.target !== `windows_service:${action.input.service_name.toLowerCase()}`)) fail("WINDOWS_SERVICE_AUTHORIZATION_REQUIRED");
       if (action.capability === "workspace.create_checkpoint"

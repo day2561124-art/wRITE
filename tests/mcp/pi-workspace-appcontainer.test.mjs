@@ -1,0 +1,178 @@
+import assert from "node:assert/strict";
+import { createServer } from "node:net";
+import { once } from "node:events";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { createDevOperationJournalService } from "../../server/src/mcp-development-journal-tools.mjs";
+import { createPowerShellMaintenanceTool } from "../../server/src/mcp-powershell-maintenance-tools.mjs";
+import { fingerprintMcpMutationRequest } from "../../server/src/mcp-operation-reconciliation-context.mjs";
+import { adaptAuthorizedPiRequest } from "../../server/src/pi-execution-policy.mjs";
+import { createPiProductionExecutionController } from "../../server/src/pi-production-execution-controller.mjs";
+import { createPiProductionRouteStore } from "../../server/src/pi-production-execution-route.mjs";
+import { createPiTaskAuthorizationStore, createPiTaskPolicy } from "../../server/src/pi-task-authorization.mjs";
+
+const platform = { skip: process.platform !== "win32" || process.arch !== "x64", timeout: 60_000 };
+const identities = { project_id: "writer_workbench", workspace_id: "dev_workspace_" + "4".repeat(24),
+  workstream_id: "dev_workstream_20261121-010000_" + "3".repeat(12) };
+const shellCapability = "workspace.powershell_isolated";
+const goal = "Run ordinary Windows PowerShell while isolating fixture inputs and outputs";
+const psString = value => `'${value.replaceAll("'", "''")}'`;
+
+async function fixture(t) {
+  const root = await mkdtemp(path.join(os.tmpdir(), "nexa-appcontainer-test-"));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
+  const context = { ...identities, root: path.join(root, "workspace"), workspace_type: "isolated_worktree",
+    state: "active", workstream_state: "active", lifecycle_state: "active", healthy: true, mutation_allowed: true };
+  const taskRoot = path.join(root, "grants");
+  await mkdir(context.root);
+  await mkdir(taskRoot);
+  const store = createPiTaskAuthorizationStore({ root: taskRoot });
+  const grant = await store.issue({ ...identities, goal, capabilities: [shellCapability], expires_at_ms: Date.now() + 120_000 });
+  const journal = createDevOperationJournalService({ storageRoot: path.join(root, "journal") });
+  const route = createPiProductionRouteStore({ journal });
+  await route.change({ mode: "pi_default", expected_revision: 0, decision_id: "gpt-appcontainer-test", gate_hash: "1".repeat(64) },
+    { validateGate: async () => true });
+  const tool = createPowerShellMaintenanceTool({ isolated: true, workspaceContextResolver: async () => context,
+    journalApi: { begin: journal.begin, complete: journal.complete, fail: journal.fail, degrade: journal.markDegraded } });
+  let dispatches = 0;
+  const controller = createPiProductionExecutionController({ journal, route, authorizeTask: createPiTaskPolicy({ store, required: true }),
+    transport: {
+      resolveWorkspace: async () => context,
+      queryOperation: journal.getOperation,
+      async callTool(params) {
+        dispatches += 1;
+        assert.equal(params.name, "powershell_run");
+        assert.equal(params.arguments.sandbox, true);
+        const result = await journal.executeReconciled({ reconciliation_key: params._meta.reconciliation_key,
+          request_fingerprint_sha256: fingerprintMcpMutationRequest(params.name, params.arguments), tool_name: params.name,
+          resolve_workspace_scope: async () => identities }, async () => {
+          const payload = await tool(params.arguments);
+          return { content: [{ type: "text", text: JSON.stringify(payload) }] };
+        });
+        return result.value;
+      },
+    } });
+  const intent = (intent_id, command, options = {}) => adaptAuthorizedPiRequest({ request_kind: "autonomous_engineering",
+    intent_id, workspace_id: context.workspace_id, goal, task_authorization_id: grant.task_authorization_id, command,
+    ...options }, { resolveWorkspace: async () => context });
+  return { root, context, journal, controller, intent, dispatches: () => dispatches };
+}
+
+test("Pi runs sandboxed PowerShell with exact staged input, denied host and loopback access, and a durable output", platform, async t => {
+  const f = await fixture(t);
+  const protectedPath = path.join(f.root, "host-only.txt");
+  const source = path.join(f.context.root, "source.txt");
+  await writeFile(protectedPath, "host-fixture");
+  await writeFile(source, "source-fixture");
+  process.env.NEXA_APPCONTAINER_TEST_HOST_ONLY = "fixture";
+  t.after(() => { delete process.env.NEXA_APPCONTAINER_TEST_HOST_ONLY; });
+  let connected = false;
+  const service = createServer(socket => { connected = true; socket.end(); });
+  t.after(() => new Promise(resolve => service.close(resolve)));
+  service.listen(0, "127.0.0.1");
+  await once(service, "listening");
+  const command = [
+    "if ($env:NEXA_APPCONTAINER_TEST_HOST_ONLY) { throw 'unexpected host environment' }",
+    `$outside = ${psString(protectedPath)}`,
+    `try { [IO.File]::ReadAllText($outside) | Out-Null; throw 'unexpected host read' } catch [UnauthorizedAccessException] {}`,
+    `try { [IO.File]::WriteAllText($outside, 'unexpected'); throw 'unexpected host write' } catch [UnauthorizedAccessException] {}`,
+    `$fixture = [Net.Sockets.TcpClient]::new()`,
+    `try { $fixture.Connect('127.0.0.1', ${service.address().port}); throw 'unexpected loopback' } catch [Net.Sockets.SocketException] {} finally { $fixture.Dispose() }`,
+    `$copied = [IO.File]::ReadAllText([IO.Path]::GetFullPath('source.txt'))`,
+    `[IO.File]::WriteAllText([IO.Path]::GetFullPath('source.txt'), $copied + '-edited')`,
+    "Write-Output 'isolated-fixture-ok'",
+  ].join("\n");
+  const intent = await f.intent("native-appcontainer-read-write", command, { sandbox_paths: ["source.txt"], output_paths: ["source.txt"] });
+  assert.equal(intent.requested_actions[0].capability, shellCapability);
+  const completed = await f.controller.execute(intent);
+  assert.equal(completed.state.status, "COMPLETED", JSON.stringify(completed.state.last_error) + JSON.stringify(completed.receipts));
+  const payload = JSON.parse(completed.receipts[0].evidence.content[0].text);
+  assert.equal(payload.stdout.trim(), "isolated-fixture-ok");
+  assert.equal(payload.artifacts[0].content, "source-fixture-edited");
+  assert.match(payload.artifacts[0].source_sha256, /^[a-f0-9]{64}$/u);
+  assert.equal(payload.workspace_writes, false);
+  assert.equal(await readFile(source, "utf8"), "source-fixture");
+  assert.equal(await readFile(protectedPath, "utf8"), "host-fixture");
+  assert.equal(connected, false);
+  assert.equal((await f.controller.execute(intent)).state.operation_id, completed.state.operation_id);
+  assert.equal(f.dispatches(), 1);
+  assert.equal((await f.journal.status()).health, "healthy");
+});
+
+test("AppContainer timeout terminates a Windows child and records a safe workspace failure", platform, async t => {
+  const f = await fixture(t);
+  const command = [
+    `$program = [Diagnostics.ProcessStartInfo]::new([IO.Path]::Combine($PSHOME, 'powershell.exe'), '-NoProfile -NonInteractive -Command Start-Sleep -Seconds 30')`,
+    "$program.UseShellExecute = $false",
+    "$program.CreateNoWindow = $true",
+    "$child = [Diagnostics.Process]::Start($program)",
+    "Write-Output ('sandbox-child=' + $child.Id)",
+    "Start-Sleep -Seconds 30",
+  ].join("\n");
+  const intent = await f.intent("native-appcontainer-timeout", command, { timeoutMs: 2500 });
+  const stopped = await f.controller.execute(intent);
+  assert.equal(stopped.state.status, "DECISION_REQUIRED");
+  const observed = JSON.parse(stopped.command.receipt.evidence.content[0].text);
+  assert.equal(observed.timed_out, true);
+  assert.equal(observed.job_terminated, true);
+  const pid = Number(/sandbox-child=([0-9]+)/u.exec(observed.stdout)?.[1]);
+  assert.ok(pid > 0, observed.stdout);
+  assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+  const recorded = await f.journal.getOperation({ reconciliation_key: intent.requested_actions[0].idempotency_key });
+  assert.equal(recorded.reconciliation_state, "no_effect");
+  assert.equal(recorded.automatic_replay_allowed, false);
+  assert.equal((await f.journal.status()).health, "healthy");
+});
+
+test("AppContainer composes a real Windows build and preserves the native test exit code", platform, async t => {
+  const f = await fixture(t);
+  const source = 'class Probe { static int Main(string[] args) { System.Console.WriteLine("nexa-build-probe"); return args.Length == 0 ? 0 : 7; } }';
+  await mkdir(path.join(f.context.root, "code"));
+  await writeFile(path.join(f.context.root, "code", "probe.cs"), source);
+  const scope = { cwd: "code", sandbox_paths: ["code/probe.cs"] };
+  const build = [
+    `$compiler = [IO.Path]::Combine($env:WINDIR, 'Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe')`,
+    `& $compiler /nologo /out:probe.exe probe.cs`,
+    `if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }`,
+    `& ([IO.Path]::GetFullPath('probe.exe'))`,
+  ].join("\n");
+  const good = await f.controller.execute(await f.intent("native-appcontainer-build", build, scope));
+  assert.equal(good.state.status, "COMPLETED", JSON.stringify(good.command));
+  assert.equal(JSON.parse(good.receipts[0].evidence.content[0].text).stdout.trim(), "nexa-build-probe");
+  const failure = await f.intent("native-appcontainer-test-failed", `${build} failed`, scope);
+  const failed = await f.controller.execute(failure);
+  assert.equal(failed.state.status, "DECISION_REQUIRED");
+  assert.equal(JSON.parse(failed.command.receipt.evidence.content[0].text).exit_code, 7);
+  assert.equal((await f.journal.getOperation({ reconciliation_key: failure.requested_actions[0].idempotency_key })).reconciliation_state, "no_effect");
+  assert.equal((await f.journal.status()).health, "healthy");
+  await assert.rejects(readFile(path.join(f.context.root, "code", "probe.exe")), { code: "ENOENT" });
+});
+
+test("AppContainer provisions Node and installs a workspace package offline", platform, async t => {
+  const f = await fixture(t);
+  await mkdir(path.join(f.context.root, "fixture"));
+  await writeFile(path.join(f.context.root, "package.json"), JSON.stringify({ name: "nexa-fixture-root", version: "1.0.0",
+    dependencies: { "nexa-local-fixture": "file:./fixture" } }));
+  await writeFile(path.join(f.context.root, "fixture", "package.json"), JSON.stringify({ name: "nexa-local-fixture", version: "1.0.0", main: "index.js" }));
+  await writeFile(path.join(f.context.root, "fixture", "index.js"), 'module.exports = "local-package-installed";\n');
+  const command = [
+    `& node.exe -e "try { require('nexa-local-fixture') } catch { process.exitCode = 7 }"`,
+    "if ($LASTEXITCODE -ne 7) { throw 'expected missing dependency' }",
+    "Write-Output 'dependency-missing-observed'",
+    "& npm.cmd install --offline --install-links --ignore-scripts --no-package-lock",
+    "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }",
+    `& node.exe -e "console.log(require('nexa-local-fixture'))"`,
+  ].join("\n");
+  const intent = await f.intent("native-appcontainer-npm", command, { toolchain: "node", timeoutMs: 30_000,
+    sandbox_paths: ["package.json", "fixture/package.json", "fixture/index.js"] });
+  const result = await f.controller.execute(intent);
+  assert.equal(result.state.status, "COMPLETED", JSON.stringify(result.command));
+  const payload = JSON.parse(result.receipts[0].evidence.content[0].text);
+  assert.match(payload.stdout, /dependency-missing-observed/u);
+  assert.match(payload.stdout, /local-package-installed/u);
+  assert.equal(payload.toolchain, "node");
+  await assert.rejects(readFile(path.join(f.context.root, "node_modules", "nexa-local-fixture", "index.js")), { code: "ENOENT" });
+  assert.equal((await f.journal.status()).health, "healthy");
+});

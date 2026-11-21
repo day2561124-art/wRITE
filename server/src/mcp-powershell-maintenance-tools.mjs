@@ -13,6 +13,7 @@ import {
 import { workspaceExecutionProvenance } from "./mcp-development-readonly-tools.mjs";
 import { resolveDevWorkspaceExecutionContext } from "./mcp-development-workstream-tools.mjs";
 import { markPowerShellPreDispatchFailure } from "./mcp-powershell-predispatch-failure.mjs";
+import { prepareAppContainerPowerShell } from "./mcp-powershell-appcontainer.mjs";
 import {
   beginDevJournalOperation,
   completeDevJournalOperation,
@@ -402,21 +403,33 @@ function journalResult(result) {
     stdout_truncated: result.stdout_truncated === true,
     stderr_truncated: result.stderr_truncated === true,
     reason: result.reason ?? null,
+    ...(result.isolation_mode === "appcontainer" ? {
+      isolation_mode: result.isolation_mode,
+      workspace_writes: false,
+      job_terminated: result.job_terminated === true,
+      cleanup_pending: result.cleanup_pending === true,
+      input_manifest_sha256: result.input_manifest_sha256,
+      input_file_count: result.input_file_count,
+      ...(result.toolchain ? { toolchain: result.toolchain } : {}),
+      artifact_manifest_sha256: sha256(JSON.stringify((result.artifacts ?? []).map(({content, ...item}) => item))),
+    } : {}),
   };
 }
 
 export function createPowerShellMaintenanceTool({
   elevated = false,
+  isolated = false,
   platform = process.platform,
   workspaceContextResolver = resolveDevWorkspaceExecutionContext,
   executor = elevated ? runPowerShellViaAdminTask : runPowerShellProcess,
   journalApi = defaultJournalApi,
 } = {}) {
+  if (isolated && elevated) throw new Error("INVALID_POWERSHELL_RUNNER_CONFIGURATION");
   const toolName = elevated ? "powershell_admin_run" : "powershell_run";
   const operationType = elevated ? "powershell_admin_maintenance" : "powershell_maintenance";
 
   return async function powershellMaintenance(input = {}) {
-    let timeoutMs, context, cwd;
+    let timeoutMs, context, cwd, prepared;
     try {
       if (platform !== "win32") throw new Error(`${toolName} is only available on Windows.`);
       assertPowerShellMaintenanceCommandAllowed(input.command);
@@ -426,8 +439,14 @@ export function createPowerShellMaintenanceTool({
         { mutation: true },
       );
       cwd = await resolveMaintenanceCwd(context.root, input.cwd ?? ".", {
-        hostAbsoluteCwd: !elevated && context.workspace_type === "shared",
+        hostAbsoluteCwd: !isolated && !elevated && context.workspace_type === "shared",
       });
+      if (isolated) {
+        if (context.workspace_type !== "isolated_worktree" || context.workstream_state !== "active"
+          || context.lifecycle_state !== "active" || context.mutation_allowed !== true) throw new Error("ISOLATED_WORKSPACE_REQUIRED");
+        prepared = await prepareAppContainerPowerShell({ context, cwd, command: input.command, timeoutMs,
+          sandbox_paths: input.sandbox_paths, output_paths: input.output_paths, toolchain: input.toolchain });
+      }
     } catch (error) {
       throw markPowerShellPreDispatchFailure(error, toolName);
     }
@@ -443,17 +462,26 @@ export function createPowerShellMaintenanceTool({
         command_sha256: commandHash,
         cwd,
         timeout_ms: timeoutMs,
+        ...(prepared ? { isolation_mode: "appcontainer", workspace_writes: false, ...prepared.manifest } : {}),
       },
+    }).catch(async error => {
+      await prepared?.cleanup();
+      throw error;
     });
 
     let result;
     try {
-      result = await executor({
+      result = prepared ? await prepared.run() : await executor({
         command: input.command,
         cwd,
         timeoutMs,
       });
+      if (prepared) {
+        try { await prepared.cleanup(); }
+        catch { result = { ...result, ok: false, cleanup_pending: true, reason: "SANDBOX_CLEANUP_PENDING" }; }
+      }
     } catch (error) {
+      await prepared?.cleanup().catch(() => {});
       const reason = redactProcessOutput(error?.message ?? String(error)).slice(0, 512);
       try {
         await journalApi.fail(operation.operation_id, {
@@ -500,3 +528,4 @@ export function createPowerShellMaintenanceTool({
 
 export const powershell_run = createPowerShellMaintenanceTool({ elevated: false });
 export const powershell_admin_run = createPowerShellMaintenanceTool({ elevated: true });
+export const powershell_isolated_run = createPowerShellMaintenanceTool({ isolated: true });

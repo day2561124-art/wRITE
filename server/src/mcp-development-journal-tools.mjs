@@ -2252,13 +2252,25 @@ function verifiedMcpTestResult(events,started,terminal) {
       const shell = isPowerShellOperation({tool_name: context.tool_name, operation_type: "mcp_mutation"});
       const childStarts = events => events.filter(event => event.parent_operation_id === admission.operation_id
         && event.stage === "operation_started");
+      const terminatedIsolatedChild = (events, children) => {
+        if (children.length !== 1) return false;
+        const [child] = children;
+        return child.tool_name === "powershell_run" && child.operation_type === "powershell_maintenance"
+          && child.result?.isolation_mode === "appcontainer" && child.result.workspace_writes === false
+          && events.some(event => event.operation_id === child.operation_id && event.stage === "operation_completed"
+            && event.result?.isolation_mode === "appcontainer" && event.result.workspace_writes === false
+            && event.result.command_sha256 === child.result.command_sha256
+            && event.result.input_manifest_sha256 === child.result.input_manifest_sha256
+            && event.result.job_terminated === true && event.result.cleanup_pending === false);
+      };
       const dispatchEvidenceChanged = new Error("POWERSHELL_DISPATCH_EVIDENCE_CHANGED");
-      const recordFailure = async noEffect => {
+      const recordFailure = async (noEffect, isolated = false) => {
         try {
           return await fail(admission.operation_id, {
             result: { outcome: noEffect ? "failed_no_effect" : "ambiguous_effect", reconciliation_required: !noEffect },
             beforeAppend: shell && noEffect ? snapshot => {
-              if (childStarts(snapshot.events).length) throw dispatchEvidenceChanged;
+              const children = childStarts(snapshot.events);
+              if (isolated ? !terminatedIsolatedChild(snapshot.events, children) : children.length !== 0) throw dispatchEvidenceChanged;
             } : undefined,
           });
         } catch (error) {
@@ -2293,17 +2305,19 @@ function verifiedMcpTestResult(events,started,terminal) {
       let payload;
       try { payload = JSON.parse(value?.content?.[0]?.text ?? "{}"); } catch { payload = {}; }
       const completedCommandObservation=shell
-        && payload?.execution_ok===true&&payload?.timed_out===false&&Number.isSafeInteger(payload?.exit_code);
+        && payload?.execution_ok===true&&payload?.timed_out===false&&Number.isSafeInteger(payload?.exit_code)
+        && (payload.isolation_mode !== "appcontainer" || payload.ok === true);
       if (value?.isError === true || (!completedCommandObservation && (payload?.ok === false || payload?.execution_ok === false))) {
         const verification = await verify();
         const children = childStarts(verification.events);
-        const noEffect = shell ? children.length === 0 && isPowerShellPreDispatchFailure(value, admission)
+        const isolatedNoEffect = shell && terminatedIsolatedChild(verification.events, children);
+        const noEffect = shell ? isolatedNoEffect || children.length === 0 && isPowerShellPreDispatchFailure(value, admission)
           : (children.length === 0 && ["dev_create_file", "dev_apply_patch"].includes(context.tool_name))
           || (children.length === 0 && isWorkstreamPrewriteFailure(value, {tool_name: context.tool_name, operation_id: admission.operation_id}))
           || children.length > 0 && children.every((child) => verification.events.some((event) =>
           event.operation_id === child.operation_id && terminalStageSet.has(event.stage)
           && ["failed_no_effect", "no_effect_observed"].includes(event.result?.outcome)));
-        await recordFailure(noEffect);
+        await recordFailure(noEffect, isolatedNoEffect);
       } else {
         const verification = await verify();
         const children = verification.events.filter((event) => event.parent_operation_id === admission.operation_id

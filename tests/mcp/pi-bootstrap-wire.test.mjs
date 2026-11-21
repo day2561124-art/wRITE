@@ -11,6 +11,7 @@ import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {hashExecutionInput,REQUIRED_DECISION_BOUNDARIES} from '../../server/src/pi-execution-contract.mjs';
 import {getDevTestSuiteMapping} from '../../server/src/mcp-development-test-tools.mjs';
+import {createPiTaskAuthorizationStore} from '../../server/src/pi-task-authorization.mjs';
 const completionTimeoutMs=getDevTestSuiteMapping().mcp_pi_postseal.timeout_ms+300_000;
 const exec=promisify(execFile),source=process.env.PI_POSTSEAL_TEST_SOURCE_ROOT??path.resolve('.'),shared='dev_workspace_shared_repository_v1';
 function facts(response){if(response.isError)throw Error(response.content?.[0]?.text??'MCP_TOOL_ERROR');return JSON.parse(response.content.find(c=>c.type==='text').text);}
@@ -54,7 +55,10 @@ test('actual MCP default ingress completes cold lifecycle and terminal no replay
  await mkdir(path.join(repo,'data','outputs','logs'),{recursive:true});
  const journal=createDevOperationJournalService({storageRoot:journalRoot}),route=createPiProductionRouteStore({journal});
  await route.change({mode:'pi_default',expected_revision:0,decision_id:'gpt-real-wire-fixture',gate_hash:'a'.repeat(64)},{validateGate:async()=>true});
- const environment={...process.env,MCP_TOOL_PROFILE:'chatgpt_developer',PI_POSTSEAL_WIRE_FIXTURE_ROOT:repo};
+ const taskRoot=path.join(root,'task-authorizations');await mkdir(taskRoot);
+ const taskStore=createPiTaskAuthorizationStore({root:taskRoot});
+ const environment={...process.env,MCP_TOOL_PROFILE:'chatgpt_developer',PI_POSTSEAL_WIRE_FIXTURE_ROOT:repo,
+  NEXA_PI_TASK_AUTHORIZATION_ROOT:taskRoot,NEXA_PI_REQUIRE_TASK_AUTHORIZATION:'0'};
  for(const key of Object.keys(environment))if(key.startsWith('WRITER_WORKBENCH_ISOLATED_TEST_')||key==='WRITER_WORKBENCH_TEST_JOURNAL_GROUP')delete environment[key];
  const hook=fileURLToPath(new URL('./pi-bootstrap-wire-cold.fixture.mjs',import.meta.url));
  async function connect(exit){const transport=new StdioClientTransport({command:process.execPath,args:['--import',pathToFileURL(hook).href,path.join(repo,'server','src','mcp-server.mjs')],cwd:repo,env:{...environment,PI_POSTSEAL_WIRE_EXIT:exit?'1':'0'},stderr:'pipe'});transport.stderr?.on('data',chunk=>process.stderr.write(chunk));const client=new Client({name:'pi-postseal-wire-acceptance',version:'1'});clients.push(client);await client.connect(transport);return {client,transport};}
@@ -68,7 +72,8 @@ test('actual MCP default ingress completes cold lifecycle and terminal no replay
   const deadline=Date.now()+completionTimeoutMs;
   while(!['COMPLETED','FAILED','CANCELLED','BLOCKED','DECISION_REQUIRED'].includes(value.state.status)&&Date.now()<deadline){
    await new Promise(r=>setTimeout(r,100));
-   value=facts(await client.callTool({name:'dev_pi_execution_status',arguments:{operation_id:value.state.operation_id,...(contract.bootstrap?{bootstrap:true}:{workstream_id:contract.context.workstream_id,workspace_id:contract.context.workspace_id})}},undefined,{timeout:300000})).operation;
+   const context=value.intent.context;
+   value=facts(await client.callTool({name:'dev_pi_execution_status',arguments:{operation_id:value.state.operation_id,...(contract.bootstrap?{bootstrap:true}:{workstream_id:context.workstream_id,workspace_id:context.workspace_id})}},undefined,{timeout:300000})).operation;
   }return value;
  }
  const first=await connect(false);const toolNames=(await first.client.listTools()).tools.map(t=>t.name);assert(toolNames.includes('dev_capability_get_schema'));assert(toolNames.includes('dev_pi_execute_intent'));
@@ -89,6 +94,21 @@ test('actual MCP default ingress completes cold lifecycle and terminal no replay
  await startWorker(false);
  const resumed=await submitAndWait(second.client,contract);assert.equal(resumed.state.status,'COMPLETED',JSON.stringify({state:resumed.state,runtime:resumed.runtime,receipts:resumed.receipts.map(r=>({step_id:r.step_id,kind:r.kind,evidence:r.step_id==='test'?r.evidence:undefined}))}));assert.equal(resumed.state.operation_id,exit.operation_id);assert.equal(resumed.result.verification.focused,'passed');
  const context={project_id:'writer_workbench',workstream_id:exit.binding.workstream_id,workspace_id:exit.binding.workspace_id};
+ if(process.platform==='win32'&&process.arch==='x64'){
+  const capability='workspace.powershell_isolated';
+  const goal='Exercise AppContainer through the real authenticated Pi worker';
+  const grant=await taskStore.issue({...context,goal,capabilities:[capability],expires_at_ms:Date.now()+300_000});
+  const staged={request_kind:'autonomous_engineering',intent_id:'wire-appcontainer-0001',goal,workspace_id:context.workspace_id,
+   task_authorization_id:grant.task_authorization_id,sandbox_paths:['package.json'],output_paths:['sandbox-result.txt'],
+   command:"$package = Get-Content package.json -Raw | ConvertFrom-Json; [IO.File]::WriteAllText([IO.Path]::GetFullPath('sandbox-result.txt'), $package.name)"};
+  const observed=await submitAndWait(second.client,staged);
+  assert.equal(observed.state.status,'COMPLETED',JSON.stringify({state:observed.state,command:observed.command}));
+  const result=facts(observed.receipts[0].evidence);
+  const sourcePackage=JSON.parse(await readFile(path.join(repo,'package.json'),'utf8'));
+  assert.equal(result.artifacts[0].content,sourcePackage.name);
+  assert.equal(result.workspace_writes,false);
+  assert.equal((await submitAndWait(second.client,staged)).projection_hash,observed.projection_hash);
+ }
  const observations=intent('wire-read-checkpoint-0001',context,[{step_id:'workstream',capability:'workspace.get_workstream',input:{workstream_id:context.workstream_id},depends_on:[]},{step_id:'checkpoint',capability:'workspace.get_checkpoint',input:{checkpoint_id:exit.checkpoint.checkpoint_id},depends_on:['workstream']}]);
  const inspected=(await submitAndWait(second.client,observations));assert.equal(inspected.state.status,'COMPLETED');const workstream=facts(inspected.receipts[0].evidence),checkpoint=facts(inspected.receipts[1].evidence);assert.equal(checkpoint.checkpoint_id,exit.checkpoint.checkpoint_id);assert.equal(checkpoint.workspace_id,context.workspace_id);assert.equal(checkpoint.workstream_id,context.workstream_id);assert.equal(checkpoint.git_head,base);
  const transition=async(state,revision)=>{
