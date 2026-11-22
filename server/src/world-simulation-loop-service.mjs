@@ -4947,6 +4947,10 @@ export async function scheduleWorldSimulationAutonomousCognitionOpportunities(
           === "cb-c2-eventless-plan-commitment-v1"
           ? array(turn.autonomous_cognition_plan_commitment.consumed_opportunity_ids)
           : []),
+        ...(turn?.autonomous_actor_initiated_action?.version
+          === "world-actor-initiated-speech-v1"
+          ? array(turn.autonomous_actor_initiated_action.consumed_opportunity_ids)
+          : []),
       ]),
     ])],
   });
@@ -5747,7 +5751,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       grounding_claimed: false,
     });
 
-    // CB-C4: the listener can assign a defeasible social meaning only to
+    // Actor-initiated speech: the listener can assign a defeasible social meaning only to
     // same-observer CC-6E evidence. Keep the interpretation separate from
     // audible signals and from durable relationship or World state.
     const socialInterpretationAssembly =
@@ -5804,7 +5808,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       world_state_mutation_performed: false,
     });
 
-    // CB-C4: provide only this observer's existing person-specific
+    // Actor-initiated speech: provide only this observer's existing person-specific
     // relationship description as optional context. A missing or nontext
     // relationship is unknown; the appraiser cannot establish target truth.
     const appraisalContextsByPerson = {};
@@ -12576,7 +12580,7 @@ export async function resolveWorldSimulationTurn(
     adaptiveMemoryConsolidationMutationExecution
       .next_world_state;
 
-  // CB-C4 admits only the exact prepared same-character social appraisal
+  // actor-initiated World speech admits only the exact prepared same-character social appraisal
   // projection into the ordinary Phase63 encoding decision and mutation path.
   // The bridge never writes a memory; the Phase63 writer owns admission.
   const socialAppraisalExperienceBridge =

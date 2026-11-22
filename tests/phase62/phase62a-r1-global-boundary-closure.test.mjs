@@ -347,10 +347,20 @@ try {
       compilerRefs.push(relative(filePath));
     }
   }
+  // Actor-initiated speech: this is a separately audited native World-only actor action entry.
+  // Keep the exact allowlist, rather than allowing arbitrary new native callers.
   assert.deepEqual(nativeRunnerRefs.sort(), [
+    "server/src/world-simulation-actor-initiated-speech-service.mjs",
     "server/src/world-simulation-loop-service.mjs",
     "server/src/world-simulation-neural-service.mjs",
   ]);
+  const actorSpeechSource = await readFile(
+    path.join(serverSrc, "world-simulation-actor-initiated-speech-service.mjs"), "utf8");
+  assert.match(actorSpeechSource, /adjudicateWorldSimulationCausality\(/);
+  assert.match(actorSpeechSource, /commitWorldSimulationTurn\(/);
+  assert.match(actorSpeechSource, /world_consistency_critic/);
+  assert.equal(actorSpeechSource.includes("runWorldSimulationCapability("), false,
+    "actor-initiated World speech actor speech must use the Native engine-verified capability path, never a caller-asserted assurance.");
   assert.deepEqual(compilerRefs.sort(), [
     "server/src/world-simulation-capability-envelope-service.mjs",
     "server/src/world-simulation-character-facing-capability-runtime-service.mjs",

@@ -13,6 +13,7 @@ import { projectRoot } from "../../server/src/project-paths.mjs";
 import { beginWorldSimulationSession } from "../../server/src/world-simulation-session-service.mjs";
 import { commitWorldSimulationTurn, getWorldSimulationHistory, getWorldSimulationState } from "../../server/src/world-simulation-state-service.mjs";
 import { hashAgentRunValue } from "../../server/src/agent-run-service.mjs";
+import { runWorldSimulationActorInitiatedSpeech } from "../../server/src/world-simulation-actor-initiated-speech-service.mjs";
 import { buildCharacterCommunicationActionCandidate } from "../../server/src/character-communication-foundation-service.mjs";
 import { nativeImplementationIntentionActivationCapability } from "../../server/src/world-simulation-goal-implementation-intention-activation-service.mjs";
 import { buildWorldSimulationSubjectiveClaims } from "../../server/src/world-simulation-subjective-claim-projection-service.mjs";
@@ -706,6 +707,282 @@ try {
     },
     available_actions:{[character]:[speechCandidate]},
   };
+  // Actor-initiated speech: an actor with a prior C2 committed goal and Phase69A plan can
+  // select a canonical World speech candidate from a fresh internal cue.
+  // There is NO queued observation event, invented ally answer or belief
+  // verification. Phase69C activation and actual causal speech must both occur.
+  const spontaneousWorld={
+    ...structuredClone(actionWorld),
+    event_queue:[],
+  };
+  const spontaneousSession=await beginWorldSimulationSession({
+    source_text:"actor-initiated World speech World-owned actor-initiated speech with no external event",
+    characters:Object.keys(spontaneousWorld.characters),
+    initial_world_state:spontaneousWorld,
+  },{fixtureRoot:goalFixtureRoot});
+  const spontaneousSid=spontaneousSession.world_simulation_session_id;
+  const spontaneousBefore=await getWorldSimulationState(
+    spontaneousSid,{fixtureRoot:goalFixtureRoot});
+  const spontaneousHistoryBefore=await getWorldSimulationHistory(
+    spontaneousSid,{fixtureRoot:goalFixtureRoot});
+  let activationStageCount=0,choiceStageCount=0;
+  const selfInitiated=await runWorldSimulationActorInitiatedSpeech({
+    world_simulation_session_id:spontaneousSid,
+    character,
+    runtime_context_by_character:planCue,
+  },{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+    assert.equal(packet.character,character);
+    assert.equal(packet.boundaries.external_world_event_present,false);
+    assert.equal(packet.boundaries.world_truth_exposed,false);
+    if(packet.cognition?.implementation_intention_activation){
+      activationStageCount++;
+      const activation=packet.cognition.implementation_intention_activation;
+      assert.equal(activation.plans.length,1);
+      assert.equal(activation.plans[0].if_cue.label,"timer_doubt_requires_verification");
+      assert.equal(activation.action_selection_requested,false);
+      return {
+        plan_activation_context_token:activation.context_token,
+        activated_plan_tokens:[activation.plans[0].plan_token],
+      };
+    }
+    choiceStageCount++;
+    const plans=packet.cognition.implementation_intention_guidance.implementation_intentions;
+    assert.equal(plans.length,1);
+    assert.equal(plans[0].then_response.label,"ask_trusted_ally");
+    assert.equal(packet.boundaries.action_choice_owner,"character_brain");
+    assert.ok(packet.candidate_action_intents.some(candidate=>
+      candidate.action_id===speechCandidate.action_id));
+    return {action_id:speechCandidate.action_id};
+  }});
+  const spontaneousAfter=await getWorldSimulationState(
+    spontaneousSid,{fixtureRoot:goalFixtureRoot});
+  const spontaneousHistory=await getWorldSimulationHistory(
+    spontaneousSid,{fixtureRoot:goalFixtureRoot});
+  assert.equal(activationStageCount,1);
+  assert.equal(choiceStageCount,1);
+  assert.equal(selfInitiated.committed,true);
+  assert.equal(selfInitiated.external_world_event_created,false);
+  assert.equal(selfInitiated.information_verified,false);
+  assert.equal(spontaneousAfter.revision,spontaneousBefore.revision+1);
+  assert.equal(spontaneousHistory.turns.length,spontaneousHistoryBefore.turns.length+1);
+  const autonomousReceipt=spontaneousHistory.turns.at(-1);
+  assert.equal(autonomousReceipt.event,null);
+  assert.equal(autonomousReceipt.autonomous_actor_initiated_action?.character,character);
+  assert.equal(autonomousReceipt.selected_action_intents.length,1);
+  assert.equal(autonomousReceipt.selected_action_intents[0].action_id,
+    speechCandidate.action_id);
+  const emitted=autonomousReceipt.action_outcomes.filter(outcome=>
+    outcome.actor===character
+    && outcome.action_id===speechCandidate.action_id
+    && outcome.result==="communication_emitted");
+  assert.equal(emitted.length,1,
+    "Actor-originated internal opportunity must execute a real World causal inquiry.");
+  assert.equal(emitted[0].communication_event?.addressee,inquiryAlly);
+  assert.equal(emitted[0].communication_event?.semantic_content,inquiryWords);
+  assert.equal(emitted[0].communication_event?.world_truth_claimed,false);
+  assert.equal((spontaneousAfter.state.motivational_goal_history??[]).length,2);
+  assert.equal((spontaneousAfter.state.goal_implementation_intention_history??[]).length,1);
+  const spontaneousReplay=await scheduleWorldSimulationAutonomousCognitionOpportunities({
+    world_simulation_session_id:spontaneousSid,
+    runtime_context_by_character:planCue,
+  },{fixtureRoot:goalFixtureRoot});
+  assert.equal(spontaneousReplay.scheduler_projection.opportunity_count,0,
+    "Committed actor speech must consume the original internal cue exactly once.");
+  console.log(JSON.stringify({
+    scenario:"c2_eventless_actor_initiates_world_speech",
+    empty_initial_event_queue:spontaneousBefore.state.event_queue.length===0,
+    plan_activated:activationStageCount===1,character_choice:choiceStageCount===1,
+    world_revision_before:spontaneousBefore.revision,
+    world_revision_after:spontaneousAfter.revision,
+    causal_speech_outcomes:emitted.length,information_verified:false,
+    replay_opportunities:spontaneousReplay.scheduler_projection.opportunity_count,
+  }));
+
+  // An actor can decline a real plan cue and a genuine available action.
+  // Absence of choice must not create a dummy external World turn.
+  for(const behavior of ["decline","foreign_action"]){
+    const fresh=await beginWorldSimulationSession({
+      source_text:"actor-initiated World speech refusal or forged action "+behavior,
+      characters:Object.keys(spontaneousWorld.characters),
+      initial_world_state:spontaneousWorld,
+    },{fixtureRoot:goalFixtureRoot});
+    const freshSid=fresh.world_simulation_session_id;
+    const pre=await getWorldSimulationState(freshSid,{fixtureRoot:goalFixtureRoot});
+    const preHistory=await getWorldSimulationHistory(freshSid,{fixtureRoot:goalFixtureRoot});
+    const call=()=>runWorldSimulationActorInitiatedSpeech({
+      world_simulation_session_id:freshSid,character,
+      runtime_context_by_character:planCue,
+    },{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>
+      packet.cognition.implementation_intention_activation
+        ? {
+          plan_activation_context_token:
+            packet.cognition.implementation_intention_activation.context_token,
+          activated_plan_tokens:[
+            packet.cognition.implementation_intention_activation.plans[0].plan_token,
+          ],
+        }
+        : {action_id:behavior==="decline"?"reject_all":"forged_action_id"},
+    });
+    if(behavior==="foreign_action"){
+      await assert.rejects(call(),error=>error?.code==="WORLD_ACTOR_SPEECH_ACTION_NOT_AVAILABLE");
+    }else{
+      const declined=await call();
+      assert.equal(declined.committed,false);
+      assert.equal(declined.status,"brain_declined_action");
+    }
+    const post=await getWorldSimulationState(freshSid,{fixtureRoot:goalFixtureRoot});
+    const postHistory=await getWorldSimulationHistory(freshSid,{fixtureRoot:goalFixtureRoot});
+    assert.equal(post.revision,pre.revision);
+    assert.equal(post.state_hash,pre.state_hash);
+    assert.deepEqual(postHistory.turns,preHistory.turns);
+  }
+
+  // Actor-originated action must lose a CAS race instead of replaying an
+  // old choice, even if its cognition and chosen candidate were valid.
+  const autonomousRace=await beginWorldSimulationSession({
+    source_text:"actor-initiated World speech actor speech competing World commit",
+    characters:Object.keys(spontaneousWorld.characters),
+    initial_world_state:spontaneousWorld,
+  },{fixtureRoot:goalFixtureRoot});
+  const autonomousRaceSid=autonomousRace.world_simulation_session_id;
+  let actorRaceWinnerCount=0;
+  await assert.rejects(runWorldSimulationActorInitiatedSpeech({
+    world_simulation_session_id:autonomousRaceSid,character,
+    runtime_context_by_character:planCue,
+  },{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+    if(packet.cognition.implementation_intention_activation){
+      const activation=packet.cognition.implementation_intention_activation;
+      return {
+        plan_activation_context_token:activation.context_token,
+        activated_plan_tokens:[activation.plans[0].plan_token],
+      };
+    }
+    const atIngress=await getWorldSimulationState(
+      autonomousRaceSid,{fixtureRoot:goalFixtureRoot});
+    await commitWorldSimulationTurn(autonomousRaceSid,{
+      expected_revision:atIngress.revision,
+      expected_state_hash:atIngress.state_hash,
+      turn_id:"harness_cb_c4_competing_world_winner",
+      next_world_state:atIngress.state,event:null,
+      selected_action_intents:[],action_outcomes:[],state_transitions:[],
+    },{fixtureRoot:goalFixtureRoot});
+    actorRaceWinnerCount++;
+    return {action_id:speechCandidate.action_id};
+  }}),error=>error?.code==="WORLD_ACTOR_SPEECH_WORLD_STATE_STALE");
+  const autonomousRaceAfter=await getWorldSimulationState(
+    autonomousRaceSid,{fixtureRoot:goalFixtureRoot});
+  const autonomousRaceHistory=await getWorldSimulationHistory(
+    autonomousRaceSid,{fixtureRoot:goalFixtureRoot});
+  assert.equal(actorRaceWinnerCount,1);
+  assert.equal(autonomousRaceAfter.revision,1);
+  assert.equal(autonomousRaceHistory.turns.length,1);
+  assert.equal(autonomousRaceHistory.turns[0].turn_id,
+    "harness_cb_c4_competing_world_winner");
+  assert.equal((autonomousRaceHistory.turns[0].action_outcomes??[]).length,0);
+  console.log(JSON.stringify({
+    scenario:"c2_eventless_actor_stale_cas",
+    competing_world_commit_count:actorRaceWinnerCount,
+    causal_speech_outcomes:0,old_actor_action_rejected:true,
+  }));
+
+  // The action must not bypass an existing queued event or address someone
+  // absent from its one committed scene. Neither failure creates a World turn.
+  for (const fault of ["external_event_pending","recipient_not_colocated"]) {
+    const guardedWorld=structuredClone(spontaneousWorld);
+    if(fault==="external_event_pending") {
+      guardedWorld.event_queue=[{
+        event_id:"cb_c4_prior_queued_world_event",type:"observation",
+        scene_id:actionScene,participants:[character],
+      }];
+    } else {
+      delete guardedWorld.scenes[actionScene].entity_positions[inquiryAlly];
+    }
+    const guarded=await beginWorldSimulationSession({
+      source_text:"actor-initiated World speech guarded scenario "+fault,
+      characters:Object.keys(guardedWorld.characters),
+      initial_world_state:guardedWorld,
+    },{fixtureRoot:goalFixtureRoot});
+    const guardedSid=guarded.world_simulation_session_id;
+    const guardedBefore=await getWorldSimulationState(
+      guardedSid,{fixtureRoot:goalFixtureRoot});
+    const guardedHistoryBefore=await getWorldSimulationHistory(
+      guardedSid,{fixtureRoot:goalFixtureRoot});
+    let called=0;
+    const runGuard=()=>runWorldSimulationActorInitiatedSpeech({
+      world_simulation_session_id:guardedSid,character,
+      runtime_context_by_character:planCue,
+    },{fixtureRoot:goalFixtureRoot,characterBrain:async ()=>{
+      called++;return {action_id:speechCandidate.action_id};
+    }});
+    if(fault==="external_event_pending"){
+      await assert.rejects(runGuard(),error=>error?.code==="WORLD_ACTOR_SPEECH_EXTERNAL_EVENT_PENDING");
+    }else{
+      const blocked=await runGuard();
+      assert.equal(blocked.status,"no_grounded_speech_candidate");
+      assert.equal(blocked.committed,false);
+    }
+    const guardedAfter=await getWorldSimulationState(
+      guardedSid,{fixtureRoot:goalFixtureRoot});
+    const guardedHistoryAfter=await getWorldSimulationHistory(
+      guardedSid,{fixtureRoot:goalFixtureRoot});
+    assert.equal(called,0);
+    assert.equal(guardedAfter.revision,guardedBefore.revision);
+    assert.equal(guardedAfter.state_hash,guardedBefore.state_hash);
+    assert.deepEqual(guardedHistoryAfter.turns,guardedHistoryBefore.turns);
+  }
+
+  // A custom runtime is not allowed to substitute another actor's Brain
+  // identity or invoke the same actor's Brain twice. No partial plan, choice,
+  // causal outcome or consumed internal opportunity may survive rejection.
+  for (const fault of ["wrong_character","duplicate_callback"]) {
+    const runtimeGuardSession=await beginWorldSimulationSession({
+      source_text:"World actor speech runtime ingress guard "+fault,
+      characters:Object.keys(spontaneousWorld.characters),
+      initial_world_state:spontaneousWorld,
+    },{fixtureRoot:goalFixtureRoot});
+    const guardSid=runtimeGuardSession.world_simulation_session_id;
+    const guardBefore=await getWorldSimulationState(guardSid,{fixtureRoot:goalFixtureRoot});
+    const guardHistoryBefore=await getWorldSimulationHistory(guardSid,{fixtureRoot:goalFixtureRoot});
+    let realBrainCount=0;
+    const manager={
+      runCharacterTurn:async ({brain_input,characterBrain})=>{
+        if(fault==="wrong_character")
+          return characterBrain({...brain_input,character:"substituted_actor"});
+        const first=await characterBrain(brain_input);
+        await characterBrain(brain_input);
+        return first;
+      },
+    };
+    await assert.rejects(runWorldSimulationActorInitiatedSpeech({
+      world_simulation_session_id:guardSid,character,
+      runtime_context_by_character:planCue,
+    },{fixtureRoot:goalFixtureRoot,
+      characterRuntimeManager:manager,
+      characterBrain:async packet=>{
+        realBrainCount++;
+        const activation=packet.cognition.implementation_intention_activation;
+        return {
+          plan_activation_context_token:activation.context_token,
+          activated_plan_tokens:[activation.plans[0].plan_token],
+        };
+      },
+    }),error=>error?.code===(
+      fault==="wrong_character"
+        ? "WORLD_ACTOR_SPEECH_CHARACTER_MISMATCH"
+        : "WORLD_ACTOR_SPEECH_DUPLICATE_BRAIN_INVOCATION"
+    ));
+    const guardAfter=await getWorldSimulationState(guardSid,{fixtureRoot:goalFixtureRoot});
+    const guardHistory=await getWorldSimulationHistory(guardSid,{fixtureRoot:goalFixtureRoot});
+    assert.equal(realBrainCount,fault==="duplicate_callback"?1:0);
+    assert.equal(guardAfter.revision,guardBefore.revision);
+    assert.equal(guardAfter.state_hash,guardBefore.state_hash);
+    assert.deepEqual(guardHistory.turns,guardHistoryBefore.turns);
+    console.log(JSON.stringify({
+      scenario:"world_actor_speech_runtime_ingress_guard",fault,
+      real_brain_calls:realBrainCount,world_unchanged:true,
+    }));
+  }
+
   const actionSession=await beginWorldSimulationSession({
     source_text:"C2 eventless plan followed by source-declared World observation fixture",
     characters:Object.keys(actionWorld.characters),
