@@ -4,6 +4,8 @@ import {runPhase2E2E} from '../../scripts/pi-runtime-phase2-e2e.mjs';
 
 test('schema metadata progresses during real Pi PowerShell execution without authorizing replay', {timeout:180000}, async()=>{
   const evidence=await runPhase2E2E({normalCalls:1});
+  assert.match(evidence.source_commit,/^[a-f0-9]{40}$/u);
+  assert.equal(typeof evidence.source_tree_dirty,'boolean');
   assert.equal(evidence.runs[0].stdout,'PI_PHASE2_OK');
   assert.equal(evidence.physical_dispatches,8);
   assert.equal(evidence.duplicate_same_operation,true);

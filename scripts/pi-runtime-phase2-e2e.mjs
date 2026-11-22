@@ -26,11 +26,14 @@ export function phase2Intent(id,context,actions,bootstrap=false) {
 export async function runPhase2E2E({normalCalls=8,outputPath=null,keep=false,transportFactory=null,beforeFaults=null}={}) {
   const root=await mkdtemp(path.join(os.tmpdir(),'pi-phase2-')),repo=path.join(root,'repo');
   await mkdir(repo);
-  const git=args=>exec(process.platform==='win32'?'git.exe':'git',args,{cwd:repo,windowsHide:true,shell:false,timeout:30000,maxBuffer:1024*1024});
+  const git=(args,cwd=repo)=>exec(process.platform==='win32'?'git.exe':'git',args,{cwd,windowsHide:true,shell:false,timeout:30000,maxBuffer:1024*1024});
   let client,transport,journal,worker;
   const samples=[],runs=[];
   let requestId=1;
   try {
+    const revision=await git(['rev-parse','--verify','HEAD'],source).catch(()=>null);
+    const sourceCommit=revision?.stdout.trim()??null;
+    const sourceStatus=sourceCommit?await git(['status','--porcelain'],source).catch(()=>null):null;
     for(const dir of ['server','scripts'])await cp(path.join(source,dir),path.join(repo,dir),
       {recursive:true,filter:p=>!['node_modules','.tmp'].includes(path.basename(p))});
     await cp(path.join(source,'package.json'),path.join(repo,'package.json'));
@@ -157,7 +160,7 @@ export async function runPhase2E2E({normalCalls=8,outputPath=null,keep=false,tra
     await client.close();client=null;
     const trace=transport.readFixtureTrace?await transport.readFixtureTrace():(await readFile(path.join(root,'trace.jsonl'),'utf8')).trim().split('\n').map(JSON.parse);
     const evidence={scope:'isolated actual MCP stdio ingress; not production/ChatGPT connector',pi_dependency_version:'1.0.4',
-      source_commit:'8e9b561b86e009e8df86734d980aa586538d8f2e',context,runs,samples,trace,
+      source_commit:sourceCommit,source_tree_dirty:sourceStatus?Boolean(sourceStatus.stdout.trim()):null,context,runs,samples,trace,
       server_sha256:createHash('sha256').update(await readFile(path.join(repo,'server/src/mcp-server.mjs'))).digest('hex'),
       nonzero:{status:nonzero.state.status,exit_code:nonzeroFact.exit_code,ok:nonzeroFact.ok,error:nonzero.result},
       timeout:{status:timeout.state.status,duplicate_same_projection:retry.projection_hash===timeout.projection_hash,
