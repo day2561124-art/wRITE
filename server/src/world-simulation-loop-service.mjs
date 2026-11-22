@@ -4932,10 +4932,18 @@ export async function scheduleWorldSimulationAutonomousCognitionOpportunities(
       input.runtime_context_by_character
       ?? options.autonomousCognitionRuntimeContextByCharacter
       ?? {},
-    consumed_opportunity_ids:
-      input.consumed_opportunity_ids
-      ?? options.autonomousCognitionConsumedOpportunityIds
-      ?? [],
+    // Eventless cognitive commits retain their processed opportunity IDs in
+    // atomic history. Caller-side consumed IDs remain useful for read-only
+    // dispatches; persisted IDs prevent goal-write replay after a restart.
+    consumed_opportunity_ids: [...new Set([
+      ...array(input.consumed_opportunity_ids
+        ?? options.autonomousCognitionConsumedOpportunityIds ?? []),
+      ...array(committedHistory.turns).flatMap(turn =>
+        turn?.autonomous_cognition_goal_commitment?.version
+          === "cb-c2-eventless-goal-commitment-v1"
+          ? array(turn.autonomous_cognition_goal_commitment.consumed_opportunity_ids)
+          : []),
+    ])],
   });
   return Object.freeze({
     version: worldSimulationAutonomousCognitionSchedulerVersion,
