@@ -5055,8 +5055,41 @@ export async function dispatchWorldSimulationAutonomousCognitionOpportunities(
             );
             throw error;
           }
+          if (!sameCharacterName(packet?.character, opportunity.character)) {
+            throw admissionError(
+              "C2 Brain ingress character does not match the scheduled opportunity.",
+              "WORLD_SIMULATION_AUTONOMOUS_COGNITION_CHARACTER_MISMATCH",
+            );
+          }
           brainInvoked = true;
-          const result = await options.characterBrain(packet);
+          // Use precisely the World revision already checked at actual Brain
+          // ingress. No second, potentially stale snapshot or raw World state
+          // enters the character packet. The opaque turn handle is scoped to
+          // this dispatch context, not the private scheduler opportunity ID.
+          const goalViewTurnId = `c2_goal_view_${hashAgentRunValue({
+            opportunity_id: opportunity.opportunity_id,
+            session_id: scheduled.world_simulation_session_id,
+            state_revision: current.revision,
+            world_state_hash: current.state_hash,
+          }).slice(0, 32)}`;
+          const goalView = buildWorldSimulationNativeGoalDecisionView({
+            world_state: current.state,
+            character: opportunity.character,
+            turn_id: goalViewTurnId,
+          });
+          const result = await options.characterBrain({
+            ...packet,
+            native_goal_decision: goalView,
+            boundaries: {
+              ...packet.boundaries,
+              native_goal_decision_explicit_intent_only: true,
+              native_goal_decision_world_write_authority: false,
+              native_goal_decision_action_authority: false,
+              // C2 only delivers a bounded view. Even an explicit goal
+              // intent returned here has no eventless commit path yet.
+              native_goal_decision_intent_submission_supported: false,
+            },
+          });
           brainCompleted = true;
           return result;
         } catch (error) {
