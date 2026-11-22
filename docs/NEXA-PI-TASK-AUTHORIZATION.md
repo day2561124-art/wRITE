@@ -18,6 +18,8 @@
 
 環境內可執行 Windows 系統命令和已帶入的腳本。指定 `toolchain: "node"` 時，Nexa 將伺服器使用的 `node.exe` 和同目錄安裝的 npm 複製成唯讀工具鏈，環境預設使用離線 npm。可將工作區的本地套件及 package manifest 列入 `sandbox_paths`，再執行普通安裝與測試命令。套件的安裝檔與輸出留在該次執行的隔離環境。
 
+Windows 正式環境已觀察到 Node 預設的測試子程序模式在 AppContainer 內逾時。可在同一個 AppContainer 內執行 `node --test --test-isolation=none <測試檔>`。這會讓 Node 在單一程序載入測試。依賴各測試檔分開執行的專案可針對不同檔案分別啟動此命令。
+
 ## 預先授權維護 Windows 服務
 
 維護已安裝的專案服務時，授權操作員在 `task.json` 的 `capabilities` 加入 `windows.service.ensure_running`，並在 `windows_services` 列出核准的服務名稱。GPT 交付的步驟以 `service_name` 指定其中一個目標。Pi 透過現有 `powershell_admin_run` 提交範圍標記。受保護的 Task Scheduler runner 從授權庫獨立核對目標、工作區、工作流、期限及撤銷狀態，再確認服務、啟動已停止的服務並等待 `Running`。同一份授權可維護多個核准目標。

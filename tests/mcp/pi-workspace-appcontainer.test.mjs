@@ -166,28 +166,33 @@ test("AppContainer composes a real Windows build and preserves the native test e
   await assert.rejects(readFile(path.join(f.context.root, "code", "probe.exe")), { code: "ENOENT" });
 });
 
-test("AppContainer provisions Node and installs a workspace package offline", platform, async t => {
+test("AppContainer installs a workspace package offline and runs a Node test in one process", platform, async t => {
   const f = await fixture(t);
   await mkdir(path.join(f.context.root, "fixture"));
   await writeFile(path.join(f.context.root, "package.json"), JSON.stringify({ name: "nexa-fixture-root", version: "1.0.0",
     dependencies: { "nexa-local-fixture": "file:./fixture" } }));
   await writeFile(path.join(f.context.root, "fixture", "package.json"), JSON.stringify({ name: "nexa-local-fixture", version: "1.0.0", main: "index.js" }));
   await writeFile(path.join(f.context.root, "fixture", "index.js"), 'module.exports = "local-package-installed";\n');
+  await writeFile(path.join(f.context.root, "offline.test.cjs"), [
+    'const assert = require("node:assert/strict");',
+    'const test = require("node:test");',
+    'test("offline package loads", () => assert.equal(require("nexa-local-fixture"), "local-package-installed"));',
+  ].join("\n"));
   const command = [
     `& node.exe -e "try { require('nexa-local-fixture') } catch { process.exitCode = 7 }"`,
     "if ($LASTEXITCODE -ne 7) { throw 'expected missing dependency' }",
     "Write-Output 'dependency-missing-observed'",
     "& npm.cmd install --offline --install-links --ignore-scripts --no-package-lock",
     "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }",
-    `& node.exe -e "console.log(require('nexa-local-fixture'))"`,
+    "& node.exe --test --test-isolation=none --test-reporter=tap offline.test.cjs",
   ].join("\n");
   const intent = await f.intent("native-appcontainer-npm", command, { toolchain: "node", timeoutMs: 30_000,
-    sandbox_paths: ["package.json", "fixture/package.json", "fixture/index.js"] });
+    sandbox_paths: ["package.json", "fixture/package.json", "fixture/index.js", "offline.test.cjs"] });
   const result = await f.controller.execute(intent);
   assert.equal(result.state.status, "COMPLETED", JSON.stringify(result.command));
   const payload = JSON.parse(result.receipts[0].evidence.content[0].text);
   assert.match(payload.stdout, /dependency-missing-observed/u);
-  assert.match(payload.stdout, /local-package-installed/u);
+  assert.match(payload.stdout, /ok 1 - offline package loads/u);
   assert.equal(payload.toolchain, "node");
   await assert.rejects(readFile(path.join(f.context.root, "node_modules", "nexa-local-fixture", "index.js")), { code: "ENOENT" });
   assert.equal((await f.journal.status()).health, "healthy");
