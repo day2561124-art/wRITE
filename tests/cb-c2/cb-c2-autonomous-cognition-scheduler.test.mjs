@@ -526,6 +526,67 @@ try {
   assert.equal(repeat.scheduler_projection.opportunity_count,0,
     "A committed C2 goal opportunity must be durably consumed, not just suppressed by caller runtime context.");
 
+  // A proposal is not yet a committed goal. A NEW, explicit internal cue
+  // may let the same Brain decide whether to adopt the proposed goal; the
+  // authoritative C3/Phase68D transition must remain separate and eventless.
+  const proposedGoal=Object.values(after.state.motivational_goal_events??{});
+  assert.equal(proposedGoal.length,1);
+  assert.equal(proposedGoal[0].operation,"propose");
+  const commitCue={ [character]: {
+    pending_internal_cues: [{
+      kind:"memory_reactivation",
+      source_ref:"runtime-goal-adoption-review-after-proposal",
+    }],
+  }};
+  const commitBefore=await getWorldSimulationState(sid,{fixtureRoot:goalFixtureRoot});
+  const commitHistoryBefore=await getWorldSimulationHistory(sid,{fixtureRoot:goalFixtureRoot});
+  let acceptedGoalToken=null;
+  const accepted=await dispatchWorldSimulationAutonomousCognitionOpportunities({
+    world_simulation_session_id:sid,
+    runtime_context_by_character:commitCue,
+  },{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+    const view=packet.native_goal_decision;
+    assert.equal(packet.character,character);
+    assert.equal(view.existing_goals.length,1);
+    assert.equal(view.existing_goals[0].state,"proposed");
+    assert.equal(view.existing_goals[0].goal_ids_exposed,undefined);
+    assert.equal(view.world_truth_exposed,false);
+    assert.equal(view.goal_ids_exposed,false);
+    acceptedGoalToken=view.existing_goals[0].goal_token;
+    return {
+      goal_context_token:view.context_token,
+      goal_intents:[{operation:"commit",goal_token:acceptedGoalToken}],
+    };
+  }});
+  const committedState=await getWorldSimulationState(sid,{fixtureRoot:goalFixtureRoot});
+  const committedHistory=await getWorldSimulationHistory(sid,{fixtureRoot:goalFixtureRoot});
+  assert.equal(accepted.dispatch_count,1);
+  assert.equal(accepted.action_selection_performed,false);
+  assert.equal(accepted.durable_cognitive_write_performed,true);
+  assert.equal(committedState.revision,commitBefore.revision+1);
+  assert.equal((committedState.state.motivational_goal_history??[]).length,2);
+  assert.equal(committedHistory.turns.length,commitHistoryBefore.turns.length+1);
+  assert.equal(committedHistory.turns.at(-1).event,null);
+  assert.deepEqual(committedHistory.turns.at(-1).selected_action_intents,[]);
+  assert.deepEqual(committedHistory.turns.at(-1).action_outcomes,[]);
+  assert.deepEqual(committedState.state.event_queue,commitBefore.state.event_queue);
+  assert.equal(committedState.state.simulation_time,commitBefore.state.simulation_time);
+  const committedEvents=Object.values(committedState.state.motivational_goal_events??{});
+  assert.equal(committedEvents.length,2);
+  assert.equal(committedEvents.filter(event=>event.operation==="propose").length,1);
+  assert.equal(committedEvents.filter(event=>event.operation==="commit").length,1);
+  assert.equal(committedEvents[0].goal_id,committedEvents[1].goal_id,
+    "Propose and commit must transition one goal, not create a second goal identity.");
+  assert.equal(committedHistory.turns.at(-1).autonomous_cognition_goal_commitment?.goal_event_count,1);
+  console.log(JSON.stringify({
+    scenario:"c2_eventless_goal_propose_then_commit",
+    distinct_explicit_internal_cues:2,
+    sequential_world_revisions:[before.revision,after.revision,committedState.revision],
+    operations:committedEvents.map(event=>event.operation).sort(),
+    reused_goal_identity:committedEvents[0].goal_id===committedEvents[1].goal_id,
+    selected_actions:0,
+  }));
+
   // Each invalid decision starts from the same genuine Phase65/66 evidence
   // but in a new isolated Native session. A bad source or context must abort
   // before any state/history mutation, without contaminating the next case.
