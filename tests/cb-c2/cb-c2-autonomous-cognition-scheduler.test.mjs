@@ -657,6 +657,85 @@ try {
   assert.equal(planReplay.scheduler_projection.opportunity_count,0,
     "Successfully authored plan opportunity must be durably suppressed on replay.");
 
+  // A committed goal does not automatically demand a plan. Without an
+  // explicit plan_intents reply, a C2 thought must remain read-only.
+  const planNoIntentSession=await beginWorldSimulationSession({
+    source_text:"C2 committed goal without plan selection",
+    characters:Object.keys(baseWorldState.characters),
+    initial_world_state:committedState.state,
+  },{fixtureRoot:goalFixtureRoot});
+  const noPlanSid=planNoIntentSession.world_simulation_session_id;
+  const noPlan=await dispatchWorldSimulationAutonomousCognitionOpportunities({
+    world_simulation_session_id:noPlanSid,
+    runtime_context_by_character:planCue,
+  },{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+    assert.equal(packet.native_plan_decision.committed_goals.length,1);
+    return {disposition:"considered_plan_but_declined"};
+  }});
+  const noPlanState=await getWorldSimulationState(noPlanSid,{fixtureRoot:goalFixtureRoot});
+  assert.equal(noPlan.dispatch_count,1);
+  assert.equal(noPlan.world_mutation_performed,false);
+  assert.equal(noPlan.action_selection_performed,false);
+  assert.equal(noPlanState.revision,0);
+  assert.equal((noPlanState.state.goal_implementation_intention_history??[]).length,0);
+
+  for(const [fault,code] of [
+    ["forged_goal_token","WORLD_SIMULATION_NATIVE_PLAN_GOAL_TOKEN_INVALID"],
+    ["stale_context","WORLD_SIMULATION_NATIVE_PLAN_CONTEXT_MISMATCH"],
+    ["invalid_plan_intents","WORLD_SIMULATION_NATIVE_PLAN_INTENT_INVALID"],
+    ["mixed_goal_plan","WORLD_SIMULATION_AUTONOMOUS_GOAL_PLAN_MIXED_BATCH_UNSUPPORTED"],
+  ]) {
+    const invalid=await beginWorldSimulationSession({
+      source_text:`C2 eventless invalid plan ${fault}`,
+      characters:Object.keys(baseWorldState.characters),
+      initial_world_state:committedState.state,
+    },{fixtureRoot:goalFixtureRoot});
+    const invalidSid=invalid.world_simulation_session_id;
+    const pre=await getWorldSimulationState(invalidSid,{fixtureRoot:goalFixtureRoot});
+    const preHistory=await getWorldSimulationHistory(invalidSid,{fixtureRoot:goalFixtureRoot});
+    await assert.rejects(dispatchWorldSimulationAutonomousCognitionOpportunities({
+      world_simulation_session_id:invalidSid,
+      runtime_context_by_character:planCue,
+    },{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+      const view=packet.native_plan_decision;
+      assert.equal(view.committed_goals.length,1);
+      const intent={
+        goal_token:fault==="forged_goal_token"?"forged_goal_ref":view.committed_goals[0].goal_token,
+        cue_descriptor:{cue_kind:"opportunity",label:"timer_doubt_requires_verification"},
+        response_descriptor:{response_kind:"seek_support",label:"ask_trusted_ally"},
+      };
+      const response={
+        plan_context_token:fault==="stale_context"?"outdated_plan_context":view.context_token,
+        plan_intents:fault==="invalid_plan_intents"?{}:[intent],
+      };
+      if(fault==="mixed_goal_plan"){
+        const goalView=packet.native_goal_decision;
+        assert.equal(goalView.motivation_basis.length,1);
+        response.goal_context_token=goalView.context_token;
+        response.goal_intents=[{
+          operation:"propose",goal_kind:"achieve_state",domain:"inquiry",
+          target_descriptor:{label:"查證第二件物品"},
+          motivation_basis_tokens:[goalView.motivation_basis[0].source_token],
+          motivation_relations:["supports"],
+        }];
+      }
+      return response;
+    }}),error=>error?.code===code,
+      `C2 plan validator must reject ${fault} without a partial World write`);
+    const post=await getWorldSimulationState(invalidSid,{fixtureRoot:goalFixtureRoot});
+    const postHistory=await getWorldSimulationHistory(invalidSid,{fixtureRoot:goalFixtureRoot});
+    assert.equal(post.revision,pre.revision);
+    assert.equal(post.state_hash,pre.state_hash);
+    assert.deepEqual(postHistory.turns,preHistory.turns);
+    assert.deepEqual(post.state.event_queue,pre.state.event_queue);
+    assert.equal((post.state.goal_implementation_intention_history??[]).length,0);
+    assert.equal((post.state.motivational_goal_history??[]).length,2);
+    console.log(JSON.stringify({
+      scenario:"c2_eventless_plan_negative",fault,
+      expected_error:code,world_revision_unchanged:true,history_unchanged:true,
+    }));
+  }
+
   // Each invalid decision starts from the same genuine Phase65/66 evidence
   // but in a new isolated Native session. A bad source or context must abort
   // before any state/history mutation, without contaminating the next case.
