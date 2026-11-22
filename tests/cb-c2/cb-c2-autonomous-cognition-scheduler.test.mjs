@@ -809,6 +809,70 @@ try {
   assert.equal(noPlanState.revision,0);
   assert.equal((noPlanState.state.goal_implementation_intention_history??[]).length,0);
 
+  // A spontaneous action request must never silently count as a completed C2
+  // cognition opportunity. This scheduler has no World action authority yet.
+  // Reject instead of ignoring the chosen action and consuming the cue.
+  for (const withPlan of [false,true]) {
+    const actionIntentWorld={
+      ...structuredClone(planAfter.state),
+      event_queue:[],
+      available_actions:{[character]:[speechCandidate]},
+    };
+    const rejectedActionSession=await beginWorldSimulationSession({
+      source_text:"C2 eventless explicit action must be rejected until World handoff exists",
+      characters:Object.keys(actionIntentWorld.characters),
+      initial_world_state:actionIntentWorld,
+    },{fixtureRoot:goalFixtureRoot});
+    const rejectedActionSid=rejectedActionSession.world_simulation_session_id;
+    const rejectedActionBefore=await getWorldSimulationState(
+      rejectedActionSid,{fixtureRoot:goalFixtureRoot});
+    const rejectedActionHistoryBefore=await getWorldSimulationHistory(
+      rejectedActionSid,{fixtureRoot:goalFixtureRoot});
+    await assert.rejects(
+      dispatchWorldSimulationAutonomousCognitionOpportunities({
+        world_simulation_session_id:rejectedActionSid,
+        runtime_context_by_character:planCue,
+      },{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+        assert.equal(packet.boundaries.scheduler_action_selection_authority,false);
+        assert.equal(packet.boundaries.native_plan_decision_action_authority,false);
+        assert.equal(packet.native_plan_decision.committed_goals.length,1);
+        return {
+          action_id:speechCandidate.action_id,
+          ...(withPlan ? {
+            plan_context_token:packet.native_plan_decision.context_token,
+            plan_intents:[{
+              goal_token:packet.native_plan_decision.committed_goals[0].goal_token,
+              cue_descriptor:{cue_kind:"opportunity",label:"timer_check_now"},
+              response_descriptor:{response_kind:"seek_support",label:"ask_trusted_ally"},
+            }],
+          } : {}),
+        };
+      }}),
+      error=>error?.code==="WORLD_SIMULATION_AUTONOMOUS_ACTION_INTENT_UNSUPPORTED"
+        && Array.isArray(error.consumed_opportunity_ids)
+        && error.consumed_opportunity_ids.length===0,
+      "C2 cannot silently swallow an explicit action selection or partially write a companion plan."
+    );
+    const rejectedActionAfter=await getWorldSimulationState(
+      rejectedActionSid,{fixtureRoot:goalFixtureRoot});
+    const rejectedActionHistoryAfter=await getWorldSimulationHistory(
+      rejectedActionSid,{fixtureRoot:goalFixtureRoot});
+    const replayAfterRejection=await scheduleWorldSimulationAutonomousCognitionOpportunities({
+      world_simulation_session_id:rejectedActionSid,runtime_context_by_character:planCue,
+    },{fixtureRoot:goalFixtureRoot});
+    assert.equal(rejectedActionAfter.revision,rejectedActionBefore.revision);
+    assert.equal(rejectedActionAfter.state_hash,rejectedActionBefore.state_hash);
+    assert.deepEqual(rejectedActionHistoryAfter.turns,rejectedActionHistoryBefore.turns);
+    assert.equal(replayAfterRejection.scheduler_projection.opportunity_count,1,
+      "An unsupported action must not durably consume the character's internal cue.");
+    console.log(JSON.stringify({
+      scenario:"c2_eventless_action_intent_must_not_be_silently_consumed",
+      with_plan_intent:withPlan,
+      expected_error:"WORLD_SIMULATION_AUTONOMOUS_ACTION_INTENT_UNSUPPORTED",
+      world_unchanged:true,opportunity_preserved:true,
+    }));
+  }
+
   for(const [fault,code] of [
     ["forged_goal_token","WORLD_SIMULATION_NATIVE_PLAN_GOAL_TOKEN_INVALID"],
     ["stale_context","WORLD_SIMULATION_NATIVE_PLAN_CONTEXT_MISMATCH"],
