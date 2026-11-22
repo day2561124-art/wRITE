@@ -14,6 +14,7 @@ import { beginWorldSimulationSession } from "../../server/src/world-simulation-s
 import { commitWorldSimulationTurn, getWorldSimulationHistory, getWorldSimulationState } from "../../server/src/world-simulation-state-service.mjs";
 import { hashAgentRunValue } from "../../server/src/agent-run-service.mjs";
 import { runWorldSimulationActorInitiatedSpeech } from "../../server/src/world-simulation-actor-initiated-speech-service.mjs";
+import { runWorldSimulationCommittedActorSpeechListenerCognition } from "../../server/src/world-simulation-committed-actor-speech-listener-ingress-service.mjs";
 import { assertWorldSimulationCommittedAcousticSource } from "../../server/src/world-simulation-native-committed-source-service.mjs";
 import { buildCharacterCommunicationActionCandidate } from "../../server/src/character-communication-foundation-service.mjs";
 import { nativeImplementationIntentionActivationCapability } from "../../server/src/world-simulation-goal-implementation-intention-activation-service.mjs";
@@ -906,6 +907,93 @@ try {
     listener_increment_persisted:true,choice_receipt_persisted:true,
     source_audit:sourceAudit.status,information_verified:false,
   }));
+
+  // A newly admitted listener may privately notice its own actually
+  // released acoustic cue from the last *committed* actor speech. Neither
+  // source transcript nor source identity are available to this Brain.
+  let receivedListenerCues=0;
+  const listenerIngressInput={
+    world_simulation_session_id:acousticSid,
+    observer:inquiryAlly,
+    source_turn_id:acousticSourceTurn.turn_id,
+    expected_revision:acousticSnapshot.revision,
+    expected_state_hash:acousticSnapshot.state_hash,
+  };
+  const listenerView=await runWorldSimulationCommittedActorSpeechListenerCognition(
+    listenerIngressInput,
+    {fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+      receivedListenerCues++;
+      assert.equal(packet.character,inquiryAlly);
+      const acoustic=packet.cognition.committed_acoustic_observation;
+      assert.equal(acoustic.kind,"speech_sound_detected");
+      assert.equal(acoustic.heard_surface_fragment,null);
+      assert.equal(acoustic.content_understood,false);
+      assert.equal(acoustic.speaker_identity_recognized,false);
+      assert.equal(acoustic.lexical_intelligibility_attested,false);
+      assert.equal(acoustic.increment_ref,sourceAdmission.observer_increment.increment_ref);
+      assert.deepEqual(acoustic.perceived_cue_refs,
+        sourceAdmission.observer_increment.perceived_cue_refs);
+      assert.equal(packet.boundaries.world_truth_authority,false);
+      assert.equal(packet.boundaries.action_selection_authority,false);
+      assert.equal(packet.boundaries.future_cues_exposed,false);
+      assert.equal(packet.boundaries.speaker_identity_exposed,false);
+      assert.equal(packet.boundaries.speech_surface_exposed,false);
+      assert.equal(JSON.stringify(packet).includes(acousticContent),false,
+        "The listener's acoustic-only cue must not expose the source transcript.");
+      return {private_reaction:"noticed a speech sound, no lexical certainty"};
+    }});
+  assert.equal(receivedListenerCues,1);
+  assert.equal(listenerView.status,"verified_listener_acoustic_brain_ingress");
+  assert.equal(listenerView.source_proof_verified,true);
+  assert.equal(listenerView.world_mutation_performed,false);
+  assert.equal(listenerView.public_reply_emitted,false);
+  assert.equal(listenerView.content_understood,false);
+  const listenerAfter=await getWorldSimulationState(acousticSid,{fixtureRoot:goalFixtureRoot});
+  const listenerHistoryAfter=await getWorldSimulationHistory(
+    acousticSid,{fixtureRoot:goalFixtureRoot});
+  assert.equal(listenerAfter.revision,acousticSnapshot.revision);
+  assert.equal(listenerAfter.state_hash,acousticSnapshot.state_hash);
+  assert.deepEqual(listenerHistoryAfter.turns,acousticHistory.turns);
+  console.log(JSON.stringify({
+    scenario:"world_actor_listener_committed_cue_ingress",
+    source_proof_verified:true,observer_only_cues:1,
+    brain_calls:receivedListenerCues,transcript_hidden:true,
+    public_reply_emitted:false,world_unchanged:true,
+  }));
+
+  for(const fault of ["source_is_speaker","stale_world_cas",
+      "runtime_character_substitution","brain_action_forgery"]){
+    let invoked=0;
+    const faultInput={...listenerIngressInput};
+    if(fault==="source_is_speaker")faultInput.observer=character;
+    if(fault==="stale_world_cas")faultInput.expected_revision++;
+    const faultOptions={
+      fixtureRoot:goalFixtureRoot,
+      characterBrain:async ()=>{
+        invoked++;
+        return fault==="brain_action_forgery"
+          ? {action_id:acousticCandidate.action_id}
+          : {private_reaction:"heard noise"};
+      },
+    };
+    if(fault==="runtime_character_substitution")
+      faultOptions.characterRuntimeManager={
+        runCharacterTurn:async ({brain_input,characterBrain})=>
+          characterBrain({...brain_input,character:"not_the_listener"}),
+      };
+    await assert.rejects(
+      runWorldSimulationCommittedActorSpeechListenerCognition(faultInput,faultOptions),
+      error=>error?.code===({
+        source_is_speaker:"WORLD_LISTENER_CUE_SOURCE_NOT_CURRENT",
+        stale_world_cas:"WORLD_LISTENER_CUE_WORLD_STATE_STALE",
+        runtime_character_substitution:"WORLD_LISTENER_CUE_CHARACTER_MISMATCH",
+        brain_action_forgery:"WORLD_LISTENER_CUE_ACTION_UNSUPPORTED",
+      })[fault]);
+    assert.equal(invoked,fault==="brain_action_forgery"?1:0);
+    const afterFault=await getWorldSimulationState(
+      acousticSid,{fixtureRoot:goalFixtureRoot});
+    assert.equal(afterFault.state_hash,acousticSnapshot.state_hash);
+  }
 
   // An actor can decline a real plan cue and a genuine available action.
   // Absence of choice must not create a dummy external World turn.
