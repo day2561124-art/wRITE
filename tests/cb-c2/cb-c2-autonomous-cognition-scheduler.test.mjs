@@ -904,6 +904,66 @@ try {
     }));
   }
 
+  // A real Phase69A plan intent is also revision-bound. If another World
+  // transaction wins after the Brain saw its committed goal token, the old
+  // plan must never be reinterpreted or committed against the new snapshot.
+  const planRacing=await beginWorldSimulationSession({
+    source_text:"CB-C2 Phase69A plan writer CAS interleaving",
+    characters:Object.keys(baseWorldState.characters),
+    initial_world_state:committedState.state,
+  },{fixtureRoot:goalFixtureRoot});
+  const planRacingSid=planRacing.world_simulation_session_id;
+  let planRaceWinnerCount=0;
+  await assert.rejects(
+    dispatchWorldSimulationAutonomousCognitionOpportunities({
+      world_simulation_session_id:planRacingSid,
+      runtime_context_by_character:planCue,
+    },{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+      const planView=packet.native_plan_decision;
+      assert.equal(planView.committed_goals.length,1);
+      const atIngress=await getWorldSimulationState(
+        planRacingSid,{fixtureRoot:goalFixtureRoot});
+      await commitWorldSimulationTurn(planRacingSid,{
+        expected_revision:atIngress.revision,
+        expected_state_hash:atIngress.state_hash,
+        turn_id:"harness_competing_plan_cas_winner",
+        next_world_state:atIngress.state,
+        event:null,
+        selected_action_intents:[],
+        action_outcomes:[],
+        state_transitions:[],
+      },{fixtureRoot:goalFixtureRoot});
+      planRaceWinnerCount++;
+      return {
+        plan_context_token:planView.context_token,
+        plan_intents:[{
+          goal_token:planView.committed_goals[0].goal_token,
+          cue_descriptor:{cue_kind:"opportunity",label:"timer_doubt_requires_verification"},
+          response_descriptor:{response_kind:"seek_support",label:"ask_trusted_ally"},
+        }],
+      };
+    }}),
+    error=>error?.code==="WORLD_SIMULATION_AUTONOMOUS_GOAL_COMMIT_STALE",
+    "A late competing World revision must reject the old Phase69A plan without partial writes."
+  );
+  const planRaceAfter=await getWorldSimulationState(
+    planRacingSid,{fixtureRoot:goalFixtureRoot});
+  const planRaceHistory=await getWorldSimulationHistory(
+    planRacingSid,{fixtureRoot:goalFixtureRoot});
+  assert.equal(planRaceWinnerCount,1);
+  assert.equal(planRaceAfter.revision,1);
+  assert.equal((planRaceAfter.state.goal_implementation_intention_history??[]).length,0);
+  assert.equal((planRaceAfter.state.motivational_goal_history??[]).length,2);
+  assert.equal(planRaceHistory.turns.length,1);
+  assert.equal(planRaceHistory.turns[0].turn_id,"harness_competing_plan_cas_winner");
+  assert.deepEqual(planRaceAfter.state.event_queue,committedState.state.event_queue);
+  console.log(JSON.stringify({
+    scenario:"c2_eventless_plan_stale_cas",
+    competing_world_commit_count:planRaceWinnerCount,
+    final_revision:planRaceAfter.revision,
+    plan_events:0,c2_stale_plan_rejected:true,
+  }));
+
   // Simulate an unrelated, legitimate World CAS winner after the C2 Brain
   // receives a valid source token but before the C2 goal writer executes.
   // The competing transaction is harness-owned and writes no event/goal.
