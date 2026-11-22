@@ -9,7 +9,15 @@ import {
 } from "../../server/src/world-simulation-loop-service.mjs";
 import { projectRoot } from "../../server/src/project-paths.mjs";
 import { beginWorldSimulationSession } from "../../server/src/world-simulation-session-service.mjs";
-import { getWorldSimulationState } from "../../server/src/world-simulation-state-service.mjs";
+import { getWorldSimulationHistory, getWorldSimulationState } from "../../server/src/world-simulation-state-service.mjs";
+import { hashAgentRunValue } from "../../server/src/agent-run-service.mjs";
+import { buildWorldSimulationSubjectiveClaims } from "../../server/src/world-simulation-subjective-claim-projection-service.mjs";
+import { resolveWorldSimulationSubjectiveBeliefs } from "../../server/src/world-simulation-subjective-belief-resolution-service.mjs";
+import { buildWorldSimulationSubjectiveBeliefRevisions } from "../../server/src/world-simulation-subjective-belief-revision-service.mjs";
+import {
+  buildWorldSimulationChronologicalMutationQueue,
+  executeWorldSimulationChronologicalMutationQueue,
+} from "../../server/src/world-simulation-chronological-mutation-queue-service.mjs";
 import {
   buildWorldSimulationAutonomousCognitionSchedulerContract,
   projectWorldSimulationAutonomousCognitionOpportunities,
@@ -381,6 +389,144 @@ try {
   assert.equal(quietDispatch.action_selection_performed, false);
 } finally {
   await rm(fixtureRoot, { recursive: true, force: true });
+}
+
+
+// C2 controlled goal-writer acceptance: the cue is genuine committed
+// motivation and idle context, and the initial World has an EMPTY event queue.
+// Phase65/66 entries are constructed through their actual authoritative
+// builders and mutation executor, not freeform synthetic goal identifiers.
+// This does not establish an independently self-chosen investigation policy.
+const goalFixtureRoot = path.join(projectRoot, "tests", ".tmp",
+  `cb-c2-eventless-goal-${process.pid}-${Date.now()}`);
+await rm(goalFixtureRoot, {recursive: true, force: true});
+try {
+  const character = "閒置角色";
+  const sourceTurn = "committed_prior_subjective_observation";
+  const memory = {
+    memory_id: "memory_c2_prior_observation",
+    memory_type: "episodic_direct_perception",
+    content: {kind:"visual_observation",description:"架上的計時器標籤顯示四十分鐘。"},
+    source: {kind:"direct_perception",sense:"visual"},
+    internal_provenance: {
+      event_id:"prior_observation",scene_id:"scene_c2",
+      turn_id:sourceTurn,observation_hash:"observation_c2",
+      formation_version:"phase63a-subjective-memory-formation-v1",
+    },
+    formation_stage:"encoded_unconsolidated",
+    engine_persisted_trace:true,last_recalled_at:null,
+    accessible:true,suppressed:false,possibly_incorrect:false,
+    source_confused:false,subjective_memory_not_world_truth:true,
+  };
+  const executeFixture = (state, stage, built) => {
+    const queue = buildWorldSimulationChronologicalMutationQueue({
+      turn_id: `${sourceTurn}:${stage}`,
+      world_state_hash: hashAgentRunValue(state),
+      state_transitions: built.result.state_transitions,
+      elapsed_ms: 0,
+    });
+    return executeWorldSimulationChronologicalMutationQueue({
+      world_state: state, preview_world_state: built.result.preview_world_state,
+      queue, scene_id: "scene_c2",
+    }).next_world_state;
+  };
+  let state = {
+    ...structuredClone(baseWorldState),
+    memories: {[character]:[memory],"無事角色":[],"內在提示角色":[]},
+  };
+  const claim = buildWorldSimulationSubjectiveClaims({
+    world_state:state, turn_id:sourceTurn,
+    source_memory_records:[{character,memory_record:memory}],
+    claim_proposals:[{
+      proposal_ref:"prior_visual_label",
+      character,
+      proposition:"我看見計時器上標著四十分鐘。",
+      evidence:[{source_memory_ref:memory.memory_id,relation:"supports"}],
+    }],
+  });
+  state = executeFixture(state, "subjective_claim", claim);
+  const resolution = resolveWorldSimulationSubjectiveBeliefs({
+    world_state:state,turn_id:sourceTurn,
+  });
+  const revision = buildWorldSimulationSubjectiveBeliefRevisions({
+    world_state:state,turn_id:sourceTurn,resolution:resolution.result,
+  });
+  state = executeFixture(state, "subjective_belief_revision", revision);
+  assert.equal(state.event_queue.length, 0);
+  assert.equal(state.subjective_claim_history.length, 1);
+  assert.equal(state.subjective_belief_revision_history.length, 1);
+  const session = await beginWorldSimulationSession({
+    source_text:"C2 goal-only internal transaction with no external event queue",
+    characters:Object.keys(baseWorldState.characters),
+    initial_world_state:state,
+  }, {fixtureRoot:goalFixtureRoot});
+  const sid=session.world_simulation_session_id;
+  const before=await getWorldSimulationState(sid,{fixtureRoot:goalFixtureRoot});
+  const historyBefore=await getWorldSimulationHistory(sid,{fixtureRoot:goalFixtureRoot});
+  assert.equal(before.revision,0);
+  assert.deepEqual(before.state.event_queue,[]);
+  const seen=[];
+  const dispatch=await dispatchWorldSimulationAutonomousCognitionOpportunities({
+    world_simulation_session_id:sid,
+    runtime_context_by_character:{[character]:{idle:true}},
+  },{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+    seen.push(structuredClone(packet));
+    const view=packet.native_goal_decision;
+    assert.equal(view.character,character);
+    assert.equal(view.motivation_basis.length,1);
+    assert.equal(view.motivation_basis[0].evidence.proposition,
+      "我看見計時器上標著四十分鐘。");
+    assert.equal(view.world_truth_exposed,false);
+    assert.equal(view.source_event_ids_exposed,false);
+    return {
+      goal_context_token:view.context_token,
+      goal_intents:[{
+        operation:"propose",goal_kind:"achieve_state",domain:"inquiry",
+        target_descriptor:{label:"查證計時器實際上限"},
+        motivation_basis_tokens:[view.motivation_basis[0].source_token],
+        motivation_relations:["supports"],
+      }],
+    };
+  }});
+  const after=await getWorldSimulationState(sid,{fixtureRoot:goalFixtureRoot});
+  const historyAfter=await getWorldSimulationHistory(sid,{fixtureRoot:goalFixtureRoot});
+  console.log(JSON.stringify({
+    scenario:"c2_eventless_explicit_goal_transaction",
+    c2_turns:seen.length,
+    opportunity_triggers:dispatch.dispatches.map(row=>row.trigger_kinds),
+    had_external_event:!dispatch.event_queue_empty,
+    before_revision:before.revision,after_revision:after.revision,
+    goal_events:Object.keys(after.state.motivational_goal_events??{}).length,
+    history_entries:historyAfter.turns.length,
+    durable_write_reported:dispatch.durable_cognitive_write_performed,
+    selected_action_reported:dispatch.action_selection_performed,
+  }));
+  assert.equal(dispatch.dispatch_count,1);
+  assert.equal(dispatch.event_queue_empty,true);
+  assert.deepEqual(dispatch.dispatches[0].trigger_kinds,["idle_with_active_goal"]);
+  assert.equal(dispatch.action_selection_performed,false);
+  assert.equal(after.revision,before.revision+1,
+    "Native C2 eventless writer gap: an explicit source-backed same-character goal intent must be authoritatively committed without a World event.");
+  assert.equal(dispatch.durable_cognitive_write_performed,true);
+  assert.equal(dispatch.world_mutation_performed,true);
+  assert.equal(Object.keys(after.state.motivational_goal_events??{}).length,1);
+  assert.equal(after.state.motivational_goal_history.length,1);
+  assert.equal(historyAfter.turns.length,historyBefore.turns.length+1);
+  assert.equal(historyAfter.turns.at(-1).event,null);
+  assert.deepEqual(historyAfter.turns.at(-1).selected_action_intents,[]);
+  assert.deepEqual(historyAfter.turns.at(-1).action_outcomes,[]);
+  assert.deepEqual(after.state.event_queue,before.state.event_queue);
+  assert.equal(after.state.simulation_time,before.state.simulation_time);
+  // A replay without caller supplied consumed IDs must not re-issue the
+  // identical committed cognitive opportunity under a new revision.
+  const repeat=await scheduleWorldSimulationAutonomousCognitionOpportunities({
+    world_simulation_session_id:sid,
+    runtime_context_by_character:{[character]:{idle:true}},
+  },{fixtureRoot:goalFixtureRoot});
+  assert.equal(repeat.scheduler_projection.opportunity_count,0,
+    "A committed C2 goal opportunity must be durably consumed, not just suppressed by caller runtime context.");
+} finally {
+  await rm(goalFixtureRoot,{recursive:true,force:true});
 }
 
 console.log("CB-C2 autonomous cognition scheduler tests passed.");
