@@ -1,5 +1,6 @@
 import http from 'http';
-import {fileURLToPath} from 'node:url';
+import path from 'node:path';
+import { projectRoot } from './project-paths.mjs';
 import {readSessionMemoryProfile} from './mcp-session-profile.mjs';
 import {createPiDurableWorkerSupervisor} from './pi-durable-worker-supervisor.mjs';
 import { attachBoundedSseKeepalive } from './mcp-http-sse-keepalive.mjs';
@@ -230,7 +231,7 @@ function readPostBody(req, maxBytes) {
 
 const configPath = process.argv.includes('--config')
   ? process.argv[process.argv.indexOf('--config') + 1]
-  : fileURLToPath(new URL('../../config/mcp-http.example.json', import.meta.url));
+  : path.join(projectRoot, 'config/mcp-http.example.json');
 const portArgumentIndex = process.argv.indexOf('--port');
 const portOverride = portArgumentIndex >= 0
   ? Number.parseInt(process.argv[portArgumentIndex + 1], 10)
@@ -246,7 +247,7 @@ const config = {
 // Resolve from this deployment, never the caller's working directory.
 // Validate the profile even when both settings have explicit overrides.
 Object.assign(process.env, readSessionMemoryProfile(
-  fileURLToPath(new URL('../../config/mcp-session-memory-profile.json', import.meta.url)),
+  path.join(projectRoot, 'config/mcp-session-memory-profile.json'),
   process.env,
 ));
 const maxPostBodyBytes = boundedIntegerEnvironment(

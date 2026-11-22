@@ -27,6 +27,7 @@ export const POWERSHELL_MAINTENANCE_OUTPUT_MAX_CHARACTERS = 64 * 1024;
 export const POWERSHELL_MAINTENANCE_DEFAULT_TIMEOUT_MS = 30_000;
 export const POWERSHELL_MAINTENANCE_MAX_TIMEOUT_MS = 120_000;
 export const POWERSHELL_ADMIN_TASK_NAME = "WriterWorkbench-PowerShellAdminRunner";
+export const POWERSHELL_SCOPED_ADMIN_TASK_NAME = "WriterWorkbench-PowerShellScopedAdminRunner";
 
 function scopedAdminStateRoot() {
   const grants = process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT;
@@ -391,7 +392,7 @@ export async function runPowerShellViaAdminTask({
   serviceAuthorization,
   scriptAuthorization,
   stateRoot = serviceAuthorization || scriptAuthorization ? scopedAdminStateRoot() : defaultAdminStateRoot(),
-  taskName = POWERSHELL_ADMIN_TASK_NAME,
+  taskName = serviceAuthorization || scriptAuthorization ? POWERSHELL_SCOPED_ADMIN_TASK_NAME : POWERSHELL_ADMIN_TASK_NAME,
   spawnSyncImpl = spawnSync,
   requestId = randomUUID().replaceAll("-", ""),
 } = {}) {

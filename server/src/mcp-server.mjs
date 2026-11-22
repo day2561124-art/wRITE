@@ -18,6 +18,7 @@ import {
   assertExactPath,
   assertPathInside,
   projectPaths,
+  projectRoot,
   resolveCandidateMarkdownPath,
   resolveGeneratedMarkdownPath,
   resolveProjectPath,
@@ -292,8 +293,8 @@ const execFileAsync = promisify(execFile);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const rootDir = path.resolve(__dirname, "..", "..");
-const toolsDir = path.join(rootDir, "server", "src", "tools");
+const rootDir = projectRoot;
+const toolsDir = path.join(__dirname, "tools");
 
 const serverInfo = {
   name: "armed-academy-fiction-engine",

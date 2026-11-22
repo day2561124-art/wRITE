@@ -7,6 +7,8 @@ import { createMcpRuntimeDiagnostics } from './mcp-runtime-diagnostics.mjs';
 import {performance} from 'node:perf_hooks';
 import {REQUEST_TRACE_PROTOCOL,REQUEST_TRACE_META_KEY,createTraceBuffer,publishTrace,requestTraceChannel,sanitizeTrace,traceId,withTraceId} from './mcp-request-tracing.mjs';
 import { terminateProcessTree } from './process-control.mjs';
+import path from 'node:path';
+import { projectRoot, releaseRoot } from './project-paths.mjs';
 
 // Minimal stdio proxy: spawn a per-connection child process running mcp-server.mjs
 // and provide helpers to forward JSON-RPC messages via newline framing.
@@ -480,11 +482,14 @@ export function createStdioSession(options = {}) {
   function spawnChild() {
     readOnlyTools.clear();
     stdoutBuffer = Buffer.alloc(0);
-    const nextChild = spawnProcess(process.execPath, ['server/src/mcp-server.mjs',...(options.trustedLocalOwner===true?['--trusted-local-owner']:[])], {
+    const managed = process.env.NEXA_MANAGED_PROJECT_ROOT !== undefined;
+    const entry = managed ? path.join(releaseRoot, 'server/src/mcp-server.mjs') : 'server/src/mcp-server.mjs';
+    const nextChild = spawnProcess(process.execPath, [entry,...(options.trustedLocalOwner===true?['--trusted-local-owner']:[])], {
       // fd 3 is Node's internal IPC channel for the world-simulation prepared-turn
       // broker. stdout remains exclusively MCP JSON-RPC framing.
       // Session startup, reload and recovery are background operations on Windows.
       windowsHide: true,
+      ...(managed ? { cwd: projectRoot } : {}),
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
       env: {
         ...process.env,

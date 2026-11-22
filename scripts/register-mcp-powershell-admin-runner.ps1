@@ -1,12 +1,15 @@
 [CmdletBinding()]
 param(
-    [string]$TaskName = 'WriterWorkbench-PowerShellAdminRunner',
+    [string]$TaskName,
     [switch]$ScopedTaskAuthorizations
 )
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 Set-StrictMode -Version Latest
+if (-not $PSBoundParameters.ContainsKey('TaskName')) {
+    $TaskName = if ($ScopedTaskAuthorizations) { 'WriterWorkbench-PowerShellScopedAdminRunner' } else { 'WriterWorkbench-PowerShellAdminRunner' }
+}
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $windowsPrincipal = New-Object Security.Principal.WindowsPrincipal $identity

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { projectRoot, releaseRoot } from "../project-paths.mjs";
 import {
   normalizeProjectPath,
   projectPaths,
@@ -14,17 +14,15 @@ import {
   createTransactionId,
 } from "../file-transactions.mjs";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const rootDir = path.resolve(__dirname, "..", "..", "..");
+const rootDir = projectRoot;
 const currentPromptPath = path.join(projectPaths.outputs, "current_prompt.md");
 const generationContextPath = path.join(projectPaths.outputs, "generation_context.md");
 const runsDir = path.join(projectPaths.outputs, "runs");
 
 const toolPaths = {
-  buildCurrentPrompt: path.join(rootDir, "server", "src", "tools", "build-current-prompt.mjs"),
-  searchContext: path.join(rootDir, "server", "src", "tools", "search-context.mjs"),
-  buildTaskPrompt: path.join(rootDir, "server", "src", "tools", "build-task-prompt.mjs"),
+  buildCurrentPrompt: path.join(releaseRoot, "server", "src", "tools", "build-current-prompt.mjs"),
+  searchContext: path.join(releaseRoot, "server", "src", "tools", "search-context.mjs"),
+  buildTaskPrompt: path.join(releaseRoot, "server", "src", "tools", "build-task-prompt.mjs"),
 };
 
 const defaultTask =

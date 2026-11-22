@@ -1,11 +1,23 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export const projectRoot = path.resolve(__dirname, "..", "..");
+export const releaseRoot = path.resolve(__dirname, "..", "..");
+
+function managedProjectRoot() {
+  const configured = process.env.NEXA_MANAGED_PROJECT_ROOT;
+  if (configured === undefined) return releaseRoot;
+  if (!path.isAbsolute(configured)) throw new Error("NEXA_MANAGED_PROJECT_ROOT must be an absolute repository path.");
+  const root = realpathSync.native(configured);
+  const git = lstatSync(path.join(root, ".git"));
+  if (!git.isDirectory() && !git.isFile()) throw new Error("The managed project has no regular Git repository metadata.");
+  return root;
+}
+
+export const projectRoot = managedProjectRoot();
 const realProjectRoot = realpathSync.native(projectRoot);
 
 export const projectPaths = {

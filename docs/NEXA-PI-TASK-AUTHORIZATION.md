@@ -2,7 +2,7 @@
 
 ## 啟用任務授權
 
-在 Nexa 主機的維護時段，透過已檢閱的發布版本，在提升權限的 64 位元 Windows PowerShell 執行 `scripts/register-mcp-powershell-admin-runner.ps1 -ScopedTaskAuthorizations`。它會沿用既有排程名稱，在 `Program Files` 建立受保護的授權庫。Windows ACL 允許管理員與 SYSTEM 寫入授權、撤銷記錄與收據。一般 MCP 和 Pi worker 程序只有供請求標記使用的收件匣可寫，同一個登入帳號可藉由一般與提升權限的 token 分工。
+在 Nexa 主機的維護時段，透過已檢閱的發布版本，在提升權限的 64 位元 Windows PowerShell 執行 `scripts/register-mcp-powershell-admin-runner.ps1 -ScopedTaskAuthorizations`。它會以既有 Windows Task Scheduler 機制建立 `WriterWorkbench-PowerShellScopedAdminRunner`，並在 `Program Files` 建立受保護的授權庫。Windows ACL 允許管理員與 SYSTEM 寫入授權、撤銷記錄與收據。一般 MCP 和 Pi worker 程序只有供請求標記使用的收件匣可寫，同一個登入帳號可藉由一般與提升權限的 token 分工。既有緊急維護入口繼續使用原本的排程。
 
 將註冊結果的 `task_authorization_root` 設為 `NEXA_PI_TASK_AUTHORIZATION_ROOT`。正式切換時設定 `NEXA_PI_REQUIRE_TASK_AUTHORIZATION=1`，使 Pi 的一般寫入、驗證、提交及檢查點要求有效授權。從同一啟動環境啟動 MCP 與 durable worker。安裝完成後，先以一般程序確認授權目錄可讀、寫入受阻，再執行服務驗收。
 
@@ -66,6 +66,8 @@ TRPG Gateway 憑證遭拒時，Nexa 會暫停該連線的 TRPG 工具並重新�
 候選版已在完整 Journal 複本追加這一對收據，驗證原有事件雜湊、操作狀態與冪等重試。正式 Nexa 的 Journal 讀寫程序都切換到支援該收據的版本後，從正式安裝目錄執行 `node scripts/reconcile-trpg-supervisor-resume.mjs --inspect`。檢查樣本及結果後可用 `--apply` 追加對帳，並覆核 `chain_verified=true`、`health=healthy` 和 `reconciliation_required=false`。
 
 切換前，保存既有排程定義、MCP 與 worker 啟動設定及安裝版本。在維護時段停止新派送，等已在執行的操作結束，再切換 runner 和 Journal 讀寫程序。如果尚未追加新版事件，復原可使用先前的排程、環境與安裝版本。追加新版事件後，復原須使用已驗證能讀取目前 Journal 的版本，並保留所有對帳收據。
+
+若發布程式和正式 Git 工作區位於不同位置，在啟動 Listener、管理授權和檢查 Journal 時，將 `NEXA_MANAGED_PROJECT_ROOT` 設為正式 Git 工作區的絕對路徑。Listener 和 Pi worker 載入發布目錄中的程式，設定、工作流、檢查點與 Journal 仍從正式工作區取得。從部署主機的啟動環境設定此值。
 
 ## Git 整合基準
 

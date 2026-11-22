@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { projectRoot } from "../project-paths.mjs";
 import {
   assertPathInside,
   projectPaths,
@@ -9,9 +9,7 @@ import {
 } from "../project-paths.mjs";
 import { atomicWriteFile } from "../file-transactions.mjs";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const rootDir = path.resolve(__dirname, "..", "..", "..");
+const rootDir = projectRoot;
 
 const defaultGenerationContextPath = path.join(rootDir, "data", "outputs", "generation_context.md");
 const defaultRetrievalContextPath = path.join(rootDir, "data", "outputs", "retrieval_context.md");

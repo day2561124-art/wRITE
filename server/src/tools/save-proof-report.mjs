@@ -1,15 +1,13 @@
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { projectRoot } from "../project-paths.mjs";
 import {
   commitFileTransaction,
   createTransactionId,
 } from "../file-transactions.mjs";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const rootDir = path.resolve(__dirname, "..", "..", "..");
+const rootDir = projectRoot;
 
 const reportsDir = path.join(rootDir, "data", "outputs", "proof_reports");
 const indexPath = path.join(rootDir, "data", "outputs", "logs", "proof_report_index.jsonl");
