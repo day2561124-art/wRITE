@@ -587,6 +587,76 @@ try {
     selected_actions:0,
   }));
 
+  // After Phase68D commit, a NEW independent C2 internal cue should let
+  // the same Native Brain formulate a Phase69A plan without an unrelated
+  // external World event. The engine must retain its normal goal token,
+  // source validation and World-CAS authority. This is a controlled intent
+  // supplied by the test Brain, not an unprompted general AI policy.
+  const planCue={ [character]: {
+    pending_internal_cues: [{
+      kind:"memory_reactivation",
+      source_ref:"runtime-form-implementation-intention-from-committed-goal",
+    }],
+  }};
+  const planBefore=await getWorldSimulationState(sid,{fixtureRoot:goalFixtureRoot});
+  const planHistoryBefore=await getWorldSimulationHistory(sid,{fixtureRoot:goalFixtureRoot});
+  let observedPlanView=null;
+  const planned=await dispatchWorldSimulationAutonomousCognitionOpportunities({
+    world_simulation_session_id:sid,
+    runtime_context_by_character:planCue,
+  },{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+    assert.equal(packet.character,character);
+    observedPlanView=packet.native_plan_decision;
+    assert.ok(observedPlanView,
+      "C2→C3 plan gap: a conscious eventless cognition opportunity must receive the same bounded Native plan view already used by eventful turns.");
+    assert.equal(observedPlanView.prior_turn_committed_goal_only,true);
+    assert.equal(observedPlanView.world_truth_exposed,false);
+    assert.equal(observedPlanView.source_event_ids_exposed,false);
+    assert.equal(observedPlanView.goal_ids_exposed,false);
+    assert.equal(observedPlanView.action_selection_requested,false);
+    assert.equal(observedPlanView.committed_goals.length,1);
+    assert.equal(observedPlanView.committed_goals[0].target_descriptor.label,"查證計時器實際上限");
+    assert.equal(packet.boundaries.native_plan_decision_world_write_authority,false);
+    return {
+      plan_context_token:observedPlanView.context_token,
+      plan_intents:[{
+        goal_token:observedPlanView.committed_goals[0].goal_token,
+        cue_descriptor:{cue_kind:"opportunity",label:"timer_doubt_requires_verification"},
+        response_descriptor:{response_kind:"seek_support",label:"ask_trusted_ally"},
+      }],
+    };
+  }});
+  const planAfter=await getWorldSimulationState(sid,{fixtureRoot:goalFixtureRoot});
+  const planHistoryAfter=await getWorldSimulationHistory(sid,{fixtureRoot:goalFixtureRoot});
+  console.log(JSON.stringify({
+    scenario:"c2_eventless_goal_to_native_plan",
+    plan_view_received:observedPlanView!==null,
+    plan_entries:(planAfter.state.goal_implementation_intention_history??[]).length,
+    world_revision_before:planBefore.revision,
+    world_revision_after:planAfter.revision,
+    goal_entries:(planAfter.state.motivational_goal_history??[]).length,
+    selected_action_performed:planned.action_selection_performed,
+  }));
+  assert.equal(planned.dispatch_count,1);
+  assert.equal(planned.action_selection_performed,false);
+  assert.equal(planned.durable_cognitive_write_performed,true);
+  assert.equal(planAfter.revision,planBefore.revision+1,
+    "An explicit Phase69A plan intent from the actual C2 Brain must commit through the authoritative eventless World writer.");
+  assert.equal((planAfter.state.goal_implementation_intention_history??[]).length,1);
+  assert.equal((planAfter.state.motivational_goal_history??[]).length,2);
+  assert.equal(planHistoryAfter.turns.length,planHistoryBefore.turns.length+1);
+  assert.equal(planHistoryAfter.turns.at(-1).event,null);
+  assert.deepEqual(planHistoryAfter.turns.at(-1).selected_action_intents,[]);
+  assert.deepEqual(planHistoryAfter.turns.at(-1).action_outcomes,[]);
+  assert.deepEqual(planAfter.state.event_queue,planBefore.state.event_queue);
+  assert.equal(planAfter.state.simulation_time,planBefore.state.simulation_time);
+  const planReplay=await scheduleWorldSimulationAutonomousCognitionOpportunities({
+    world_simulation_session_id:sid,
+    runtime_context_by_character:planCue,
+  },{fixtureRoot:goalFixtureRoot});
+  assert.equal(planReplay.scheduler_projection.opportunity_count,0,
+    "Successfully authored plan opportunity must be durably suppressed on replay.");
+
   // Each invalid decision starts from the same genuine Phase65/66 evidence
   // but in a new isolated Native session. A bad source or context must abort
   // before any state/history mutation, without contaminating the next case.
