@@ -4947,6 +4947,10 @@ export async function scheduleWorldSimulationAutonomousCognitionOpportunities(
           === "cb-c2-eventless-plan-commitment-v1"
           ? array(turn.autonomous_cognition_plan_commitment.consumed_opportunity_ids)
           : []),
+        ...(turn?.autonomous_actor_initiated_action?.version
+          === "cb-c4-world-owned-eventless-actor-speech-v1"
+          ? array(turn.autonomous_actor_initiated_action.consumed_opportunity_ids)
+          : []),
       ]),
     ])],
   });
