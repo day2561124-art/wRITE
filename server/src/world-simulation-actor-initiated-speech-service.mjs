@@ -216,6 +216,27 @@ export async function runWorldSimulationActorInitiatedSpeech(input = {}, options
     version:worldSimulationActorInitiatedSpeechVersion,
     status:"no_admitted_action_candidates",committed:false,action_selection_performed:false,
   });
+  // The established proposer normalizes its input by adding empty optional
+  // fields. Compare every World-authored field byte-for-byte, and allow only
+  // known absent-field defaults, never a changed or newly authored action.
+  const optionalNormalizedFields=new Set([
+    "prerequisites","known_costs","blocked_by",
+    "duration_estimate","duration_ms","duration_s",
+    "target","target_position","movement","door_interaction",
+    "object_interaction","attack","defense","projectile","ability",
+    "communication","resource_commitment",
+  ]);
+  const sameTrustedCandidate=(source, proposed)=>{
+    const base=object(source), normalized=object(proposed);
+    if (Object.keys(normalized).some(key=>!Object.hasOwn(base,key)
+      && (!optionalNormalizedFields.has(key)
+        || !(normalized[key]===null
+          || (Array.isArray(normalized[key]) && normalized[key].length===0)))))
+      return false;
+    return Object.entries(base).every(([key,value])=>
+      Object.hasOwn(normalized,key)
+      && hashAgentRunValue(normalized[key])===hashAgentRunValue(value));
+  };
   const proposalIds=new Set();
   for (const candidate of menu) {
     const source=candidates.find(item=>item.action_id===candidate?.action_id);
@@ -223,7 +244,7 @@ export async function runWorldSimulationActorInitiatedSpeech(input = {}, options
       reject("WORLD_ACTOR_SPEECH_ACTION_CATALOG_EXPANDED",
         "Neural action consideration cannot add or duplicate World candidates.");
     proposalIds.add(candidate.action_id);
-    if (hashAgentRunValue(candidate)!==hashAgentRunValue(source))
+    if (!sameTrustedCandidate(source,candidate))
       reject("WORLD_ACTOR_SPEECH_ACTION_CANDIDATE_MUTATED",
         "Action proposer cannot change World-owned action payloads behind a stable action ID.");
   }
@@ -260,7 +281,7 @@ export async function runWorldSimulationActorInitiatedSpeech(input = {}, options
   if (!candidate) reject("WORLD_ACTOR_SPEECH_ACTION_NOT_AVAILABLE",
     "Actor tried to select a speech action outside its World catalog.");
   const trustedCandidate=candidates.find(item=>item.action_id===actionId);
-  if (!trustedCandidate || hashAgentRunValue(trustedCandidate)!==hashAgentRunValue(candidate))
+  if (!trustedCandidate || !sameTrustedCandidate(trustedCandidate,candidate))
     reject("WORLD_ACTOR_SPEECH_ACTION_CANDIDATE_MUTATED",
       "Causal action must retain the exact trusted World candidate.");
   const selected=[{
