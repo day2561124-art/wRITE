@@ -41,7 +41,7 @@
 }
 ```
 
-若 GPT 已確定修復方案，可在 `verification.focused` 或 `verification.affected` 步驟加上 `"on_failure": ["repair", "retest"]`。隨後緊接列出的修復步驟，最後以新的步驟識別碼和相同的測試能力及參數重驗。修復可使用授權範圍內的讀取、寫入、修補與隔離 PowerShell。後續提交等步驟可依賴原始驗證步驟。Pi 會在第一次驗證通過時略過修復。收到可核對的失敗收據時，Pi 記錄失敗並執行修復及重驗。逾時或效果無法確認時，Pi 保留接續點。
+若 GPT 已確定修復方案，可在 `verification.focused`、`verification.affected` 或 `workspace.powershell_isolated` 步驟加上 `"on_failure": ["repair", "retest"]`。隨後緊接列出的修復步驟，最後以新的步驟識別碼和相同的能力及參數重驗。修復可使用授權範圍內的讀取、寫入、修補與隔離 PowerShell。後續提交等步驟可依賴原始步驟。Pi 會在第一次執行通過時略過修復。收到可核對的失敗收據時，Pi 記錄失敗並執行修復及重驗。隔離 PowerShell 的收據必須證明程序已清理，且未直接寫入工作區。逾時或效果無法確認時，Pi 保留接續點。
 
 最新批次的 `recovery`、`pending_steps`、`last_error` 和各步驟收據提供接續依據。遇到需要新決策的結果，可用同一份授權提交後續工作。`node scripts/manage-pi-task-authorization.mjs revoke <task-authorization-id>` 會寫入撤銷記錄。Pi 會在新派送前重新檢查其有效性。已獲准派送的操作和事後唯讀對帳維持原本的生命週期。
 
@@ -54,6 +54,8 @@
 正式 Journal 查核基準為序列 `66036`。序列 `65527` 已有對帳收據。剩餘的一對同次 TRPG 啟動操作是 `dev_operation_7d331e6fcd994db98a23a25f83a16483` 與 `dev_operation_d11a295a8f864caaa4e733ecaf551257`。獨立主機日誌記錄 `SUPERVISOR_START`、`CHILD_START` 和 `READY`。收據保留 PowerShell 結束碼和草稿橋接結果為未知，禁止重播。
 
 候選版已在完整 Journal 複本追加這一對收據，驗證原有事件雜湊、操作狀態與冪等重試。正式 Nexa 的 Journal 讀寫程序都切換到支援該收據的版本後，從正式安裝目錄執行 `node scripts/reconcile-trpg-supervisor-resume.mjs --inspect`。檢查樣本及結果後可用 `--apply` 追加對帳，並覆核 `chain_verified=true`、`health=healthy` 和 `reconciliation_required=false`。
+
+切換前，保存既有排程定義、MCP 與 worker 啟動設定及安裝版本。在維護時段停止新派送，等已在執行的操作結束，再切換 runner 和 Journal 讀寫程序。如果尚未追加新版事件，復原可使用先前的排程、環境與安裝版本。追加新版事件後，復原須使用已驗證能讀取目前 Journal 的版本，並保留所有對帳收據。
 
 ## Git 整合基準
 

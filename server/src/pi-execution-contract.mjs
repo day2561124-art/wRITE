@@ -219,7 +219,7 @@ function validateFailureRecovery(intent) {
   for (const [index, action] of actions.entries()) {
     if (action.on_failure === undefined) continue;
     if (!intent.task_authorization_id || intent.context.workspace_id === "dev_workspace_shared_repository_v1"
-      || !["verification.focused", "verification.affected"].includes(action.capability)
+      || !["verification.focused", "verification.affected", "workspace.powershell_isolated"].includes(action.capability)
       || !Array.isArray(action.on_failure) || action.on_failure.length < 2 || action.on_failure.length > 5) fail("INVALID_FAILURE_RECOVERY");
     const branch = actions.slice(index + 1, index + 1 + action.on_failure.length);
     if (branch.length !== action.on_failure.length || branch.some((step, i) =>

@@ -139,6 +139,34 @@ function scopedAdminChildOutcome(started, terminal) {
     && ["SCOPED_ADMIN_AUTHORIZATION_DENIED", "SCOPED_ADMIN_SERVICE_FAILED"].includes(after.reason)) return "failed_no_effect";
   return null;
 }
+
+function completedAppContainerChild(started, terminal) {
+  const before = started.result;
+  const after = terminal?.result;
+  return started.tool_name === "powershell_run" && started.operation_type === "powershell_maintenance"
+    && terminal?.stage === "operation_completed" && after?.command_sha256 === before?.command_sha256
+    && before?.isolation_mode === "appcontainer" && before.workspace_writes === false
+    && after.isolation_mode === "appcontainer" && after.workspace_writes === false
+    && /^[a-f0-9]{64}$/u.test(before.input_manifest_sha256 ?? "") && after.input_manifest_sha256 === before.input_manifest_sha256
+    && after.job_terminated === true && after.cleanup_pending === false;
+}
+
+function verifiedAppContainerFailureResult(events, started, terminal) {
+  if (started.operation_type !== "mcp_mutation" || started.tool_name !== "powershell_run"
+    || terminal?.stage !== "operation_failed" || terminal.result.outcome !== "failed_no_effect"
+    || terminal.result.reconciliation_required !== false) return null;
+  const children = events.filter(event => event.parent_operation_id === started.operation_id && event.stage === "operation_started");
+  if (children.length !== 1) return null;
+  const [child] = children;
+  const done = events.find(event => event.operation_id === child.operation_id && event.stage === "operation_completed");
+  if (!completedAppContainerChild(child, done) || child.workspace_id !== started.workspace_id
+    || child.workstream_id !== started.workstream_id || done.sequence >= terminal.sequence) return null;
+  const { execution_ok, exit_code, timed_out, reason, isolation_mode, workspace_writes,
+    input_manifest_sha256, job_terminated, cleanup_pending } = done.result;
+  if (execution_ok !== true || timed_out !== false || reason !== null || !Number.isSafeInteger(exit_code) || exit_code === 0) return null;
+  return { execution_ok, exit_code, timed_out, reason, isolation_mode, workspace_writes,
+    input_manifest_sha256, job_terminated, cleanup_pending, shell_terminal_event_id: done.journal_event_id };
+}
 const fixedGitExecutable = process.platform === "win32" ? "git.exe" : "git";
 const explicitWorkspaceMutationOperationTypes = new Set(["git_commit", "integration_apply"]);
 
@@ -2256,8 +2284,9 @@ function verifiedMcpTestResult(events,started,terminal) {
       || ["intended_effect_observed", "failed_intended_effect_observed"].includes(observedTerminal?.result?.outcome));
     const state = ambiguous ? "recovery_required" : observedFailedRefresh ? "failed_observed" : noEffect ? "no_effect" : intended ? "completed"
       : terminal ? "recovery_required" : verification.active_operations.includes(started.operation_id) ? "active" : "dangling";
-    const childTestResult = state === "completed" && !resolution ? verifiedMcpTestResult(verification.events,started,terminal) : null;
-    const originalResult = childTestResult ? {...observedTerminal.result,...childTestResult} : observedTerminal?.result ?? null;
+    const childResult = resolution ? null : state === "completed" ? verifiedMcpTestResult(verification.events, started, terminal)
+      : state === "no_effect" ? verifiedAppContainerFailureResult(verification.events, started, terminal) : null;
+    const originalResult = childResult ? {...observedTerminal.result,...childResult} : observedTerminal?.result ?? null;
     return {
       operation_id: started.operation_id, operation_type: started.operation_type, tool_name: started.tool_name,
       workstream_id: started.workstream_id, workspace_id: started.workspace_id,
@@ -2299,11 +2328,7 @@ function verifiedMcpTestResult(events,started,terminal) {
         const terminal = events.find(event => event.operation_id === child.operation_id && event.stage === "operation_completed");
         if (!terminal || terminal.result.command_sha256 !== child.result?.command_sha256) return false;
         if (child.tool_name === "powershell_admin_run") return scopedAdminChildOutcome(child, terminal) === "failed_no_effect";
-        return child.tool_name === "powershell_run" && child.operation_type === "powershell_maintenance"
-          && child.result?.isolation_mode === "appcontainer" && child.result.workspace_writes === false
-          && terminal.result.isolation_mode === "appcontainer" && terminal.result.workspace_writes === false
-          && terminal.result.input_manifest_sha256 === child.result.input_manifest_sha256
-          && terminal.result.job_terminated === true && terminal.result.cleanup_pending === false;
+        return completedAppContainerChild(child, terminal);
       };
       const dispatchEvidenceChanged = new Error("POWERSHELL_DISPATCH_EVIDENCE_CHANGED");
       const recordFailure = async (noEffect, childWitness = false) => {

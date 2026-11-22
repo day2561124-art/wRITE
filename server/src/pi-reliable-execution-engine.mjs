@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {traceSpan} from "./mcp-request-tracing.mjs";
 import { hostname } from "node:os";
-import { executionPhaseForStep, observedVerificationFailure, reliableTerminal, reliableFailure, stableJson, reduceReliableProjection } from "./pi-reliable-execution-state.mjs";
+import { executionPhaseForStep, observedRecoveryFailure, reliableTerminal, reliableFailure, stableJson, reduceReliableProjection } from "./pi-reliable-execution-state.mjs";
 import { reliableErrorCode } from "./pi-mcp-reliable-adapter.mjs";
 const phases=["EXECUTING","VERIFYING","COMMITTING"];
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -36,9 +36,11 @@ export function createPiReliableExecutionEngine({store,adapter,retryPolicy={max_
       await own({type:"retry_scheduled",call_id:call.call_id,code,not_started_receipt:proof});
       await executionHook?.("retry_scheduled",record);return record;
     }
-    async function scheduleVerificationRecovery(callId, receipt) {
-      await own({ type: "verification_recovery_scheduled", call_id: callId, receipt });
-      await executionHook?.("verification_recovery_scheduled", record);
+    async function scheduleFailureRecovery(callId, receipt) {
+      const action = record.intent.requested_actions.find(value => value.step_id === receipt.step_id);
+      const type = action.capability === "workspace.powershell_isolated" ? "shell_recovery_scheduled" : "verification_recovery_scheduled";
+      await own({ type, call_id: callId, receipt });
+      await executionHook?.(type, record);
     }
     async function reconcile() {
       const call=record.runtime.active_call;
@@ -67,7 +69,7 @@ export function createPiReliableExecutionEngine({store,adapter,retryPolicy={max_
         await own({type:"reconciliation_completed",call_id:call.call_id,receipt:observed.receipt});
         return;
       }
-      if (observed.verdict === "verification_failed") return scheduleVerificationRecovery(call.call_id, observed.receipt);
+      if (observed.verdict === "recoverable_failure") return scheduleFailureRecovery(call.call_id, observed.receipt);
       if(observed.verdict==="not_started")return scheduleRetry("WORKER_INTERRUPTED",observed.receipt);
       if(observed.verdict==="active") {
         if(record.runtime.active_call.reconciliation_attempt>=record.runtime.retry_policy.max_attempts)
@@ -134,7 +136,7 @@ export function createPiReliableExecutionEngine({store,adapter,retryPolicy={max_
       }
       if (response.failed) {
         const action = record.intent.requested_actions.find(value => value.step_id === stepId);
-        if (observedVerificationFailure(action, response.receipt)) await scheduleVerificationRecovery(callId, response.receipt);
+        if (observedRecoveryFailure(action, response.receipt)) await scheduleFailureRecovery(callId, response.receipt);
         else await stop(response.error_code, "DECISION_REQUIRED", response.receipt);
         continue;
       }

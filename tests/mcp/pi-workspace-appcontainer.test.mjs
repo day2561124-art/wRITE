@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { createServer } from "node:net";
 import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -20,7 +21,7 @@ const shellCapability = "workspace.powershell_isolated";
 const goal = "Run ordinary Windows PowerShell while isolating fixture inputs and outputs";
 const psString = value => `'${value.replaceAll("'", "''")}'`;
 
-async function fixture(t) {
+async function fixture(t, { allowRepair = false, loseFirstShellResponse = false } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "nexa-appcontainer-test-"));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const context = { ...identities, root: path.join(root, "workspace"), workspace_type: "isolated_worktree",
@@ -29,7 +30,8 @@ async function fixture(t) {
   await mkdir(context.root);
   await mkdir(taskRoot);
   const store = createPiTaskAuthorizationStore({ root: taskRoot });
-  const grant = await store.issue({ ...identities, goal, capabilities: [shellCapability], expires_at_ms: Date.now() + 120_000 });
+  const grant = await store.issue({ ...identities, goal,
+    capabilities: allowRepair ? [shellCapability, "filesystem.patch"] : [shellCapability], expires_at_ms: Date.now() + 120_000 });
   const journal = createDevOperationJournalService({ storageRoot: path.join(root, "journal") });
   const route = createPiProductionRouteStore({ journal });
   await route.change({ mode: "pi_default", expected_revision: 0, decision_id: "gpt-appcontainer-test", gate_hash: "1".repeat(64) },
@@ -43,6 +45,16 @@ async function fixture(t) {
       queryOperation: journal.getOperation,
       async callTool(params) {
         dispatches += 1;
+        if (allowRepair && params.name === "dev_apply_patch") {
+          const { path: file, expectedSha256, oldText, newText } = params.arguments;
+          assert.equal(file, "code/probe.cs");
+          const target = path.join(context.root, file);
+          const source = await readFile(target, "utf8");
+          assert.equal(createHash("sha256").update(source).digest("hex"), expectedSha256);
+          assert.equal(source, oldText);
+          await writeFile(target, newText);
+          return { ok: true };
+        }
         assert.equal(params.name, "powershell_run");
         assert.equal(params.arguments.sandbox, true);
         const result = await journal.executeReconciled({ reconciliation_key: params._meta.reconciliation_key,
@@ -51,11 +63,15 @@ async function fixture(t) {
           const payload = await tool(params.arguments);
           return { content: [{ type: "text", text: JSON.stringify(payload) }] };
         });
+        if (loseFirstShellResponse && dispatches === 1) {
+          throw Object.assign(new Error("Fixture lost the native build response"), { code: "TRANSPORT_ERROR" });
+        }
         return result.value;
       },
     } });
-  const intent = (intent_id, command, options = {}) => adaptAuthorizedPiRequest({ request_kind: "autonomous_engineering",
-    intent_id, workspace_id: context.workspace_id, goal, task_authorization_id: grant.task_authorization_id, command,
+  const intent = (intent_id, commandOrActions, options = {}) => adaptAuthorizedPiRequest({ request_kind: "autonomous_engineering",
+    intent_id, workspace_id: context.workspace_id, goal, task_authorization_id: grant.task_authorization_id,
+    ...(typeof commandOrActions === "string" ? { command: commandOrActions } : { requested_actions: commandOrActions }),
     ...options }, { resolveWorkspace: async () => context });
   return { root, context, journal, controller, intent, dispatches: () => dispatches };
 }
@@ -176,3 +192,39 @@ test("AppContainer provisions Node and installs a workspace package offline", pl
   await assert.rejects(readFile(path.join(f.context.root, "node_modules", "nexa-local-fixture", "index.js")), { code: "ENOENT" });
   assert.equal((await f.journal.status()).health, "healthy");
 });
+
+for (const loseFirstShellResponse of [false, true]) {
+  test(`Pi repairs a real Windows build in one grant (${loseFirstShellResponse ? "reconciled" : "direct"} receipt)`, platform, async t => {
+    const f = await fixture(t, { allowRepair: true, loseFirstShellResponse });
+    const broken = "class Probe { static int Main() { return MissingValue; } }";
+    const fixed = "class Probe { static int Main() { return 0; } }";
+    await mkdir(path.join(f.context.root, "code"));
+    await writeFile(path.join(f.context.root, "code", "probe.cs"), broken);
+    const input = { cwd: "code", sandbox_paths: ["code/probe.cs"], command: [
+      `$compiler = [IO.Path]::Combine($env:WINDIR, 'Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe')`,
+      "& $compiler /nologo /out:probe.exe probe.cs",
+      "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }",
+      "& ([IO.Path]::GetFullPath('probe.exe'))",
+    ].join("\n") };
+    const plan = await f.intent("native-build-repair", [
+      { step_id: "build", capability: shellCapability, input, on_failure: ["repair", "rebuild"] },
+      { step_id: "repair", capability: "filesystem.patch", depends_on: ["build"],
+        input: { path: "code/probe.cs", oldText: broken, newText: fixed,
+          expectedSha256: createHash("sha256").update(broken).digest("hex") } },
+      { step_id: "rebuild", capability: shellCapability, input, depends_on: ["repair"] },
+    ]);
+    const completed = await f.controller.execute(plan);
+    assert.equal(completed.state.status, "COMPLETED", JSON.stringify(completed.command));
+    assert.deepEqual(completed.state.recovery.recovered_steps, ["build"]);
+    assert.deepEqual(completed.state.completed_steps, ["repair", "rebuild"]);
+    const operations = await f.journal.readExecutionProjections();
+    const failure = operations.find(event => event.execution_projection.command.type === "shell_recovery_scheduled");
+    assert.equal(failure.execution_projection.command.receipt.kind, loseFirstShellResponse ? "reconciled_facts" : "tool_response");
+    const replay = await f.controller.execute(plan);
+    assert.equal(replay.state.operation_id, completed.state.operation_id);
+    assert.equal(f.dispatches(), 3);
+    assert.equal(await readFile(path.join(f.context.root, "code", "probe.cs"), "utf8"), fixed);
+    await assert.rejects(readFile(path.join(f.context.root, "code", "probe.exe")), { code: "ENOENT" });
+    assert.equal((await f.journal.status()).health, "healthy");
+  });
+}

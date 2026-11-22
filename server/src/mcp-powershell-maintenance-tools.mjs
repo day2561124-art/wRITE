@@ -582,7 +582,10 @@ export function createPowerShellMaintenanceTool({
         ...(serviceAuthorization ? { serviceAuthorization, requestId: operation.operation_id.slice("dev_operation_".length) } : {}),
       });
       if (prepared) {
-        try { await prepared.cleanup(); }
+        try {
+          await prepared.cleanup();
+          result = { ...result, cleanup_pending: false };
+        }
         catch { result = { ...result, ok: false, cleanup_pending: true, reason: "SANDBOX_CLEANUP_PENDING" }; }
       }
     } catch (error) {
