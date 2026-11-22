@@ -81,7 +81,23 @@ export async function inspectScopedAdminRecovery(started, { stateRoot = scopedAd
     return null;
   }
   const file = path.join(stateRoot, "results", `${requestId}.result.json`);
-  const info = await lstat(file);
+  // The scheduled task can outlive the crashed MCP process. Give a recent
+  // dispatch time to publish its receipt without requesting another execution.
+  const startedAt = Date.parse(started.timestamp);
+  const timeoutMs = Number.isSafeInteger(scope.timeout_ms)
+    ? Math.min(scope.timeout_ms, POWERSHELL_MAINTENANCE_MAX_TIMEOUT_MS) : 0;
+  const deadline = Math.min(Date.now() + ADMIN_RESULT_STARTUP_GRACE_MS, startedAt + timeoutMs + ADMIN_RESULT_STARTUP_GRACE_MS);
+  let info;
+  for (;;) {
+    try {
+      info = await lstat(file);
+      break;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+      if (!(Date.now() < deadline)) return null;
+      await new Promise(resolve => setTimeout(resolve, ADMIN_RESULT_POLL_MS));
+    }
+  }
   if (!info.isFile() || info.isSymbolicLink() || info.size > 16_384) return null;
   const raw = await readFile(file, "utf8");
   const receipt = JSON.parse(raw);

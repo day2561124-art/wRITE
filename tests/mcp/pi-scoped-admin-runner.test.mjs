@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { readFileSync, readdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -124,7 +125,15 @@ test("scoped scheduled runner reads protected grants and ignores the legacy comm
   `], { timeout: 35_000, encoding: "utf8", windowsHide: true });
   assert.equal(interrupted.status, 73, interrupted.stderr || interrupted.error?.message);
   const cold = createDevOperationJournalService({ storageRoot, scopedAdminEffectInspector: event => inspectScopedAdminRecovery(event, { stateRoot: root }) });
-  const recovered = await cold.initialize();
+  const interruptedOperation = await cold.getOperation({ reconciliation_key: recoveryKey, request_fingerprint_sha256: "2".repeat(64) });
+  const interruptedChild = (await cold.verify()).events.find(event => event.parent_operation_id === interruptedOperation.operation_id);
+  const resultFile = path.join(results, `${interruptedChild.operation_id.slice("dev_operation_".length)}.result.json`);
+  const stagedFile = resultFile + ".pending";
+  await rename(resultFile, stagedFile);
+  const [recovered] = await Promise.all([
+    cold.initialize(),
+    delay(500).then(() => rename(stagedFile, resultFile)),
+  ]);
   assert.equal(recovered.health, "healthy");
   assert.equal(recovered.chain_verified, true);
   const previous = await cold.getOperation({ reconciliation_key: recoveryKey, request_fingerprint_sha256: "2".repeat(64) });
