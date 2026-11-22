@@ -99,7 +99,7 @@ try {
 async function verifyIndependentMutation(parent) {
   const repository = path.join(parent, 'mcp-fixture');
   await mkdir(repository);
-  for (const name of ['server', 'config', 'scripts', 'package.json']) {
+  for (const name of ['server', 'scripts', 'package.json']) {
     await cp(path.join(projectRoot, name), path.join(repository, name), {
       recursive: true, filter: p => !['node_modules', '.tmp'].includes(path.basename(p)),
     });
