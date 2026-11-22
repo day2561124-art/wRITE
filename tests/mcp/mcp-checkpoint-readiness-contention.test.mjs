@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { execFileSync, spawn } from 'node:child_process';
+import { cp, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createDevCheckpointService } from '../../server/src/mcp-development-checkpoint-tools.mjs';
 import { createRuntimeReadiness } from '../../server/src/mcp-runtime-readiness.mjs';
+import { projectRoot } from '../../server/src/project-paths.mjs';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 const root = await mkdtemp(path.join(os.tmpdir(), 'checkpoint-readiness-contention-'));
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -83,6 +86,7 @@ try {
   await assert.rejects(failed.ensure('checkpoint'), {code:'CHECKPOINT_STORE_BUSY'});
   assert.equal(attempts, 1, 'The same component respects its cooldown');
   assert.equal(await readFile(busyLock, 'utf8'), ownerBytes, 'Timeout must preserve the live lock');
+  await verifyIndependentMutation(root);
   console.log(JSON.stringify({result:'PASS', released_live_owner:true, independent_recovery:true, ordinary_budget_preserved:true, bounded_retry:true, persistent_wait_ms:Math.round(elapsed)}));
 } finally {
   if (holder && holder.exitCode === null && holder.signalCode === null) {
@@ -90,4 +94,52 @@ try {
     await new Promise(resolve => holder.once('exit', resolve));
   }
   await rm(root, {recursive:true, force:true});
+}
+
+async function verifyIndependentMutation(parent) {
+  const repository = path.join(parent, 'mcp-fixture');
+  await mkdir(repository);
+  for (const name of ['server', 'config', 'scripts', 'package.json']) {
+    await cp(path.join(projectRoot, name), path.join(repository, name), {
+      recursive: true, filter: p => !['node_modules', '.tmp'].includes(path.basename(p)),
+    });
+  }
+  await symlink(await realpath(path.join(projectRoot, 'node_modules')), path.join(repository, 'node_modules'),
+    process.platform === 'win32' ? 'junction' : 'dir');
+  const git = (...argv) => execFileSync('git', argv, { cwd: repository, stdio: 'ignore', windowsHide: true });
+  git('init', '-qb', 'main');
+  git('add', 'package.json');
+  git('-c', 'user.name=Checkpoint fixture', '-c', 'user.email=checkpoint@example.invalid', 'commit', '-qm', 'Baseline');
+  const storage = path.join(repository, 'data/outputs/logs/development_runtime/checkpoints');
+  const lock = path.join(storage, 'maintenance.lock');
+  const bytes = JSON.stringify({ pid: process.pid, hostname: os.hostname() });
+  await mkdir(storage, { recursive: true });
+  await writeFile(lock, bytes);
+  const client = new Client({ name: 'checkpoint-component-isolation', version: '1' });
+  try {
+    await client.connect(new StdioClientTransport({
+      command: process.execPath, args: [path.join(repository, 'server/src/mcp-server.mjs')], cwd: repository,
+      stderr: 'ignore', env: { ...process.env, MCP_TOOL_PROFILE: 'chatgpt_developer',
+        WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL: '0', WRITER_WORKBENCH_ISOLATED_TEST_CHECKPOINT: '0',
+        WRITER_WORKBENCH_ISOLATED_TEST_TRANSACTION: '0' },
+    }));
+    let checkpointFinished = false;
+    const checkpoint = client.callTool({ name: 'dev_workspace_create_checkpoint',
+      arguments: { workspace_id: 'dev_workspace_' + 'e'.repeat(24) } }, undefined, { timeout: 10_000 })
+      .then(value => { checkpointFinished = true; return value; }, error => { checkpointFinished = true; return error; });
+    await delay(250);
+    const file = 'scripts/independent-checkpoint-proof.mjs';
+    const text = 'export const proof = true;';
+    const written = await client.callTool({ name: 'dev_create_file', arguments: { path: file, content: text } },
+      undefined, { timeout: 5000 });
+    assert.equal(written.isError, undefined);
+    assert.equal(checkpointFinished, false);
+    assert.equal(await readFile(path.join(repository, file), 'utf8'), text);
+    assert.equal(await readFile(lock, 'utf8'), bytes);
+    await rm(lock);
+    const unregistered = await checkpoint;
+    assert(unregistered instanceof Error || unregistered.isError, 'The unregistered fixture workspace must not produce a checkpoint');
+  } finally {
+    await client.close();
+  }
 }

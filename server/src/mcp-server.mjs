@@ -1215,7 +1215,7 @@ async function auditedToolCall(tool, args, actor) {
     });
   } catch (error) {
     if (!handlerInvoked) markPowerShellPreDispatchFailure(error, tool.name);
-    result = {
+    result = isJournalIsolationFailure(error) ? journalIsolationResult(error) : {
       isError: true,
       content: [
         {
@@ -1264,6 +1264,10 @@ async function auditedToolCall(tool, args, actor) {
   ], { audit_id: auditId, tool_name: tool.name });
 
   return result;
+}
+
+function journalIsolationResult(error) {
+  return { ...jsonContent({ ok: false, code: error.code, message: error.message, isolation: error.isolation }), isError: true };
 }
 
 async function directoryCount(dirPath) {
@@ -6008,12 +6012,7 @@ async function callToolDirect(params) {
     : "mcp-client";
 
   if (tool.risk !== "read") {
-    const sources = permissionSources[name] ?? [];
-    const requiredComponents = [
-      ...(sources.includes("development_checkpoint_store") ? ["checkpoint"] : []),
-      ...(sources.includes("development_transaction_store") ? ["transaction"] : []),
-    ];
-    await Promise.all(requiredComponents.map(runtimeComponents.ensure));
+    await Promise.all(requiredRuntimeComponents(name).map(runtimeComponents.ensure));
     const mutationArgs = args;
     // MCP metadata carries transport identity without weakening strict tool argument schemas.
     const key = normalizeMcpReconciliationKey(params._meta?.reconciliation_key);
@@ -6129,8 +6128,7 @@ async function dispatch(message) {
       return makeResult(message.id, await callTool(message.params));
     } catch (error) {
       if (isJournalIsolationFailure(error)) {
-        return makeResult(message.id, { ...jsonContent({ ok: false, code: error.code, message: error.message,
-          isolation: error.isolation }), isError: true });
+        return makeResult(message.id, journalIsolationResult(error));
       }
       return makeError(message.id, -32602, error.message);
     }
@@ -6172,6 +6170,14 @@ const dispatchQueueOverloadMessage = (
 const dispatchLanes = new Map();
 let pendingDispatchMessages = 0;
 
+function requiredRuntimeComponents(tool) {
+  const sources = permissionSources[tool] ?? [];
+  return [
+    ...(sources.includes("development_checkpoint_store") ? ["checkpoint"] : []),
+    ...(sources.includes("development_transaction_store") ? ["transaction"] : []),
+  ];
+}
+
 function dispatchLaneFor(message) {
   if (message?.method !== "tools/call") return "protocol";
   const name = message.params?.name;
@@ -6183,6 +6189,9 @@ function dispatchLaneFor(message) {
   const tool = toolRegistry.get(name);
   if (!tool) return "invalid_tool";
   if (tool.risk === "read" && tool.annotations?.readOnlyHint === true) return `read:${name}`;
+  const component = requiredRuntimeComponents(name).at(-1);
+  if (component) return `component:${component}`;
+  if (name === "dev_run_tests" || name === "dev_workspace_validate_integration") return "component:verification";
   // Shared mutation workflows retain their existing order and effect locks.
   return "mutation";
 }
