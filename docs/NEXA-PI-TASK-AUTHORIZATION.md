@@ -18,7 +18,7 @@
 
 環境內可執行 Windows 系統命令和已帶入的腳本。指定 `toolchain: "node"` 時，Nexa 將伺服器使用的 `node.exe` 和同目錄安裝的 npm 複製成唯讀工具鏈，環境預設使用離線 npm。可將工作區的本地套件及 package manifest 列入 `sandbox_paths`，再執行普通安裝與測試命令。套件的安裝檔與輸出留在該次執行的隔離環境。
 
-Windows 正式環境已觀察到 Node 預設的測試子程序模式在 AppContainer 內逾時。可在同一個 AppContainer 內執行 `node --test --test-isolation=none <測試檔>`。這會讓 Node 在單一程序載入測試。依賴各測試檔分開執行的專案可針對不同檔案分別啟動此命令。
+Windows 正式環境已觀察到 Node 預設的測試子程序模式在 AppContainer 內逾時。支援 `--test-isolation` 的 Node 版本可執行 `node --test --test-isolation=none <測試檔>`。較早的 Node 版本可用 `node <測試檔>` 直接執行使用 `node:test` 的檔案。需要隔離各測試檔的專案可分別啟動各檔案。
 
 ## 預先授權維護 Windows 服務
 

@@ -178,13 +178,16 @@ test("AppContainer installs a workspace package offline and runs a Node test in 
     'const test = require("node:test");',
     'test("offline package loads", () => assert.equal(require("nexa-local-fixture"), "local-package-installed"));',
   ].join("\n"));
+  const runTest = process.allowedNodeEnvironmentFlags.has("--test-isolation")
+    ? "& node.exe --test --test-isolation=none --test-reporter=tap offline.test.cjs"
+    : "& node.exe offline.test.cjs";
   const command = [
     `& node.exe -e "try { require('nexa-local-fixture') } catch { process.exitCode = 7 }"`,
     "if ($LASTEXITCODE -ne 7) { throw 'expected missing dependency' }",
     "Write-Output 'dependency-missing-observed'",
     "& npm.cmd install --offline --install-links --ignore-scripts --no-package-lock",
     "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }",
-    "& node.exe --test --test-isolation=none --test-reporter=tap offline.test.cjs",
+    runTest,
   ].join("\n");
   const intent = await f.intent("native-appcontainer-npm", command, { toolchain: "node", timeoutMs: 30_000,
     sandbox_paths: ["package.json", "fixture/package.json", "fixture/index.js", "offline.test.cjs"] });
