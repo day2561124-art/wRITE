@@ -68,7 +68,11 @@ export function isReviewedInterruptedLauncherReceipt(started,done,input) {
     &&done.result?.execution_ok===true&&done.result?.exit_code===0&&input.observed_exit_code===0;
 }
 export const INTEGRATION_PREFLIGHT_RESOLUTION = "integration_preflight_before_completion";
-const INTEGRATION_PREFLIGHT_SOURCE = "115451a8cfb65c097ff3db87c5618997e13bf3bb11463c447884c97e7e2233be";
+const reviewedIntegrationPreflightSources = new Set([
+  "115451a8cfb65c097ff3db87c5618997e13bf3bb11463c447884c97e7e2233be",
+  // Scoped terminal publication alone changed in this reviewed revision.
+  "aa8ac6a2facf3083bd75463d591c5c51f508d525a9c3548ffb49408d7f4200b4",
+]);
 export const DEV_JOURNAL_SCHEMA_VERSION = 1;
 export const DEV_JOURNAL_HEALTH = Object.freeze(["healthy", "recovering", "degraded", "corrupt"]);
 export const DEV_JOURNAL_STAGES = Object.freeze([
@@ -1022,7 +1026,7 @@ export function createDevOperationJournalService({
       ||w.workstream_id!==r.workstream_id||w.state!=="active"||w.revision!==r.expected_workstream_revision
       ||!Number.isFinite(Date.parse(w.updated_at))||Date.parse(w.updated_at)>=Date.parse(started.timestamp)
       ||!sha256Pattern.test(input.registry_sha256??"")||!sha256Pattern.test(input.integration_registry_sha256??"")
-      ||input.source_contract_sha256!==INTEGRATION_PREFLIGHT_SOURCE
+      ||!reviewedIntegrationPreflightSources.has(input.source_contract_sha256)
       ||started.diagnostic.hostname!==terminal.diagnostic.hostname||started.diagnostic.owner_pid!==terminal.diagnostic.owner_pid
       ||!Number.isFinite(Date.parse(started.timestamp))||!Number.isFinite(Date.parse(terminal.timestamp))
       ||Date.parse(terminal.timestamp)<Date.parse(started.timestamp)||Date.parse(terminal.timestamp)-Date.parse(started.timestamp)>60000

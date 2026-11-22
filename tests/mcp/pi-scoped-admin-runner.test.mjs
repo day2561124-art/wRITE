@@ -222,6 +222,27 @@ test("approved PowerShell executes only the protected script with the exact auth
   });
   assert.equal(journaled.operation.reconciliation_state, "no_effect");
   assert.equal((await journal.status()).health, "healthy");
+
+  const failingScript = scripts[1];
+  const failureKey = { ...key, reconciliation_key: "approved-script-exit-failure", request_fingerprint_sha256: "4".repeat(64) };
+  const failureReceipt = await journal.executeReconciled(failureKey, async () => {
+    const payload = await maintenance({ workspace_id: context.workspace_id,
+      command: `approved_script:${failingScript.script_id}:${failingScript.script_sha256}`,
+      script_authorization: { ...context, goal, task_authorization_id, ...failingScript }, timeoutMs: 60000 });
+    assert.equal(payload.reason, "SCOPED_ADMIN_SCRIPT_FAILED");
+    assert.equal(payload.exit_code, 7);
+    return { isError: true, content: [{ type: "text", text: JSON.stringify(payload) }] };
+  });
+  assert.equal(failureReceipt.operation.automatic_replay_allowed, false);
+  const ordinary = createPowerShellMaintenanceTool({
+    workspaceContextResolver: async () => ({ ...context, root, workspace_type: "isolated_worktree", workstream_state: "active" }),
+    journalApi: { begin: journal.begin, complete: journal.complete, fail: journal.fail, degrade: journal.markDegraded },
+  });
+  const independent = await ordinary({ workspace_id: context.workspace_id, command: "Write-Output 'independent normal PowerShell after admin failure'" });
+  assert.equal(independent.ok, true);
+  assert.match(independent.stdout, /independent normal PowerShell after admin failure/u);
+  assert.equal((await journal.status()).chain_verified, true);
+
   await store.revoke(task_authorization_id);
   assert.equal((await dispatch(scripts[1])).reason, "SCOPED_ADMIN_AUTHORIZATION_DENIED");
 });

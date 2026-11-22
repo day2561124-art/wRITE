@@ -55,12 +55,9 @@ test('actual MCP default ingress completes cold lifecycle and terminal no replay
  await mkdir(path.join(repo,'data','outputs','logs'),{recursive:true});
  const journal=createDevOperationJournalService({storageRoot:journalRoot}),route=createPiProductionRouteStore({journal});
  await route.change({mode:'pi_default',expected_revision:0,decision_id:'gpt-real-wire-fixture',gate_hash:'a'.repeat(64)},{validateGate:async()=>true});
- let injectedIncident;
- if(process.env.PI_POSTSEAL_WIRE_ISOLATION==='1'){
-  injectedIncident=await journal.begin({operation_type:'filesystem_patch',tool_name:'dev_apply_patch',
-   workspace_id:'dev_workspace_'+'f'.repeat(24),targets:[{path:'tests/mcp/pi-wire-lifecycle-probe.test.mjs'}]});
-  await journal.fail(injectedIncident.operation_id,{result:{outcome:'ambiguous_effect',reconciliation_required:true}});
- }
+ const injectedIncident=await journal.begin({operation_type:'filesystem_patch',tool_name:'dev_apply_patch',
+  workspace_id:'dev_workspace_'+'f'.repeat(24),targets:[{path:'tests/mcp/pi-wire-lifecycle-probe.test.mjs'}]});
+ await journal.fail(injectedIncident.operation_id,{result:{outcome:'ambiguous_effect',reconciliation_required:true}});
  const taskRoot=path.join(root,'task-authorizations');await mkdir(taskRoot);
  const taskStore=createPiTaskAuthorizationStore({root:taskRoot});
  const environment={...process.env,MCP_TOOL_PROFILE:'chatgpt_developer',PI_POSTSEAL_WIRE_FIXTURE_ROOT:repo,
@@ -90,10 +87,14 @@ test('actual MCP default ingress completes cold lifecycle and terminal no replay
  const admitted=facts(await first.client.callTool({name:'dev_pi_execute_intent',arguments:{intent_json:JSON.stringify(contract)}},undefined,{timeout:300000}));
  assert.equal(admitted.state.status,'CREATED');
  await first.client.close();
+ const observer=await connect(false);
  const crashedWorker=await startWorker(true);
  const workerExit=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Worker failed to reach checkpoint')),300000);crashedWorker.once('close',code=>{clearTimeout(timer);resolve(code);});crashedWorker.once('error',reject);});
  assert.equal(workerExit,73);
- const exit=JSON.parse(await readFile(path.join(root,'exit-checkpoint.json'),'utf8'));assert.equal(exit.pid,crashedWorker.pid);await first.client.close();
+ const exit=JSON.parse(await readFile(path.join(root,'exit-checkpoint.json'),'utf8'));assert.equal(exit.pid,crashedWorker.pid);
+ const independentRead=facts(await observer.client.callTool({name:'dev_read_file',arguments:{path:'package.json'}}));
+ assert.equal(JSON.parse(independentRead.content).name,JSON.parse(await readFile(path.join(repo,'package.json'),'utf8')).name);
+ await observer.client.close();
  const second=await connect(false);assert.notEqual(second.transport.pid,exit.pid);
  const saved=facts(await second.client.callTool({name:'dev_pi_execution_status',arguments:{intent_id:contract.intent_id,bootstrap:true}})).operation;
  assert.equal(saved.state.operation_id,exit.operation_id);assert.equal(saved.runtime.lifecycle_binding.workspace_id,exit.binding.workspace_id);assert(saved.state.completed_steps.includes('checkpoint'));
@@ -152,15 +153,13 @@ test('actual MCP default ingress completes cold lifecycle and terminal no replay
  const end=intent('wire-terminal-workstream-0001',context,[{step_id:'end',capability:'workspace.end_workstream',input:{workstream_id:context.workstream_id,expected_revision:active.revision,outcome:'completed'},depends_on:[],idempotency_key:'wire-workstream-end-0001'}]);
  assert.equal((await submitAndWait(second.client,end)).state.status,'COMPLETED');
  const beforeCalls=resumed.state.tool_calls.length;const duplicate=(await submitAndWait(second.client,contract));assert.equal(duplicate.state.tool_calls.length,beforeCalls);assert.equal(duplicate.projection_hash,resumed.projection_hash);
- const health=await journal.status();assert.equal(health.health,injectedIncident?'degraded':'healthy');assert.equal(health.active_operation_count,0);assert.equal(health.dangling_operation_count,0);
- if(injectedIncident){
-  assert.equal(health.isolated_operation_count,1);
-  assert.equal(health.isolated_operations[0].operation_id,injectedIncident.operation_id);
-  assert.equal((await journal.getOperation({operation_id:injectedIncident.operation_id})).automatic_replay_allowed,false);
- }
+ const health=await journal.status();assert.equal(health.health,'degraded');assert.equal(health.active_operation_count,0);assert.equal(health.dangling_operation_count,0);
+ assert.equal(health.isolated_operation_count,1);
+ assert.equal(health.isolated_operations[0].operation_id,injectedIncident.operation_id);
+ assert.equal((await journal.getOperation({operation_id:injectedIncident.operation_id})).automatic_replay_allowed,false);
  assert.equal((await git(['rev-parse','HEAD'])).stdout.trim(),base);assert.equal((await git(['status','--porcelain'])).stdout,'');
  const records=(await readdir(path.join(journalRoot,'events'))).sort();const events=await Promise.all(records.map(f=>readFile(path.join(journalRoot,'events',f),'utf8').then(JSON.parse)));
  const calls=events.filter(e=>e.operation_type==='mcp_mutation'&&e.stage==='operation_started'&&e.reconciliation_key?.startsWith('wire-lifecycle-'));
  assert.equal(calls.length,6);const creation=calls.find(e=>e.tool_name==='dev_workspace_create_isolated');assert.equal(creation.workstream_id,context.workstream_id);
- console.log(JSON.stringify({real_MCP:true,SDK_reused:true,cold_pids:[exit.pid,second.transport.pid],workstream_id:context.workstream_id,workspace_id:context.workspace_id,checkpoint_id:checkpoint.checkpoint_id,original_base:base,terminal_duplicate_new_dispatches:0,conditional_repair_verified:recoveredBuild,unrelated_journal_fault_preserved:Boolean(injectedIncident),journal:health,shared_main_unchanged:true}));
+ console.log(JSON.stringify({real_MCP:true,SDK_reused:true,cold_pids:[exit.pid,second.transport.pid],workstream_id:context.workstream_id,workspace_id:context.workspace_id,checkpoint_id:checkpoint.checkpoint_id,original_base:base,terminal_duplicate_new_dispatches:0,conditional_repair_verified:recoveredBuild,unrelated_journal_fault_preserved:true,independent_read_after_worker_exit:true,journal:health,shared_main_unchanged:true}));
 });
