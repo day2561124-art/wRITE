@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { link, lstat, open, readFile, realpath, unlink } from "node:fs/promises";
 import path from "node:path";
-import { capabilityDefinition, PI_TASK_AUTHORIZATION_ID, WINDOWS_SERVICE_NAME } from "./pi-execution-contract.mjs";
+import { capabilityDefinition, PI_TASK_AUTHORIZATION_ID, WINDOWS_APPROVED_SCRIPT_ID, WINDOWS_SERVICE_NAME } from "./pi-execution-contract.mjs";
 
 const project = "writer_workbench";
 const allowed = new Set([
   "filesystem.read", "filesystem.list", "filesystem.write", "filesystem.patch",
   "git.status", "git.commit", "verification.focused", "verification.affected",
-  "workspace.create_checkpoint", "windows.service.ensure_running", "workspace.powershell_isolated",
+  "workspace.create_checkpoint", "windows.service.ensure_running", "windows.powershell.run_approved", "workspace.powershell_isolated",
 ]);
 const maxRecordBytes = 16 * 1024;
 const unconfinedShell = new Set(["host.powershell", "workspace.powershell"]);
@@ -18,11 +18,18 @@ function denied() {
 
 function validGrant(grant) {
   const services = grant?.windows_services ?? [];
+  const scripts = grant?.windows_scripts ?? [];
   if (!Array.isArray(services) || services.length > 16 || services.some(name => typeof name !== "string"
     || !WINDOWS_SERVICE_NAME.test(name) || name !== name.toLowerCase()) || new Set(services).size !== services.length) return false;
   const allowsServiceStart = Array.isArray(grant?.capabilities) && grant.capabilities.includes("windows.service.ensure_running");
+  const allowsScript = Array.isArray(grant?.capabilities) && grant.capabilities.includes("windows.powershell.run_approved");
+  if (!Array.isArray(scripts) || scripts.length > 8 || scripts.some(script => !script
+    || Object.keys(script).sort().join(",") !== "script_id,script_sha256"
+    || typeof script.script_id !== "string" || !WINDOWS_APPROVED_SCRIPT_ID.test(script.script_id)
+    || typeof script.script_sha256 !== "string" || !/^[a-f0-9]{64}$/u.test(script.script_sha256))
+    || new Set(scripts.map(script => script.script_id)).size !== scripts.length || allowsScript !== (scripts.length > 0)) return false;
   return grant?.schema_version === 1 && grant.project_id === project && allowsServiceStart === (services.length > 0)
-    && grant.permission_level === (allowsServiceStart ? "workspace_with_admin_service" : "workspace_standard")
+    && grant.permission_level === (allowsScript ? "workspace_with_admin_script" : allowsServiceStart ? "workspace_with_admin_service" : "workspace_standard")
     && typeof grant.task_authorization_id === "string" && PI_TASK_AUTHORIZATION_ID.test(grant.task_authorization_id)
     && typeof grant.goal === "string" && grant.goal.trim() && grant.goal.length <= 4096
     && typeof grant.workspace_id === "string" && /^dev_workspace_[a-f0-9]{24}$/u.test(grant.workspace_id)
@@ -73,12 +80,14 @@ export function createPiTaskAuthorizationStore({ root, clock = Date.now } = {}) 
     }
   }
 
-  async function issue({ goal, workspace_id, workstream_id, capabilities, expires_at_ms, windows_services = [] }) {
+  async function issue({ goal, workspace_id, workstream_id, capabilities, expires_at_ms, windows_services = [], windows_scripts = [] }) {
     if (!Array.isArray(windows_services) || windows_services.some(name => typeof name !== "string" || !WINDOWS_SERVICE_NAME.test(name))) denied();
+    if (!Array.isArray(windows_scripts)) denied();
     const services = windows_services.map(name => name.toLowerCase());
     const grant = { schema_version: 1, project_id: project,
-      permission_level: services.length ? "workspace_with_admin_service" : "workspace_standard",
+      permission_level: windows_scripts.length ? "workspace_with_admin_script" : services.length ? "workspace_with_admin_service" : "workspace_standard",
       ...(services.length ? { windows_services: services } : {}),
+      ...(windows_scripts.length ? { windows_scripts } : {}),
       task_authorization_id: `pi_task_${randomUUID().replaceAll("-", "")}`,
       goal, workspace_id, workstream_id, capabilities, issued_at_ms: clock(), expires_at_ms };
     if (!validGrant(grant)) denied();
@@ -114,7 +123,9 @@ export function createPiTaskAuthorizationStore({ root, clock = Date.now } = {}) 
         || now < grant.issued_at_ms || now >= grant.expires_at_ms
         || actions.some(action => !grant.capabilities.includes(action.capability)
           || (action.capability === "windows.service.ensure_running"
-            && !grant.windows_services.includes(action.input.service_name.toLowerCase())))) denied();
+            && !grant.windows_services.includes(action.input.service_name.toLowerCase()))
+          || (action.capability === "windows.powershell.run_approved" && !grant.windows_scripts.some(script =>
+            script.script_id === action.input.script_id && script.script_sha256 === action.input.script_sha256)))) denied();
       // Existence is enough, including after a malformed or interrupted revocation.
       try {
         await lstat(filename(dir, id, "revocation"));

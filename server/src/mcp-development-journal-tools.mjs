@@ -132,11 +132,12 @@ function scopedAdminChildOutcome(started, terminal) {
     || after.command_sha256 !== before.command_sha256 || after.scoped_admin_scope_binding !== before.scoped_admin_scope_binding
     || after.scoped_request_id !== started.operation_id.slice("dev_operation_".length)
     || after.task_authorization_id !== before.task_authorization_id || after.service_name !== before.service_name
+    || after.script_id !== before.script_id || after.script_sha256 !== before.script_sha256
     || typeof after.scoped_admin_dispatch_started !== "boolean"
     || (terminal.stage === "operation_recovered" && !/^[a-f0-9]{64}$/u.test(after.scoped_admin_receipt_sha256 ?? ""))) return null;
   if (after.execution_ok === true && after.exit_code === 0) return "intended_effect_observed";
   if (after.scoped_admin_dispatch_started === false && after.execution_ok === false
-    && ["SCOPED_ADMIN_AUTHORIZATION_DENIED", "SCOPED_ADMIN_SERVICE_FAILED"].includes(after.reason)) return "failed_no_effect";
+    && ["SCOPED_ADMIN_AUTHORIZATION_DENIED", "SCOPED_ADMIN_SERVICE_FAILED", "SCOPED_ADMIN_SCRIPT_FAILED"].includes(after.reason)) return "failed_no_effect";
   return null;
 }
 

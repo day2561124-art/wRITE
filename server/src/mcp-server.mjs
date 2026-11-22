@@ -1809,7 +1809,7 @@ const devWorkspaceExecutionProperties = Object.freeze({
   }),
 });
 
-import {CAPABILITY_DEFINITIONS, verifyPiWorkspaceShellScope} from "./pi-execution-contract.mjs";
+import {CAPABILITY_DEFINITIONS, verifyPiWorkspaceShellScope, WINDOWS_APPROVED_SCRIPT_ID} from "./pi-execution-contract.mjs";
 import {beginPiWorkstreamBootstrap} from "./mcp-development-workstream-tools.mjs";
 import {isPiManagedMcpCall,assertPiManagedMcpCall} from "./pi-production-execution-controller.mjs";
 import {getMcpOperationReconciliationContext as getPiBootstrapReconciliation} from "./mcp-operation-reconciliation-context.mjs";
@@ -2080,6 +2080,12 @@ const toolDefinitions = [
           workstream_id: { type: "string", pattern: DEV_WORKSTREAM_ID_PATTERN_SOURCE },
           goal: { type: "string", maxLength: 4096 }, service_name: { type: "string", maxLength: 80 } },
         required: ["task_authorization_id", "workstream_id", "goal", "service_name"] },
+      script_authorization: { type: "object", additionalProperties: false,
+        properties: { task_authorization_id: { type: "string", pattern: "^pi_task_[a-f0-9]{32}$" },
+          workstream_id: { type: "string", pattern: DEV_WORKSTREAM_ID_PATTERN_SOURCE },
+          goal: { type: "string", maxLength: 4096 }, script_id: { type: "string", pattern: WINDOWS_APPROVED_SCRIPT_ID.source },
+          script_sha256: { type: "string", pattern: "^[a-f0-9]{64}$" } },
+        required: ["task_authorization_id", "workstream_id", "goal", "script_id", "script_sha256"] },
       timeoutMs: {
         type: "integer",
         minimum: 1_000,
@@ -2088,7 +2094,8 @@ const toolDefinitions = [
       },
     }, ["command"]),
     handler: async (args) => {
-      if (args.service_authorization !== undefined ? !isPiManagedMcpCall() : process.env.NEXA_PI_REQUIRE_TASK_AUTHORIZATION === "1") {
+      const scoped = args.service_authorization !== undefined || args.script_authorization !== undefined;
+      if (scoped ? !isPiManagedMcpCall() : process.env.NEXA_PI_REQUIRE_TASK_AUTHORIZATION === "1") {
         throw markPowerShellPreDispatchFailure(new Error("SCOPED_ADMIN_AUTHORIZATION_REQUIRED"), "powershell_admin_run");
       }
       return jsonContent(await powershell_admin_run(args));

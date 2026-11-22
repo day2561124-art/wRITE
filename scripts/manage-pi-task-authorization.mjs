@@ -12,14 +12,14 @@ try {
   if (command === "revoke") {
     console.log(JSON.stringify(await store.revoke(value)));
   } else {
-    const { goal, workspace_id, capabilities, expires_at_ms, windows_services } = JSON.parse(await readFile(value, "utf8"));
+    const { goal, workspace_id, capabilities, expires_at_ms, windows_services, windows_scripts } = JSON.parse(await readFile(value, "utf8"));
     const context = await resolveDevWorkspaceExecutionContext({ workspace_id }, { mutation: true });
     if (context.workspace_type !== "isolated_worktree" || !context.healthy || !context.mutation_allowed
       || context.lifecycle_state !== "active" || context.workstream_state !== "active") {
       throw new Error("An active, healthy isolated workspace is required.");
     }
     const grant = await store.issue({ goal, workspace_id: context.workspace_id,
-      workstream_id: context.workstream_id, capabilities, expires_at_ms, windows_services });
+      workstream_id: context.workstream_id, capabilities, expires_at_ms, windows_services, windows_scripts });
     console.log(JSON.stringify(grant));
   }
 } catch (error) {

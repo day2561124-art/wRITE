@@ -10,6 +10,7 @@ export const REQUIRED_DECISION_BOUNDARIES = Object.freeze([
 export const PERMISSIONS = Object.freeze(["read", "workspace_create", "write", "tests", "commit", "integrate", "push"]);
 export const PI_TASK_AUTHORIZATION_ID = /^pi_task_[a-f0-9]{32}$/u;
 export const WINDOWS_SERVICE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,79}$/u;
+export const WINDOWS_APPROVED_SCRIPT_ID = /^(?!(?:aux|con|nul|prn|com[0-9]|lpt[0-9])$)[a-z0-9][a-z0-9_-]{0,63}$/u;
 const suites = ["mcp", "mcp_core", "mcp_pi_postseal", "mcp_infrastructure", "mcp_reliability", "mcp_tunnel",
   "communication", "world_simulation", "cognition", "memory_retrieval"];
 function descriptor(capability, tool, permission, effect, required, optional = [], scope = "workspace", inputProperties) {
@@ -53,6 +54,9 @@ export const CAPABILITY_DEFINITIONS = Object.freeze([
     ["cwd", "timeoutMs", "sandbox_paths", "sandbox_directories", "output_paths", "toolchain"]),
   descriptor("windows.service.ensure_running", "powershell_admin_run", "write", true, ["service_name"], [], "workspace",
     Object.freeze({ service_name: Object.freeze({ type: "string", pattern: WINDOWS_SERVICE_NAME.source, maxLength: 80 }) })),
+  descriptor("windows.powershell.run_approved", "powershell_admin_run", "write", true, ["script_id", "script_sha256"], [], "workspace",
+    Object.freeze({ script_id: Object.freeze({ type: "string", pattern: WINDOWS_APPROVED_SCRIPT_ID.source, maxLength: 64 }),
+      script_sha256: Object.freeze({ type: "string", pattern: "^[a-f0-9]{64}$" }) })),
   descriptor("git.commit", "dev_git_commit", "commit", true, ["message", "paths", "expectedHead"]),
   descriptor("git.integrate", "dev_workspace_integrate", "integrate", true,
     ["integration_candidate_id", "expected_revision"], [], "candidate"),
@@ -171,6 +175,8 @@ function validateInput(action, context, bootstrap = false) {
     }
   }
   if ("service_name" in input && (typeof input.service_name !== "string" || !WINDOWS_SERVICE_NAME.test(input.service_name))) fail("INVALID_WINDOWS_SERVICE_NAME");
+  if ("script_id" in input && (typeof input.script_id !== "string" || !WINDOWS_APPROVED_SCRIPT_ID.test(input.script_id)
+    || typeof input.script_sha256 !== "string" || !sha256Pattern.test(input.script_sha256))) fail("INVALID_WINDOWS_APPROVED_SCRIPT");
   if ("path" in input) relativePath(input.path);
   if ("maxBytes" in input) integer(input.maxBytes, 1, 8192);
   if ("maxEntries" in input) integer(input.maxEntries, 1, 50);
@@ -285,6 +291,8 @@ export function createExecutionIntent(input) {
         || intent.context.workspace_id === "dev_workspace_shared_repository_v1")) fail("ISOLATED_TASK_AUTHORIZATION_REQUIRED");
       if (action.capability === "windows.service.ensure_running" && (intent.task_authorization_id === undefined
         || plan?.target !== `windows_service:${action.input.service_name.toLowerCase()}`)) fail("WINDOWS_SERVICE_AUTHORIZATION_REQUIRED");
+      if (action.capability === "windows.powershell.run_approved" && (intent.task_authorization_id === undefined
+        || plan?.target !== `windows_script:${action.input.script_id}`)) fail("WINDOWS_SCRIPT_AUTHORIZATION_REQUIRED");
       if (action.capability === "workspace.create_checkpoint"
         && !bootstrap && intent.context.workspace_id === "dev_workspace_shared_repository_v1") fail("ISOLATED_WORKSPACE_REQUIRED");
       if (typeof action.idempotency_key !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(action.idempotency_key)

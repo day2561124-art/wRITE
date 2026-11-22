@@ -44,6 +44,16 @@ export function createMcpCapabilityAdapter({ callTool, resolveWorkspace } = {}) 
         goal: intent.goal,
         service_name: action.input.service_name,
       },
+    } : action.capability === "windows.powershell.run_approved" ? {
+      command: `approved_script:${action.input.script_id}:${action.input.script_sha256}`,
+      cwd: ".",
+      timeoutMs: 60000,
+      script_authorization: {
+        task_authorization_id: intent.task_authorization_id,
+        workstream_id: context.workstream_id,
+        goal: intent.goal,
+        ...action.input,
+      },
     } : { ...action.input };
     if(intent.bootstrap && action.capability==="workspace.create_isolated") {
       if(!binding || binding.workspace_id!=="dev_workspace_shared_repository_v1") failure("BOOTSTRAP_BINDING_REQUIRED");

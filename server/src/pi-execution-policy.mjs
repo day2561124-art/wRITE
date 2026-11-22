@@ -13,12 +13,22 @@ const ordinaryCapabilities = new Set([
   "filesystem.read", "filesystem.list", "filesystem.write", "filesystem.patch",
   "git.status", "git.commit", "verification.focused", "verification.affected",
   "host.powershell", "workspace.powershell_isolated", "workspace.create_checkpoint", "windows.service.ensure_running",
+  "windows.powershell.run_approved",
 ]);
 function fail(code) { throw Object.assign(new Error(code), { code }); }
 function exact(value, required, optional = []) {
   if (!value || typeof value !== "object" || Array.isArray(value)
     || required.some(key => !Object.hasOwn(value, key))
     || Object.keys(value).some(key => ![...required, ...optional].includes(key))) fail("INVALID_AUTHORIZED_REQUEST");
+}
+function mutationTarget(action, workspaceId) {
+  if (action.capability.startsWith("filesystem.")) return action.input.path;
+  if (action.capability === "host.powershell") return "dev_workspace_shared_repository_v1";
+  if (action.capability === "windows.service.ensure_running" && typeof action.input.service_name === "string") {
+    return `windows_service:${action.input.service_name.toLowerCase()}`;
+  }
+  if (action.capability === "windows.powershell.run_approved") return `windows_script:${action.input.script_id}`;
+  return workspaceId;
 }
 
 // A finite host-owned route list, never an annotation or caller assertion of safety.
@@ -123,10 +133,7 @@ export async function adaptAuthorizedPiRequest(source, { resolveWorkspace } = {}
     constraints: source.constraints, requested_actions: actions, permissions,
     mutation_plan: actions.filter(action => capabilityDefinition(action.capability).effect).map(action => ({
       step_id: action.step_id,
-      target: action.capability.startsWith("filesystem.") ? action.input.path
-        : action.capability === "host.powershell" ? "dev_workspace_shared_repository_v1"
-        : action.capability === "windows.service.ensure_running" && typeof action.input.service_name === "string"
-          ? `windows_service:${action.input.service_name.toLowerCase()}` : context.workspace_id,
+      target: mutationTarget(action, context.workspace_id),
       expected_change: "Execute the exact GPT-authorized " + action.capability + " input",
       input_sha256: hashExecutionInput(action.input),
     })),

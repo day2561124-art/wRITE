@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { readFileSync, readdirSync } from "node:fs";
@@ -152,4 +152,76 @@ test("the Windows PowerShell parser accepts the scoped registration and runner f
   windowsPowerShell(["-Command", `foreach ($path in @(${entries})) { $tokens = $null; $errors = $null;
     $null = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors);
     if ($errors.Count -gt 0) { $errors | ForEach-Object { [Console]::Error.WriteLine($_.Message) }; exit 1 } }`]);
+});
+
+test("approved PowerShell executes only the protected script with the exact authorized digest", desktop, async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "nexa-approved-script-test-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await Promise.all(["requests", "results", "grants", "processing", "approved-scripts"].map(directory => mkdir(path.join(root, directory))));
+  const configPath = path.join(root, "config.json");
+  const userSid = windowsPowerShell(["-Command", "[Security.Principal.WindowsIdentity]::GetCurrent().User.Value"]);
+  await writeFile(configPath, JSON.stringify({ schema_version: 2, expected_user_sid: userSid, approved_scripts: true }));
+  const fixture = "param()\n[IO.File]::WriteAllText([IO.Path]::GetFullPath('script-created.txt'), 'reviewed')\nWrite-Output 'private-fixture-output'\nexit 0";
+  const failure = "exit 7";
+  const sha = code => createHash("sha256").update(code).digest("hex");
+  const scripts = [{ script_id: "reviewed-fixture", script_sha256: sha(fixture) }, { script_id: "native-exit", script_sha256: sha(failure) }];
+  await writeFile(path.join(root, "approved-scripts", "reviewed-fixture.ps1"), fixture);
+  await writeFile(path.join(root, "approved-scripts", "native-exit.ps1"), failure);
+  const store = createPiTaskAuthorizationStore({ root: path.join(root, "grants") });
+  const { task_authorization_id } = await store.issue({ ...context, goal, expires_at_ms: Date.now() + 300_000,
+    capabilities: ["windows.powershell.run_approved"], windows_scripts: scripts });
+  const output = path.join(root, "script-created.txt");
+  const dispatch = (script, requestId) => runPowerShellViaAdminTask({
+    command: `approved_script:${script.script_id}:${script.script_sha256}`, cwd: root, timeoutMs: 60000, stateRoot: root,
+    requestId,
+    scriptAuthorization: { ...context, goal, task_authorization_id, ...script },
+    spawnSyncImpl: (_executable, argv) => {
+      if (argv[0] === "/Query") return { status: 0 };
+      const [marker] = readdirSync(path.join(root, "requests"));
+      assert.match(marker, /~script\.scoped-request$/u);
+      assert.equal(readFileSync(path.join(root, "requests", marker)).length, 0);
+      windowsPowerShell(["-File", runner, "-ConfigPath", configPath]);
+      return { status: 0 };
+    },
+  });
+  const completed = await dispatch(scripts[0]);
+  assert.equal(completed.ok, true, JSON.stringify(completed));
+  assert.equal(completed.scoped_admin_dispatch_started, true);
+  assert.equal(completed.script_sha256, scripts[0].script_sha256);
+  assert.equal(completed.stdout, "approved_script_completed");
+  assert.match(completed.script_stdout_sample_sha256, /^[a-f0-9]{64}$/u);
+  const stored = await readFile(path.join(root, "results", `${completed.request_id}.result.json`), "utf8");
+  assert.doesNotMatch(stored, /private-fixture-output/u);
+  assert.equal(await readFile(output, "utf8"), "reviewed");
+
+  const failed = await dispatch(scripts[1]);
+  assert.equal(failed.scoped_admin_dispatch_started, true);
+  assert.equal(failed.ok, false);
+  assert.equal(failed.exit_code, 7);
+  assert.equal(failed.reason, "SCOPED_ADMIN_SCRIPT_FAILED");
+
+  await writeFile(path.join(root, "approved-scripts", "reviewed-fixture.ps1"), fixture.replace("reviewed", "replaced"));
+  const edited = await dispatch(scripts[0]);
+  assert.equal(edited.reason, "SCOPED_ADMIN_AUTHORIZATION_DENIED");
+  assert.equal(edited.scoped_admin_dispatch_started, false);
+  assert.equal(await readFile(output, "utf8"), "reviewed");
+
+  const journal = createDevOperationJournalService({ storageRoot: path.join(root, "journal") });
+  const maintenance = createPowerShellMaintenanceTool({ elevated: true,
+    workspaceContextResolver: async () => ({ ...context, root, workspace_type: "isolated_worktree", workstream_state: "active" }),
+    executor: args => dispatch(args.scriptAuthorization, args.requestId),
+    journalApi: { begin: journal.begin, complete: journal.complete, fail: journal.fail, degrade: journal.markDegraded },
+  });
+  const script = scripts[0];
+  const key = { tool_name: "powershell_admin_run", reconciliation_key: "changed-script-no-dispatch",
+    request_fingerprint_sha256: "3".repeat(64), resolve_workspace_scope: async () => context };
+  const journaled = await journal.executeReconciled(key, async () => {
+    const payload = await maintenance({ workspace_id: context.workspace_id, command: `approved_script:${script.script_id}:${script.script_sha256}`,
+      script_authorization: { ...context, goal, task_authorization_id, ...script }, timeoutMs: 60000 });
+    return { content: [{ type: "text", text: JSON.stringify(payload) }] };
+  });
+  assert.equal(journaled.operation.reconciliation_state, "no_effect");
+  assert.equal((await journal.status()).health, "healthy");
+  await store.revoke(task_authorization_id);
+  assert.equal((await dispatch(scripts[1])).reason, "SCOPED_ADMIN_AUTHORIZATION_DENIED");
 });

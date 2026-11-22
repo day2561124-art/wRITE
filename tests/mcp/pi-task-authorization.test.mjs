@@ -35,12 +35,14 @@ async function fixture(t) {
     { validateGate: async () => true });
   const calls = [];
   const adminCalls = [];
+  const scriptCalls = [];
   let adminError;
   const admin = createPowerShellMaintenanceTool({ elevated: true, platform: "win32",
     workspaceContextResolver: async () => ({ ...workspace, root }),
     journalApi: { begin: journal.begin, complete: journal.complete, fail: journal.fail, degrade: journal.markDegraded },
-    executor: async ({ command, cwd, timeoutMs }) => {
+    executor: async ({ command, cwd, timeoutMs, scriptAuthorization }) => {
       adminCalls.push(command);
+      if (scriptAuthorization) scriptCalls.push(scriptAuthorization);
       return { elevated: true, execution_ok: true, ok: true, command_sha256: "a".repeat(64), cwd,
         timeout_ms: timeoutMs, exit_code: 0, timed_out: false, duration_ms: 1,
         stdout: "service_running", stderr: "", stdout_truncated: false, stderr_truncated: false, reason: null };
@@ -89,7 +91,7 @@ async function fixture(t) {
     request_kind: "autonomous_engineering", intent_id, goal, workspace_id: context.workspace_id,
     task_authorization_id: grant.task_authorization_id, requested_actions, ...overrides,
   }, { resolveWorkspace: async () => workspace });
-  return { store, grant, journal, calls, adminCalls, adminError: () => adminError, controller, intent, setTime: value => { now = value; },
+  return { store, grant, journal, calls, adminCalls, scriptCalls, adminError: () => adminError, controller, intent, setTime: value => { now = value; },
     setWorkstreamState: value => { workstreamState = value; } };
 }
 
@@ -271,13 +273,15 @@ test("one elevated grant covers two exact services and reuses the protected Powe
     { code: "PERMISSION_DENIED" });
 });
 
-test("Pi reuses exact sandbox and scoped service receipts after their transport responses are lost", async t => {
+test("Pi reuses exact sandbox and scoped administrator receipts after their transport responses are lost", async t => {
   const f = await fixture(t);
-  const capabilities = ["workspace.powershell_isolated", "windows.service.ensure_running"];
-  const grant = await f.store.issue({ ...context, goal, capabilities, windows_services: ["NexaDev"], expires_at_ms: 200 });
+  const capabilities = ["workspace.powershell_isolated", "windows.service.ensure_running", "windows.powershell.run_approved"];
+  const script = { script_id: "reviewed-transport-fixture", script_sha256: "c".repeat(64) };
+  const grant = await f.store.issue({ ...context, goal, capabilities, windows_services: ["NexaDev"], windows_scripts: [script], expires_at_ms: 200 });
   const work = await f.intent("reconcile-command-receipts", [
     { step_id: "shell", capability: capabilities[0], input: { command: "Write-Output 'fixture'" } },
     { step_id: "service", capability: capabilities[1], input: { service_name: "NexaDev" }, depends_on: ["shell"] },
+    { step_id: "script", capability: capabilities[2], input: script, depends_on: ["service"] },
   ], { task_authorization_id: grant.task_authorization_id });
   const calls = [];
   const controller = () => createPiProductionExecutionController({ journal: f.journal,
@@ -299,12 +303,43 @@ test("Pi reuses exact sandbox and scoped service receipts after their transport 
   });
   const completed = await controller().execute(work);
   assert.equal(completed.state.status, "COMPLETED");
-  assert.deepEqual(completed.state.completed_steps, ["shell", "service"]);
+  assert.deepEqual(completed.state.completed_steps, ["shell", "service", "script"]);
   assert.equal(calls[0].sandbox, true);
   assert.equal(calls[1].service_authorization.task_authorization_id, grant.task_authorization_id);
+  assert.equal(calls[2].script_authorization.script_sha256, script.script_sha256);
   assert.equal((await controller().execute(work)).state.operation_id, completed.state.operation_id);
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
   assert.equal((await f.journal.status()).health, "healthy");
+});
+
+test("Pi validates the protected script's identifier, digest and workstream before dispatch", async t => {
+  const f = await fixture(t);
+  const capability = "windows.powershell.run_approved";
+  const script = { script_id: "repair-development-fixture", script_sha256: "c".repeat(64) };
+  const issue = { ...context, goal, capabilities: [capability], expires_at_ms: 200 };
+  await assert.rejects(f.store.issue(issue), { code: "PERMISSION_DENIED" });
+  await assert.rejects(f.store.issue({ ...issue, windows_scripts: [{ ...script, script_id: "nul" }] }), { code: "PERMISSION_DENIED" });
+  const grant = await f.store.issue({ ...issue, windows_scripts: [script] });
+  const override = { task_authorization_id: grant.task_authorization_id };
+  const step = { step_id: "script", capability, input: script };
+  const changed = await f.intent("script-wrong-digest", [{ ...step, input: { ...script, script_sha256: "d".repeat(64) } }], override);
+  await assert.rejects(f.controller().submit(changed), { code: "PERMISSION_DENIED" });
+  const unbound = await f.intent("script-wrong-grant", [step]);
+  await assert.rejects(f.controller().submit(unbound), { code: "PERMISSION_DENIED" });
+  assert.deepEqual(f.calls, []);
+
+  const request = await f.intent("script-approved", [step], override);
+  const completed = await f.controller().execute(request);
+  assert.equal(completed.state.status, "COMPLETED");
+  assert.deepEqual(f.scriptCalls, [{ workspace_id: context.workspace_id, workstream_id: context.workstream_id, goal,
+    task_authorization_id: grant.task_authorization_id, ...script }]);
+  assert.deepEqual(f.adminCalls, [`approved_script:${script.script_id}:${script.script_sha256}`]);
+  const child = (await f.journal.verify()).events.find(event => event.operation_type === "powershell_admin_maintenance"
+    && event.stage === "operation_started");
+  assert.equal(child.result.script_sha256, script.script_sha256);
+  await f.store.revoke(grant.task_authorization_id);
+  await assert.rejects(f.controller().submit(await f.intent("script-revoked", [step], override)), { code: "PERMISSION_DENIED" });
+  assert.equal(f.scriptCalls.length, 1);
 });
 
 test("verified Journal health reports the unresolved terminal identity", async t => {

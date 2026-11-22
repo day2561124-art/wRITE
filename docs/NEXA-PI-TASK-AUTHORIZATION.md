@@ -20,7 +20,9 @@
 
 ## 預先授權維護 Windows 服務
 
-維護已安裝的專案服務時，授權操作員在 `task.json` 的 `capabilities` 加入 `windows.service.ensure_running`，並在 `windows_services` 列出核准的服務名稱。GPT 交付的步驟以 `service_name` 指定其中一個目標。Pi 透過現有 `powershell_admin_run` 提交範圍標記。受保護的 Task Scheduler runner 從授權庫獨立核對目標、工作區、工作流、期限及撤銷狀態，再確認服務、啟動已停止的服務並等待 `Running`。同一份授權可維護多個核准目標。收件匣只接收範圍標記，通用管理員診斷由操作員在獨立的提權終端處理。
+維護已安裝的專案服務時，授權操作員在 `task.json` 的 `capabilities` 加入 `windows.service.ensure_running`，並在 `windows_services` 列出核准的服務名稱。GPT 交付的步驟以 `service_name` 指定其中一個目標。Pi 透過現有 `powershell_admin_run` 提交範圍標記。受保護的 Task Scheduler runner 從授權庫獨立核對目標、工作區、工作流、期限及撤銷狀態，再確認服務、啟動已停止的服務並等待 `Running`。同一份授權可維護多個核准目標。
+
+其他管理員維護可使用 `windows.powershell.run_approved`。操作員在提升權限的終端把已審核的 UTF-8 腳本放入註冊根目錄的 `approved-scripts/<script_id>.ps1`，並以 `Get-FileHash -Algorithm SHA256` 取得摘要。在 `task.json` 的 `windows_scripts` 列出 `script_id` 與小寫 `script_sha256`，再用相同欄位交付 Pi 步驟。runner 核對保護目錄、授權範圍和完整腳本位元組，最多執行 45 秒。固定工作目錄與系統 PowerShell 由 runner 選擇。授權和收據包含腳本摘要、派送狀態、結束碼及輸出樣本雜湊。收件匣只接收範圍標記。
 
 提升權限的 runner 將收據寫入受保護目錄，收據識別碼與 Journal 子操作一致。若 MCP 程序中斷，Nexa 會查找同一筆收據，並短暫等候仍可能在執行的 runner。可確認的成功或未派送失敗會結束原操作。收據缺失、範圍不符或服務派送後失敗時，Nexa 保留待對帳狀態，避免重新派送。
 

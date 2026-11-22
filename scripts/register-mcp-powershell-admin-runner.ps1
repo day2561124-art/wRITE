@@ -90,7 +90,7 @@ if ($ScopedTaskAuthorizations) {
     }
 
     Initialize-ScopedDirectory $protectedRoot
-    foreach ($folder in @('results', 'grants')) {
+    foreach ($folder in @('results', 'grants', 'approved-scripts')) {
         Initialize-ScopedDirectory ([IO.Path]::Combine($protectedRoot, $folder))
     }
     Initialize-ScopedDirectory ([IO.Path]::Combine($protectedRoot, 'processing')) -Private
@@ -101,7 +101,7 @@ if ($ScopedTaskAuthorizations) {
             throw 'The scoped runner installation target is invalid.'
         }
     }
-    $config = [ordered]@{ schema_version = 2; expected_user_sid = $identity.User.Value }
+    $config = [ordered]@{ schema_version = 2; expected_user_sid = $identity.User.Value; approved_scripts = $true }
     $requestRoot = $protectedRoot
 }
 else {
