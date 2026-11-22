@@ -49,7 +49,9 @@ function workerProgress(record) {
 function workerDeferrals(events) {
  const deferrals=new Map();
  for(const event of events){
-  if(event.operation_type!==workerFaultType||event.tool_name!=="pi.worker.defer"||event.stage!=="operation_completed")continue;
+  // Admission durably records the deferral. A late terminal publication
+  // cannot replace a newer attempt's scheduling decision.
+  if(event.operation_type!==workerFaultType||event.tool_name!=="pi.worker.defer"||event.stage!=="operation_started")continue;
   const fact=event.result;
   if(!/^pi_operation_[a-f0-9]{32}$/u.test(fact?.logical_operation_id??"")
     ||!/^[a-f0-9]{64}$/u.test(fact.progress_sha256??"")||!Number.isSafeInteger(fact.attempt)||fact.attempt<1||fact.attempt>workerRetryLimit
@@ -193,8 +195,16 @@ export function createPiProductionExecutionController({journal=defaultJournal,ro
   const fault={logical_operation_id:operation.state.operation_id,progress_sha256:workerProgress(operation),
    code:/^[A-Z][A-Z0-9_]{0,63}$/u.test(error?.code??"")?error.code:"WORKER_OPERATION_FAILED",
    attempt,retry_after_ms:attempt<workerRetryLimit?now+1000*2**(attempt-1):null};
-  const started=await journal.begin({operation_type:workerFaultType,tool_name:"pi.worker.defer",
-   workspace_id:operation.state.workspace_id,workstream_id:operation.state.workstream_id,result:fault});
+  const fingerprint=hashExecutionInput({operation_id:fault.logical_operation_id,progress:fault.progress_sha256,attempt});
+  let started;
+  try {
+   started=await journal.begin({operation_type:workerFaultType,tool_name:"pi.worker.defer",
+    workspace_id:operation.state.workspace_id,workstream_id:operation.state.workstream_id,result:fault,
+    reconciliation_key:`pi-worker-deferral-${fingerprint}`,request_fingerprint_sha256:fingerprint});
+  } catch (admissionError) {
+   if(admissionError?.code!=="RECONCILIATION_EXISTING_OPERATION")throw admissionError;
+   return matchingWorkerDeferral(workerDeferrals((await journal.verify()).events),operation);
+  }
   await journal.complete(started.operation_id,{result:fault});
   return fault;
  }

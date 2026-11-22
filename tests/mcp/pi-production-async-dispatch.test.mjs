@@ -150,6 +150,26 @@ test("an abandoned active claim exits the owner instead of counting a retry", as
   assert.equal((await f.journal.listOperations({ operation_type: "pi_worker_deferral" })).total, 0);
 });
 
+test("concurrent workers record only one deferral per operation progress and attempt", async t => {
+  const f = await fixture(t);
+  const original = host(f, undefined, { workerClock: () => 1000 });
+  const peerJournal = createDevOperationJournalService({ storageRoot: f.storageRoot });
+  const peer = host({ ...f, journal: peerJournal, route: createPiProductionRouteStore({ journal: peerJournal }) },
+    undefined, { workerClock: () => 1200 });
+  const admitted = await original.submit(intent("concurrent-worker-deferral"));
+  const args = { operation_id: admitted.state.operation_id, context };
+  const [a, b] = await Promise.all([
+    original.deferExecutionFailure(args, Object.assign(new Error("first peer failure"), { code: "FIRST_PEER_FAILURE" })),
+    peer.deferExecutionFailure(args, Object.assign(new Error("second peer failure"), { code: "SECOND_PEER_FAILURE" })),
+  ]);
+  assert.equal(a.attempt, 1);
+  assert.equal(b.attempt, 1);
+  assert.equal(a.retry_after_ms, b.retry_after_ms);
+  assert.equal(a.code, b.code);
+  assert.equal((await f.journal.listOperations({ operation_type: "pi_worker_deferral" })).total, 1);
+  assert.deepEqual(await peer.discover(), []);
+});
+
 test('a pre-aborted worker performs no discovery or dispatch',async()=>{
  const abort=new AbortController();abort.abort();let calls=0;
  await runPiDurableWorker({controller:{discover:async()=>{calls++;return [];},execute:async()=>{calls++;}},signal:abort.signal,observe:()=>{}});
