@@ -30,6 +30,8 @@ import { TRPG_LAUNCH_RESOLUTION, TRPG_LAUNCH_RESOLUTION_TOOL, TRPG_LAUNCH_OUTCOM
 import { restartResolutionKind, restartResolutionTool, restartParentId, restartChildId, validateRestartProof, validateRestartResolution } from "./mcp-trpg-gateway-restart-resolution.mjs";
 import { TRPG_RESUME_KIND, TRPG_RESUME_TOOL, TRPG_RESUME_RESULT, trpgResumeProofs, validateTrpgResumeResolution, verifyTrpgResumeEvidence } from "./mcp-trpg-supervisor-resume-resolution.mjs";
 import { isPowerShellPreDispatchFailure } from "./mcp-powershell-predispatch-failure.mjs";
+import { isJournalIsolationFailure, journalIncident, journalIsolationError, journalIsolationOverlaps,
+  journalOperationScope } from "./mcp-development-journal-isolation.mjs";
 import { projectPaths, projectRoot } from "./project-paths.mjs";
 import { createWorkspaceSnapshotAuthorityIpcClient } from "./mcp-workspace-snapshot-authority-ipc.mjs";
 import { normalizeExactWorkspaceSnapshot } from "./mcp-workspace-snapshot-authority.mjs";
@@ -1174,6 +1176,18 @@ export function createDevOperationJournalService({
       && (event.result?.outcome === "ambiguous_effect" || event.result?.reconciliation_required === true)
     ));
     const ambiguousTerminal = ambiguousTerminalEvents.length > 0;
+    const ambiguousByOperation = new Map(ambiguousTerminalEvents.map(event => [event.operation_id, event]));
+    const incidentIds = [...dangling, ...ambiguousByOperation.keys()];
+    const incidentIdSet = new Set(incidentIds);
+    const relatedStarts = new Map();
+    for (const started of incidentIds.length ? events : []) {
+      if (started.stage !== "operation_started" || !incidentIdSet.has(started.parent_operation_id)) continue;
+      const related = relatedStarts.get(started.parent_operation_id) ?? [];
+      related.push(started);
+      relatedStarts.set(started.parent_operation_id, related);
+    }
+    const incidents = incidentIds.map(id => journalIncident(byOperation.get(id)[0], ambiguousByOperation.get(id), relatedStarts.get(id)));
+    incidents.sort((left, right) => left.event_sequence - right.event_sequence);
     const chainDegraded = dangling.length > 0 || ambiguousTerminal;
     runtimeHealth = explicitDegraded || chainDegraded ? "degraded" : "healthy";
     reconciliationRequired = explicitDegraded || chainDegraded;
@@ -1187,6 +1201,7 @@ export function createDevOperationJournalService({
       events,
       dangling_operations: dangling,
       active_operations: active,
+      isolated_operations: incidents,
       ambiguous_terminal: ambiguousTerminal,
       ambiguous_terminal_count: ambiguousTerminalEvents.length,
       ambiguous_terminal_operations: ambiguousTerminalEvents.slice(0, DEV_JOURNAL_MAX_QUERY_RESULTS).map(event => ({
@@ -1242,10 +1257,7 @@ export function createDevOperationJournalService({
         const head = await readHead(headPath);
         if (canonicalJson(head) !== canonicalJson(verification.head)) continue;
         await beforeAppend?.(verification);
-        // Ordinary admissions must honor a newly observed degraded Gate too.
-        // The existing explicit terminal-resolution contract remains available.
-        if (input.stage === "operation_started" && input.operation_type !== "pi_terminal_resolution"
-          && runtimeHealth !== "healthy") {
+        if (input.stage === "operation_started" && input.operation_type !== "pi_terminal_resolution" && explicitDegraded) {
           const error = new Error(`JOURNAL_${runtimeHealth.toUpperCase()}: development mutation is blocked until journal reconciliation succeeds.`);
           error.code = `JOURNAL_${runtimeHealth.toUpperCase()}`;
           throw error;
@@ -1282,6 +1294,11 @@ export function createDevOperationJournalService({
           eventId,
           timestamp,
         });
+        if (event.stage === "operation_started" && event.operation_type !== "pi_terminal_resolution") {
+          const scope = journalOperationScope(event);
+          const conflict = verification.isolated_operations.find(incident => journalIsolationOverlaps(incident.scope, scope));
+          if (conflict) throw journalIsolationError(conflict);
+        }
         const encoded = `${canonicalJson(event)}\n`;
         if (Buffer.byteLength(encoded, "utf8") > DEV_JOURNAL_MAX_EVENT_BYTES) throw new Error(`Journal event exceeds ${DEV_JOURNAL_MAX_EVENT_BYTES} bytes.`);
         const eventPath = path.join(eventsPath, eventFilename(sequence, eventId));
@@ -1334,8 +1351,7 @@ export function createDevOperationJournalService({
       const prefixTail = prefix.at(-1);
       if (head.latest_event_id !== (prefixTail?.journal_event_id ?? null)
         || head.latest_event_hash !== (prefixTail?.event_hash ?? null)) throw new Error("CORRUPT_STATE");
-      const health = classifyVerifiedSnapshot({ head, events: prefix });
-      if (health.dangling_operations.length || health.ambiguous_terminal) throw new Error("CORRUPT_STATE");
+      classifyVerifiedSnapshot({ head, events: prefix });
       const history = executionProjectionEvents(prefix);
       const latest = validateHistory(history);
       const tail = verified.events.slice(head.latest_sequence);
@@ -1596,7 +1612,7 @@ export function createDevOperationJournalService({
           runtimeHealth = "degraded";
           reconciliationRequired = true;
           lastHealthError = `Could not resolve dangling operation workspace ${started.workspace_id}: ${error.message}`;
-          return verify();
+          continue;
         }
       }
 
@@ -1607,7 +1623,7 @@ export function createDevOperationJournalService({
         lastHealthError = `Interrupted validation requires scoped recovery: ${operationId}.`;
         runtimeHealth = "degraded";
         reconciliationRequired = true;
-        return verify();
+        continue;
       }
 
       let outcome = "no_effect_observed";
@@ -1734,15 +1750,14 @@ export function createDevOperationJournalService({
         runtimeHealth = "degraded";
         reconciliationRequired = true;
         lastHealthError = `Ambiguous durable effect for operation ${operationId}.`;
-        return verify();
       }
     }
     return verify();
   }
 
   async function assertMutationAllowed() {
-    await reconcileDangling();
-    if (runtimeHealth !== "healthy") {
+    await verify();
+    if (explicitDegraded) {
       const error = new Error(`JOURNAL_${runtimeHealth.toUpperCase()}: development mutation is blocked until journal reconciliation succeeds.`);
       error.code = `JOURNAL_${runtimeHealth.toUpperCase()}`;
       throw error;
@@ -2161,6 +2176,8 @@ export function createDevOperationJournalService({
       active_operations: verification.active_operations.slice(0, DEV_JOURNAL_MAX_QUERY_RESULTS),
       ambiguous_terminal_count: verification.ambiguous_terminal_count,
       ambiguous_terminal_operations: verification.ambiguous_terminal_operations,
+      isolated_operation_count: verification.isolated_operations.length,
+      isolated_operations: verification.isolated_operations.slice(0, DEV_JOURNAL_MAX_QUERY_RESULTS),
       reconciliation_required: reconciliationRequired,
       last_health_error: lastHealthError,
       storage: "server_owned_per_event_files",
@@ -2314,7 +2331,8 @@ function verifiedMcpTestResult(events,started,terminal) {
       try {
         const scope = typeof context.resolve_workspace_scope === "function" ? await context.resolve_workspace_scope() : {};
         admission = await begin({ operation_type: "mcp_mutation", tool_name: context.tool_name,
-          workspace_id: scope.workspace_id, workstream_id: scope.workstream_id });
+          workspace_id: scope.workspace_id, workstream_id: scope.workstream_id,
+          targets: context.admission_details?.targets, result: context.admission_details?.result });
       } catch (error) {
         if (error.code !== "RECONCILIATION_EXISTING_OPERATION") throw error;
         return { reconciled: true, operation: await getOperation({ operation_id: error.operation_id }) };
@@ -2359,14 +2377,16 @@ function verifiedMcpTestResult(events,started,terminal) {
         }
         const verification = await verify();
         if (shell) {
-          await recordFailure(isPowerShellPreDispatchFailure(error, admission) && !childStarts(verification.events).length);
+          await recordFailure((isPowerShellPreDispatchFailure(error, admission) || isJournalIsolationFailure(error))
+            && !childStarts(verification.events).length);
           throw error;
         }
         const beforeChild = ["dev_create_file", "dev_apply_patch"].includes(context.tool_name) && !verification.events.some(event =>
           event.parent_operation_id === admission.operation_id && event.stage === "operation_started");
         const registryPrewrite = isWorkstreamPrewriteFailure(error, {tool_name: context.tool_name, operation_id: admission.operation_id})
           && !verification.events.some(event => event.parent_operation_id === admission.operation_id && event.stage === "operation_started");
-        const noEffect = beforeChild || registryPrewrite || !!barrier;
+        const noEffect = beforeChild || registryPrewrite || !!barrier
+          || (isJournalIsolationFailure(error) && !childStarts(verification.events).length);
         await recordFailure(noEffect);
         throw error;
       }
@@ -2379,12 +2399,13 @@ function verifiedMcpTestResult(events,started,terminal) {
         const verification = await verify();
         const children = childStarts(verification.events);
         const childWitness = shell && witnessedNoEffectChild(verification.events, children);
-        const noEffect = shell ? childWitness || children.length === 0 && isPowerShellPreDispatchFailure(value, admission)
+        const isolationRejected = children.length === 0 && isJournalIsolationFailure(value);
+        const noEffect = isolationRejected || (shell ? childWitness || children.length === 0 && isPowerShellPreDispatchFailure(value, admission)
           : (children.length === 0 && ["dev_create_file", "dev_apply_patch"].includes(context.tool_name))
           || (children.length === 0 && isWorkstreamPrewriteFailure(value, {tool_name: context.tool_name, operation_id: admission.operation_id}))
           || children.length > 0 && children.every((child) => verification.events.some((event) =>
           event.operation_id === child.operation_id && terminalStageSet.has(event.stage)
-          && ["failed_no_effect", "no_effect_observed"].includes(event.result?.outcome)));
+          && ["failed_no_effect", "no_effect_observed"].includes(event.result?.outcome))));
         await recordFailure(noEffect, childWitness);
       } else {
         const verification = await verify();

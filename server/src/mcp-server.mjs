@@ -237,6 +237,7 @@ import {
   dev_workspace_list_operations,
   initializeDevJournalRuntime,
 } from "./mcp-development-journal-tools.mjs";
+import { isJournalIsolationFailure, journalMutationDetails, preserveJournalIsolationFailure } from "./mcp-development-journal-isolation.mjs";
 import {
   DEV_CHECKPOINT_ID_PATTERN_SOURCE,
   DEV_CHECKPOINT_MAX_LIST_RESULTS,
@@ -1216,6 +1217,7 @@ async function auditedToolCall(tool, args, actor) {
       ],
     };
     preserveWorkstreamPrewriteFailure(error, result);
+    preserveJournalIsolationFailure(error, result);
     preservePowerShellPreDispatchFailure(error, result);
   }
 
@@ -5923,6 +5925,7 @@ async function callToolDirect(params) {
       reconciliation_key: key,
       request_fingerprint_sha256: fingerprintMcpMutationRequest(tool.name, mutationArgs),
       tool_name: tool.name,
+      admission_details: journalMutationDetails(tool.name, effectiveArgs, isPiManagedMcpCall()),
     resolve_workspace_scope: async () => {
         if (!mutationArgs.workspace_id) {
           if(["dev_workspace_create_isolated","dev_workspace_update_workstream","dev_workspace_end_workstream"].includes(tool.name)) {
@@ -6023,6 +6026,10 @@ async function dispatch(message) {
     try {
       return makeResult(message.id, await callTool(message.params));
     } catch (error) {
+      if (isJournalIsolationFailure(error)) {
+        return makeResult(message.id, { ...jsonContent({ ok: false, code: error.code, message: error.message,
+          isolation: error.isolation }), isError: true });
+      }
       return makeError(message.id, -32602, error.message);
     }
   }
