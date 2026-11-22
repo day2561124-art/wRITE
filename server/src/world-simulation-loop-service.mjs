@@ -5117,6 +5117,23 @@ export async function dispatchWorldSimulationAutonomousCognitionOpportunities(
               native_plan_decision_intent_submission_supported: true,
             },
           });
+          // C2 is an internal cognition boundary, not an executable action
+          // turn. Silently dropping an explicit Brain action request would
+          // falsely mark the opportunity completed and risk losing intent.
+          // Fail the entire batch before any goal/plan CAS writer can run.
+          if (isObject(result) && [
+            "action_id", "selected_action_id", "selected_action",
+            "action_intents", "selected_action_intents",
+          ].some(key => Object.hasOwn(result, key))) {
+            const error = admissionError(
+              "CB-C2 cannot accept an action selection without a World-owned causal action handoff.",
+              "WORLD_SIMULATION_AUTONOMOUS_ACTION_INTENT_UNSUPPORTED",
+            );
+            // A rejected action cannot count as consuming *any* participant's
+            // opportunity, including prior completed Brains in this batch.
+            error.consumed_opportunity_ids = [];
+            throw error;
+          }
           if (isObject(result) && Object.hasOwn(result, "goal_intents")) {
             selectedNativeGoalIntents.push({
               character: opportunity.character,
