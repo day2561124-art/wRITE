@@ -931,6 +931,58 @@ try {
     assert.deepEqual(guardedHistoryAfter.turns,guardedHistoryBefore.turns);
   }
 
+  // A custom runtime is not allowed to substitute another actor's Brain
+  // identity or invoke the same actor's Brain twice. No partial plan, choice,
+  // causal outcome or consumed internal opportunity may survive rejection.
+  for (const fault of ["wrong_character","duplicate_callback"]) {
+    const runtimeGuardSession=await beginWorldSimulationSession({
+      source_text:"World actor speech runtime ingress guard "+fault,
+      characters:Object.keys(spontaneousWorld.characters),
+      initial_world_state:spontaneousWorld,
+    },{fixtureRoot:goalFixtureRoot});
+    const guardSid=runtimeGuardSession.world_simulation_session_id;
+    const guardBefore=await getWorldSimulationState(guardSid,{fixtureRoot:goalFixtureRoot});
+    const guardHistoryBefore=await getWorldSimulationHistory(guardSid,{fixtureRoot:goalFixtureRoot});
+    let realBrainCount=0;
+    const manager={
+      runCharacterTurn:async ({brain_input,characterBrain})=>{
+        if(fault==="wrong_character")
+          return characterBrain({...brain_input,character:"substituted_actor"});
+        const first=await characterBrain(brain_input);
+        await characterBrain(brain_input);
+        return first;
+      },
+    };
+    await assert.rejects(runWorldSimulationActorInitiatedSpeech({
+      world_simulation_session_id:guardSid,character,
+      runtime_context_by_character:planCue,
+    },{fixtureRoot:goalFixtureRoot,
+      characterRuntimeManager:manager,
+      characterBrain:async packet=>{
+        realBrainCount++;
+        const activation=packet.cognition.implementation_intention_activation;
+        return {
+          plan_activation_context_token:activation.context_token,
+          activated_plan_tokens:[activation.plans[0].plan_token],
+        };
+      },
+    }),error=>error?.code===(
+      fault==="wrong_character"
+        ? "WORLD_ACTOR_SPEECH_CHARACTER_MISMATCH"
+        : "WORLD_ACTOR_SPEECH_DUPLICATE_BRAIN_INVOCATION"
+    ));
+    const guardAfter=await getWorldSimulationState(guardSid,{fixtureRoot:goalFixtureRoot});
+    const guardHistory=await getWorldSimulationHistory(guardSid,{fixtureRoot:goalFixtureRoot});
+    assert.equal(realBrainCount,fault==="duplicate_callback"?1:0);
+    assert.equal(guardAfter.revision,guardBefore.revision);
+    assert.equal(guardAfter.state_hash,guardBefore.state_hash);
+    assert.deepEqual(guardHistory.turns,guardHistoryBefore.turns);
+    console.log(JSON.stringify({
+      scenario:"world_actor_speech_runtime_ingress_guard",fault,
+      real_brain_calls:realBrainCount,world_unchanged:true,
+    }));
+  }
+
   const actionSession=await beginWorldSimulationSession({
     source_text:"C2 eventless plan followed by source-declared World observation fixture",
     characters:Object.keys(actionWorld.characters),
