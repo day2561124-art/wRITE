@@ -3,7 +3,7 @@ import test from 'node:test';
 import {cp,mkdtemp,mkdir,readFile,writeFile,readdir,lstat,symlink,rm} from 'node:fs/promises';
 import {execFile,spawn} from 'node:child_process';
 import {promisify} from 'node:util';
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {pathToFileURL,fileURLToPath} from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
@@ -94,10 +94,11 @@ test('actual MCP default ingress completes cold lifecycle and terminal no replay
  await startWorker(false);
  const resumed=await submitAndWait(second.client,contract);assert.equal(resumed.state.status,'COMPLETED',JSON.stringify({state:resumed.state,runtime:resumed.runtime,receipts:resumed.receipts.map(r=>({step_id:r.step_id,kind:r.kind,evidence:r.step_id==='test'?r.evidence:undefined}))}));assert.equal(resumed.state.operation_id,exit.operation_id);assert.equal(resumed.result.verification.focused,'passed');
  const context={project_id:'writer_workbench',workstream_id:exit.binding.workstream_id,workspace_id:exit.binding.workspace_id};
+ let recoveredBuild=false;
  if(process.platform==='win32'&&process.arch==='x64'){
   const capability='workspace.powershell_isolated';
   const goal='Exercise AppContainer through the real authenticated Pi worker';
-  const grant=await taskStore.issue({...context,goal,capabilities:[capability],expires_at_ms:Date.now()+300_000});
+  const grant=await taskStore.issue({...context,goal,capabilities:[capability,'filesystem.patch','git.commit'],expires_at_ms:Date.now()+300_000});
   const staged={request_kind:'autonomous_engineering',intent_id:'wire-appcontainer-0001',goal,workspace_id:context.workspace_id,
    task_authorization_id:grant.task_authorization_id,sandbox_paths:['package.json'],output_paths:['sandbox-result.txt'],
    command:"$package = Get-Content package.json -Raw | ConvertFrom-Json; [IO.File]::WriteAllText([IO.Path]::GetFullPath('sandbox-result.txt'), $package.name)"};
@@ -108,6 +109,29 @@ test('actual MCP default ingress completes cold lifecycle and terminal no replay
   assert.equal(result.artifacts[0].content,sourcePackage.name);
   assert.equal(result.workspace_writes,false);
   assert.equal((await submitAndWait(second.client,staged)).projection_hash,observed.projection_hash);
+
+  const {path:sourceFile,content}=actions.find(action=>action.step_id==='write').input;
+  const input={sandbox_paths:[sourceFile],command:[
+   `if ((Get-Content -LiteralPath '${sourceFile}' -Raw) -notmatch 'repair-marker') { exit 7 }`,
+   "Write-Output 'revalidated-sandbox-source'",
+  ].join('\n')};
+  const sourceCommit=facts(resumed.receipts.find(receipt=>receipt.step_id==='commit').evidence).commit;
+  const repairPlan={request_kind:'autonomous_engineering',intent_id:'wire-appcontainer-repair-0001',goal,
+   workspace_id:context.workspace_id,task_authorization_id:grant.task_authorization_id,requested_actions:[
+    {step_id:'initial',capability,input,on_failure:['patch','retry']},
+    {step_id:'patch',capability:'filesystem.patch',depends_on:['initial'],input:{path:sourceFile,oldText:content,
+     newText:content+'// repair-marker\n',expectedSha256:createHash('sha256').update(content).digest('hex')}},
+    {step_id:'retry',capability,input,depends_on:['patch']},
+    {step_id:'commit',capability:'git.commit',depends_on:['initial'],
+     input:{paths:[sourceFile],message:'Commit the repaired wire fixture',expectedHead:sourceCommit}},
+   ]};
+  const repaired=await submitAndWait(second.client,repairPlan);
+  assert.equal(repaired.state.status,'COMPLETED',JSON.stringify({state:repaired.state,command:repaired.command}));
+  assert.deepEqual(repaired.state.recovery.recovered_steps,['initial']);
+  assert.deepEqual(repaired.state.completed_steps,['patch','retry','commit']);
+  assert.match(facts(repaired.receipts.find(receipt=>receipt.step_id==='retry').evidence).stdout,/revalidated-sandbox-source/u);
+  assert.equal((await submitAndWait(second.client,repairPlan)).projection_hash,repaired.projection_hash);
+  recoveredBuild=true;
  }
  const observations=intent('wire-read-checkpoint-0001',context,[{step_id:'workstream',capability:'workspace.get_workstream',input:{workstream_id:context.workstream_id},depends_on:[]},{step_id:'checkpoint',capability:'workspace.get_checkpoint',input:{checkpoint_id:exit.checkpoint.checkpoint_id},depends_on:['workstream']}]);
  const inspected=(await submitAndWait(second.client,observations));assert.equal(inspected.state.status,'COMPLETED');const workstream=facts(inspected.receipts[0].evidence),checkpoint=facts(inspected.receipts[1].evidence);assert.equal(checkpoint.checkpoint_id,exit.checkpoint.checkpoint_id);assert.equal(checkpoint.workspace_id,context.workspace_id);assert.equal(checkpoint.workstream_id,context.workstream_id);assert.equal(checkpoint.git_head,base);
@@ -127,5 +151,5 @@ test('actual MCP default ingress completes cold lifecycle and terminal no replay
  const records=(await readdir(path.join(journalRoot,'events'))).sort();const events=await Promise.all(records.map(f=>readFile(path.join(journalRoot,'events',f),'utf8').then(JSON.parse)));
  const calls=events.filter(e=>e.operation_type==='mcp_mutation'&&e.stage==='operation_started'&&e.reconciliation_key?.startsWith('wire-lifecycle-'));
  assert.equal(calls.length,6);const creation=calls.find(e=>e.tool_name==='dev_workspace_create_isolated');assert.equal(creation.workstream_id,context.workstream_id);
- console.log(JSON.stringify({real_MCP:true,SDK_reused:true,cold_pids:[exit.pid,second.transport.pid],workstream_id:context.workstream_id,workspace_id:context.workspace_id,checkpoint_id:checkpoint.checkpoint_id,original_base:base,terminal_duplicate_new_dispatches:0,journal:health,shared_main_unchanged:true}));
+ console.log(JSON.stringify({real_MCP:true,SDK_reused:true,cold_pids:[exit.pid,second.transport.pid],workstream_id:context.workstream_id,workspace_id:context.workspace_id,checkpoint_id:checkpoint.checkpoint_id,original_base:base,terminal_duplicate_new_dispatches:0,conditional_repair_verified:recoveredBuild,journal:health,shared_main_unchanged:true}));
 });
