@@ -2205,26 +2205,19 @@ process.once("exit", () => {
   for (const child of activePushGitChildren) terminatePushProcessTree(child);
 });
 
-function terminatePushProcessTree(child, { forceAfterMs = 2_000 } = {}) {
+function terminatePushProcessTree(child) {
   if (!child || child.exitCode !== null || !child.pid) return;
   if (process.platform === "win32") {
-    terminateProcessTree(child, { forceAfterMs });
+    terminateProcessTree(child);
     return;
   }
   try {
-    process.kill(-child.pid, "SIGTERM");
+    // The timed-out command owns this detached process group. Stop every
+    // member now, including descendants with no inherited response pipes.
+    process.kill(-child.pid, "SIGKILL");
   } catch {
-    terminateProcessTree(child, { forceAfterMs });
-    return;
+    terminateProcessTree(child);
   }
-  const forceTimer = setTimeout(() => {
-    try {
-      process.kill(-child.pid, "SIGKILL");
-    } catch {
-      // The isolated process group may already have exited.
-    }
-  }, forceAfterMs);
-  forceTimer.unref?.();
 }
 
 function validatePushInput(input) {

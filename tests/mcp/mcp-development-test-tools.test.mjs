@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { access, chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -1324,6 +1325,36 @@ try {
     remoteStatusBeforePush.commit_checks.find((item) => item.sha === remoteStatusFixture.head)?.remote_contains,
     false,
   );
+
+  const unreachable = await createPushFixture(tempRoot, "remote-outage-local-work");
+  const failedRemote = createHttpServer((request, response) => {
+    receivedRemoteRequest = true;
+    response.writeHead(503, { "Connection": "close" });
+    response.end("temporary fixture outage");
+  });
+  let receivedRemoteRequest = false;
+  await new Promise((resolve, reject) => {
+    failedRemote.once("error", reject);
+    failedRemote.listen(0, "127.0.0.1", resolve);
+  });
+  try {
+    const remoteUrl = `http://127.0.0.1:${failedRemote.address().port}/repo.git`;
+    runFixtureGit(unreachable.repositoryRoot, ["remote", "set-url", "origin", remoteUrl]);
+    const statusRemote = createDevGitRemoteStatusTool({ repositoryRoot: unreachable.repositoryRoot,
+      policy: { ...pushTestPolicy(remoteUrl), allowedProtocols: ["http"] } });
+    const local = createDevGitTools({ repositoryRoot: unreachable.repositoryRoot });
+    await writeFile(path.join(unreachable.repositoryRoot, "kept-local.txt"), "untouched local change\n", "utf8");
+    const [remoteFailure, localStatus] = await Promise.all([statusRemote(), local.status()]);
+    assert.equal(receivedRemoteRequest, true, "the real Git client reached the failing HTTP endpoint");
+    assert.equal(remoteFailure.reason, "REMOTE_READ_FAILED");
+    assert.equal(remoteFailure.authoritative_remote_read, false);
+    assert.equal(localStatus.clean, false);
+    assert(localStatus.untracked.includes("kept-local.txt"));
+    assert.equal(fixtureHead(unreachable.repositoryRoot), unreachable.head);
+    assert.equal(await readFile(path.join(unreachable.repositoryRoot, "kept-local.txt"), "utf8"), "untouched local change\n");
+  } finally {
+    await new Promise(resolve => failedRemote.close(resolve));
+  }
   assert.equal(await readFile(remoteStatusTrackingPath, "utf8"), remoteStatusTrackingBefore);
   assert.deepEqual(await readFile(remoteStatusIndexPath), remoteStatusIndexBefore);
 
@@ -1945,7 +1976,15 @@ try {
   assert.equal(timeoutPush.pushed, false);
   assert.equal(timeoutPush.reason, "PUSH_TIMEOUT");
   assert.equal(timeoutPush.timed_out, true);
-  assert.equal(await isPortAvailable(timeoutPushPort), true, "push timeout left descendant process alive");
+  // The root's pipe close and the descendant's socket close are separate
+  // kernel events. The controlled Git group must release the socket promptly.
+  const cleanupDeadline = Date.now() + 1000;
+  let released = await isPortAvailable(timeoutPushPort);
+  while (!released && Date.now() < cleanupDeadline) {
+    await new Promise(resolve => setTimeout(resolve, 25));
+    released = await isPortAvailable(timeoutPushPort);
+  }
+  assert.equal(released, true, "push timeout left descendant process alive");
 
   const outputPushFixture = await createPushFixture(tempRoot, "push-output-redaction");
   const outputNetworkScript = path.join(tempRoot, "push-output-network.mjs");
