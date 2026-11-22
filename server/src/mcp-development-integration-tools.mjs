@@ -1173,7 +1173,7 @@ export function createDevIntegrationService({
         },
       });
     } catch (error) {
-      await journal.markDegraded(`dev_workspace_validate_integration terminal append failed: ${error.message}`);
+      await journal.markDegraded(`dev_workspace_validate_integration terminal append failed: ${error.message}`, journalOperation.operation_id);
       const provenanceError = new Error(`Integration validation completed but provenance terminal append failed: ${error.message}`);
       provenanceError.code = "JOURNAL_TERMINAL_APPEND_FAILED";
       throw provenanceError;
@@ -1194,7 +1194,7 @@ export function createDevIntegrationService({
           },
         });
       } catch (journalError) {
-        await journal.markDegraded(`dev_workspace_validate_integration failure terminal append failed: ${journalError.message}`);
+        await journal.markDegraded(`dev_workspace_validate_integration failure terminal append failed: ${journalError.message}`, journalOperation.operation_id);
         throw new Error(`Integration validation failed and provenance terminal append failed: ${journalError.message}`);
       }
       throw error;
@@ -1580,7 +1580,7 @@ export function createDevIntegrationService({
             },
           });
         } catch (error) {
-          await markDevJournalDegraded(`dev_workspace_integrate failure terminal append failed: ${error.message}`);
+          await markDevJournalDegraded(`dev_workspace_integrate failure terminal append failed: ${error.message}`, journalOperation.operation_id);
           throw new Error(`Integration apply failed and provenance terminal append failed: ${error.message}`);
         }
         return updateCandidate(candidateId, candidate.revision, (record) => {
@@ -1620,7 +1620,7 @@ export function createDevIntegrationService({
             },
           });
         } catch (error) {
-          await markDevJournalDegraded(`dev_workspace_integrate post-verify terminal append failed: ${error.message}`);
+          await markDevJournalDegraded(`dev_workspace_integrate post-verify terminal append failed: ${error.message}`, journalOperation.operation_id);
           throw new Error(`Integration effect completed but provenance terminal append failed: ${error.message}`);
         }
         return updateCandidate(candidateId, candidate.revision, (record) => {
@@ -1661,7 +1661,7 @@ export function createDevIntegrationService({
           },
         });
       } catch (error) {
-        await markDevJournalDegraded(`dev_workspace_integrate terminal append failed: ${error.message}`);
+        await markDevJournalDegraded(`dev_workspace_integrate terminal append failed: ${error.message}`, journalOperation.operation_id);
         throw new Error(`Integration effect completed but provenance terminal append failed: ${error.message}`);
       }
       return integrated;

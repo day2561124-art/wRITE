@@ -34,6 +34,40 @@ test("a reopened Journal isolates a conflicting path while other paths and works
   assert.equal(after.head.latest_sequence, 6);
 }));
 
+test("a single terminal publication failure records only the affected operation as isolated", () => fixture(async root => {
+  const service = createDevOperationJournalService({ storageRoot: root });
+  const input = (workspace, file) => ({ operation_type: "filesystem_patch", tool_name: "dev_apply_patch",
+    workspace_id: "dev_workspace_" + workspace.repeat(24), targets: [{ path: file }] });
+  const began = await service.begin(input("1", "src/affected.txt"));
+  const nativeOpen = fs.promises.open;
+  let injected = false;
+  fs.promises.open = async (file, flags, ...args) => {
+    if (!injected && flags === "wx" && path.basename(String(file)).startsWith("000000000002-")) {
+      injected = true;
+      throw Object.assign(new Error("temporary terminal write fixture"), { code: "EIO" });
+    }
+    return nativeOpen(file, flags, ...args);
+  };
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(service.complete(began.operation_id), /temporary terminal write fixture/u);
+  } finally {
+    fs.promises.open = nativeOpen;
+    syncBuiltinESMExports();
+  }
+  assert.equal(injected, true);
+  await service.markDegraded("fixture terminal could not publish", began.operation_id);
+  const reopened = createDevOperationJournalService({ storageRoot: root });
+  const health = await reopened.status();
+  assert.equal(health.writes_available, true);
+  assert.equal(health.isolated_operation_count, 1);
+  assert.equal((await reopened.getOperation({ operation_id: began.operation_id })).original_result.failure_code,
+    "TERMINAL_PUBLICATION_FAILED");
+  const independent = await reopened.begin(input("2", "src/affected.txt"));
+  await reopened.complete(independent.operation_id);
+  assert.equal((await reopened.status()).chain_verified, true);
+}));
+
 const input=(key,fp='a'.repeat(64))=>({operation_type:'isolated_cas_test',tool_name:'dev_test',workspace_id:'dev_workspace_shared_repository_v1',reconciliation_key:key.length<8?key+'-key':key,request_fingerprint_sha256:fp});
 test('a new overlapping incident discovered before publication rejects admission',()=>fixture(async root=>{const a=createDevOperationJournalService({storageRoot:root}),b=createDevOperationJournalService({storageRoot:root});await seed(a);let count=0,injected=false,inside=false;const original=fs.promises.open;const trigger=process.env.APPEND_CAS_BASELINE==='1'?3:5;fs.promises.open=async function(file,...args){if(!inside&&String(file)===path.join(root,'append.lock')&&++count===trigger){inside=true;try{const x=await b.begin(input('ambiguous-race'));await b.fail(x.operation_id,{result:{outcome:'ambiguous_effect',reconciliation_required:true}});injected=true;}finally{inside=false;}}return original.call(this,file,...args);};syncBuiltinESMExports();try{await assert.rejects(a.begin(input('must-not-admit')),e=>e.code==='JOURNAL_SCOPE_ISOLATED');}finally{fs.promises.open=original;syncBuiltinESMExports();}assert.equal(injected,true);const v=await a.verify();assert.equal(v.events.length,4);assert.equal(v.events.some(e=>e.reconciliation_key==='must-not-admit'),false);}));
 async function fixture(fn){const root=await mkdtemp(path.join(os.tmpdir(),'pi-journal-append-cas-'));try{await fn(root);}finally{await rm(root,{recursive:true,force:true});}}

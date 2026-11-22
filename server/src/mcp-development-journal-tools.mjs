@@ -17,7 +17,7 @@ import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { promisify } from "node:util";
-import { controlledProcessEnvironment } from "./process-control.mjs";
+import { controlledProcessEnvironment, redactProcessOutput } from "./process-control.mjs";
 import {ISOLATION_RESOLUTION,ISOLATION_RESOLUTION_TOOL,inspectIsolationEvidence,validateIsolationResolution,isolationTarget,assertIsolationOwnerDead,isolationJson} from './mcp-workspace-isolation-resolution.mjs';
 import { readIsolationBeforeDispatchProof } from './mcp-workstream-prewrite-failure.mjs';
 import { isWorkstreamPrewriteFailure } from "./mcp-workstream-prewrite-failure.mjs";
@@ -2155,11 +2155,28 @@ export function createDevOperationJournalService({
     return { observations, status: await status() };
   }
 
-  async function markDegraded(reason = "terminal_journal_append_failed") {
+  async function markDegraded(reason = "terminal_journal_append_failed", operationId) {
+    const details = redactProcessOutput(String(reason)).slice(0, 512);
+    if (typeof operationId === "string" && operationIdPattern.test(operationId)) {
+      try {
+        const first = await getOperation({ operation_id: operationId });
+        if (first.terminal) return;
+        if (first.operation_id) {
+          try {
+            await fail(operationId, { result: { outcome: "ambiguous_effect", reconciliation_required: true,
+              failure_code: "TERMINAL_PUBLICATION_FAILED", reason: details } });
+            return;
+          } catch {
+            // Another writer may have published the terminal before our failed append.
+            if ((await getOperation({ operation_id: operationId })).terminal) return;
+          }
+        }
+      } catch { /* Shared integrity or availability is unconfirmed. */ }
+    }
     explicitDegraded = true;
     runtimeHealth = "degraded";
     reconciliationRequired = true;
-    lastHealthError = String(reason).slice(0, 1024);
+    lastHealthError = details;
   }
 
   function statusFromVerification(verification) {
@@ -2167,6 +2184,7 @@ export function createDevOperationJournalService({
       schema_version: DEV_JOURNAL_SCHEMA_VERSION,
       health: runtimeHealth,
       chain_verified: runtimeHealth !== "corrupt",
+      writes_available: !explicitDegraded && runtimeHealth !== "corrupt",
       latest_sequence: verification.head.latest_sequence,
       latest_event_id: verification.head.latest_event_id,
       latest_event_hash: verification.head.latest_event_hash,
@@ -2202,6 +2220,7 @@ export function createDevOperationJournalService({
           schema_version: DEV_JOURNAL_SCHEMA_VERSION,
           health: runtimeHealth === "degraded" ? "degraded" : "recovering",
           chain_verified: false,
+          writes_available: false,
           latest_sequence: null,
           latest_event_id: null,
           latest_event_hash: null,
@@ -2220,6 +2239,7 @@ export function createDevOperationJournalService({
         schema_version: DEV_JOURNAL_SCHEMA_VERSION,
         health: "corrupt",
         chain_verified: false,
+        writes_available: false,
         latest_sequence: null,
         latest_event_id: null,
         latest_event_hash: null,
@@ -2806,7 +2826,7 @@ export const failDevJournalOperation = (operationId, input) => defaultJournal.fa
 export const recoverDevJournalOperation = (operationId, input) => defaultJournal.recover(operationId, input);
 export const verifyDevJournal = () => defaultJournal.verify();
 export const assertDevJournalMutationAllowed = () => defaultJournal.assertMutationAllowed();
-export const markDevJournalDegraded = (reason) => defaultJournal.markDegraded(reason);
+export const markDevJournalDegraded = (reason, operationId) => defaultJournal.markDegraded(reason, operationId);
 
 async function captureDevArtifactStateWithinRoot(repositoryRoot, realRepositoryRoot, relativePath) {
   const target = path.resolve(repositoryRoot, relativePath);

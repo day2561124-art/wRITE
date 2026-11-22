@@ -872,7 +872,7 @@ export async function dev_git_diff_check(input = {}, options = {}) {
       },
     });
   } catch (error) {
-    await markDevJournalDegraded(`dev_git_diff_check terminal append failed: ${error.message}`);
+    await markDevJournalDegraded(`dev_git_diff_check terminal append failed: ${error.message}`, journalOperation.operation_id);
     throw new Error(`dev_git_diff_check completed but provenance terminal append failed: ${error.message}`);
   }
   return attachWorkspaceContext({ ...result, operation_id: journalOperation.operation_id, workspace_snapshot_id: snapshot.workspace_snapshot_id }, context);

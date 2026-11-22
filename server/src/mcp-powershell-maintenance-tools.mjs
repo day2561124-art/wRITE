@@ -659,7 +659,7 @@ export function createPowerShellMaintenanceTool({
           },
         });
       } catch (journalError) {
-        await journalApi.degrade(`${toolName} failure terminal append failed: ${journalError.message}`);
+        await journalApi.degrade(`${toolName} failure terminal append failed: ${journalError.message}`, operation.operation_id);
       }
       throw error;
     }
@@ -669,7 +669,7 @@ export function createPowerShellMaintenanceTool({
         result: journalResult(result),
       });
     } catch (error) {
-      await journalApi.degrade(`${toolName} terminal append failed: ${error.message}`);
+      await journalApi.degrade(`${toolName} terminal append failed: ${error.message}`, operation.operation_id);
       return {
         ...result,
         execution_ok: false,
