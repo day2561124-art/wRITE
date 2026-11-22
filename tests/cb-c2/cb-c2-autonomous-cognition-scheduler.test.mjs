@@ -525,6 +525,58 @@ try {
   },{fixtureRoot:goalFixtureRoot});
   assert.equal(repeat.scheduler_projection.opportunity_count,0,
     "A committed C2 goal opportunity must be durably consumed, not just suppressed by caller runtime context.");
+
+  // Each invalid decision starts from the same genuine Phase65/66 evidence
+  // but in a new isolated Native session. A bad source or context must abort
+  // before any state/history mutation, without contaminating the next case.
+  for (const [fault, expectedCode] of [
+    ["forged_source", "WORLD_SIMULATION_NATIVE_GOAL_SOURCE_TOKEN_INVALID"],
+    ["stale_context", "WORLD_SIMULATION_NATIVE_GOAL_CONTEXT_MISMATCH"],
+    ["invalid_intent_shape", "WORLD_SIMULATION_NATIVE_GOAL_INTENT_INVALID"],
+    ["foreign_goal_handle", "WORLD_SIMULATION_NATIVE_GOAL_TOKEN_INVALID"],
+  ]) {
+    const bad = await beginWorldSimulationSession({
+      source_text: `CB-C2 invalid autonomous goal intent ${fault}`,
+      characters:Object.keys(baseWorldState.characters),
+      initial_world_state:state,
+    },{fixtureRoot:goalFixtureRoot});
+    const invalidSid=bad.world_simulation_session_id;
+    const pre=await getWorldSimulationState(invalidSid,{fixtureRoot:goalFixtureRoot});
+    const preHistory=await getWorldSimulationHistory(invalidSid,{fixtureRoot:goalFixtureRoot});
+    await assert.rejects(dispatchWorldSimulationAutonomousCognitionOpportunities({
+      world_simulation_session_id:invalidSid,
+      runtime_context_by_character:{[character]:{idle:true}},
+    },{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+      const view=packet.native_goal_decision;
+      const proposal={
+        operation:"propose",goal_kind:"achieve_state",domain:"inquiry",
+        target_descriptor:{label:"查證計時器實際上限"},
+        motivation_basis_tokens:[view.motivation_basis[0].source_token],
+        motivation_relations:["supports"],
+      };
+      if(fault==="forged_source")proposal.motivation_basis_tokens=["not_a_real_source"];
+      if(fault==="foreign_goal_handle")return {
+        goal_context_token:view.context_token,
+        goal_intents:[{operation:"commit",goal_token:"foreign_goal_token"}],
+      };
+      return {
+        goal_context_token:fault==="stale_context"?"stale_context":view.context_token,
+        goal_intents:fault==="invalid_intent_shape"?{}:[proposal],
+      };
+    }}),error=>error?.code===expectedCode,
+    `C2 must reject ${fault} without a cognitive partial commit`);
+    const post=await getWorldSimulationState(invalidSid,{fixtureRoot:goalFixtureRoot});
+    const postHistory=await getWorldSimulationHistory(invalidSid,{fixtureRoot:goalFixtureRoot});
+    assert.equal(post.revision,pre.revision);
+    assert.equal(post.state_hash,pre.state_hash);
+    assert.deepEqual(post.state.event_queue,pre.state.event_queue);
+    assert.deepEqual(postHistory.turns,preHistory.turns);
+    assert.equal((post.state.motivational_goal_history??[]).length,0);
+    console.log(JSON.stringify({
+      scenario:"c2_eventless_goal_negative",fault,expectedCode,
+      state_unchanged:true,history_unchanged:true,
+    }));
+  }
 } finally {
   await rm(goalFixtureRoot,{recursive:true,force:true});
 }
