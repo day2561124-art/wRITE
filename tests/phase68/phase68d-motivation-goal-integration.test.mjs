@@ -13,6 +13,7 @@ import { projectWorldSimulationEffectiveGoalImplementationIntentions } from "../
 import { nativeImplementationIntentionActivationCapability } from "../../server/src/world-simulation-goal-implementation-intention-activation-service.mjs";
 
 import { hashAgentRunValue } from "../../server/src/agent-run-service.mjs";
+import { buildCharacterCommunicationActionCandidate } from "../../server/src/character-communication-foundation-service.mjs";
 import { buildWorldSimulationSubjectiveClaims } from "../../server/src/world-simulation-subjective-claim-projection-service.mjs";
 import { resolveWorldSimulationSubjectiveBeliefs } from "../../server/src/world-simulation-subjective-belief-resolution-service.mjs";
 import { buildWorldSimulationSubjectiveBeliefRevisions } from "../../server/src/world-simulation-subjective-belief-revision-service.mjs";
@@ -609,6 +610,20 @@ const fixtureRoot = path.join(projectRoot, "tests", ".tmp",
   `cbc3-native-goal-${process.pid}-${Date.now()}`);
 const sessionOptions = { fixtureRoot };
 const trustedAlly = "同伴・研究助手";
+const inquiryContent = "我想確認計時器的實際上限，你有看過規格嗎？";
+const inquiryCandidate = buildCharacterCommunicationActionCandidate({
+  character: rio,
+  cognition: {
+    communication_goal: {
+      character: rio, purpose: "request_information",
+      mode: "direct", addressee: trustedAlly,
+      public_content: inquiryContent, communication_opportunity: "initiate",
+    },
+  },
+});
+assert.ok(inquiryCandidate);
+assert.equal(inquiryCandidate.communication.channel, "speech");
+assert.equal(inquiryCandidate.communication.addressee, trustedAlly);
 await rm(fixtureRoot, { recursive: true, force: true });
 try {
   const session = await beginWorldSimulationSession({
@@ -644,20 +659,7 @@ try {
         [rio]: { known: [], current_goal: "等待同伴" },
         [trustedAlly]: { known: [] },
       },
-      available_actions: { [rio]: [{
-        action_id: "ask-trusted-ally",
-        intent: "向可信任的同伴求助", duration_ms: 100,
-        target: trustedAlly,
-        communication: {
-          channel: "speech",
-          addressee: trustedAlly,
-          message: {
-            speech_act: "request_information",
-            semantic_content: "我想確認計時器的實際上限，你有看過規格嗎？",
-            epistemic_status: "unverified",
-          },
-        },
-      }] },
+      available_actions: { [rio]: [inquiryCandidate] },
     },
   }, sessionOptions);
   const characterRuntimeManager = createWorldSimulationCharacterRuntimeManager({
@@ -705,8 +707,8 @@ try {
       assert.equal(guidance.advisory_only, true);
       assert.equal(guidance.selected_action_authority, false);
       assert.ok(packet.candidate_action_intents.some(
-        (candidate) => candidate.action_id === "ask-trusted-ally"));
-      return { action_id: "ask-trusted-ally" };
+        (candidate) => candidate.action_id === inquiryCandidate.action_id));
+      return { action_id: inquiryCandidate.action_id };
     }
     if (mode === "commit") {
       assert.equal(view.existing_goals.length, 1);
@@ -829,7 +831,7 @@ try {
   assert.equal(reentryTurn.selected_action_intents[0].selection,
     "candidate_action_intent");
   assert.equal(reentryTurn.selected_action_intents[0].action_id,
-    "ask-trusted-ally");
+    inquiryCandidate.action_id);
   // A selected action is NOT an executed investigation. This must be an
   // actual public causal World communication outcome, not a passive marker.
   const committedHistory = await getWorldSimulationHistory(
@@ -838,7 +840,7 @@ try {
     turn.turn_id === reentryTurn.turn_id && turn.revision_to === reentryTurn.revision);
   assert.ok(reentryReceipt, "Inquiry outcome must be read from the exact committed World turn.");
   const reachedWorld = (reentryReceipt.action_outcomes ?? []).filter(outcome =>
-    outcome.actor === rio && outcome.action_id === "ask-trusted-ally");
+    outcome.actor === rio && outcome.action_id === inquiryCandidate.action_id);
   console.log(JSON.stringify({
     scenario: "cb_c3_inquiry_action_causal_receipt",
     selected_action: reentryTurn.selected_action_intents[0].action_id,
@@ -856,7 +858,7 @@ try {
   assert.equal(publicEvent?.world_truth_claimed, false);
   assert.equal(publicEvent?.addressee, trustedAlly);
   assert.equal(publicEvent?.semantic_content,
-    "我想確認計時器的實際上限，你有看過規格嗎？");
+    inquiryContent);
   assert.equal(reentryTurn.selected_action_intents[0].candidate.communication?.channel, "speech");
   const afterReentry = await getWorldSimulationState(
     session.world_simulation_session_id, sessionOptions);
