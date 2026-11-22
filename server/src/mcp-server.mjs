@@ -2184,11 +2184,16 @@ const toolDefinitions = [
         const workstream = await dev_workspace_get_workstream({workstream_id: args.workstream_id});
         if (workstream.workspace_id !== args.workspace_id) throw new Error("WORKSPACE_CONTEXT_MISMATCH");
         const context = { project_id: "writer_workbench", workspace_id: args.workspace_id, workstream_id: args.workstream_id };
-        const [history, checkpoints] = await Promise.all([
+        const [history, checkpointLookup] = await Promise.all([
           piProductionController.listOperations({ context, limit: args.history_limit, before_sequence: args.before_sequence }),
-          dev_workspace_list_checkpoints({ workspace_id: args.workspace_id, workstream_id: args.workstream_id, state: "active", limit: 10 }),
+          dev_workspace_list_checkpoints({ workspace_id: args.workspace_id, workstream_id: args.workstream_id, state: "active", limit: 10 })
+            .then(checkpoints => ({ checkpoints, checkpoint_status: { available: true } }), error => ({
+              checkpoints: null,
+              checkpoint_status: { available: false,
+                code: error?.code === "CHECKPOINT_STORE_BUSY" ? error.code : "CHECKPOINT_HISTORY_UNAVAILABLE" },
+            })),
         ]);
-        return jsonContent({ workstream, ...history, checkpoints });
+        return jsonContent({ workstream, ...history, ...checkpointLookup });
       }
       if (args.history_limit !== undefined || args.before_sequence !== undefined) throw new Error("PI_OPERATION_CONTEXT_REQUIRED");
       if ((!args.operation_id === !args.intent_id) || (args.bootstrap

@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
     [string]$TaskName,
-    [switch]$ScopedTaskAuthorizations
+    [switch]$ScopedTaskAuthorizations,
+    [string]$DispatcherAccount,
+    [string]$ManagedProjectRoot
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,7 +26,7 @@ if (-not (Test-Path -LiteralPath $sourceRunner -PathType Leaf)) {
 }
 
 $protectedRoot = if ($ScopedTaskAuthorizations) {
-    Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)) 'WriterWorkbench-PiMaintenance'
+    Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)) 'WriterWorkbench-PiMaintenance-v3'
 } else { Join-Path $env:ProgramData 'WriterWorkbench\AdminPowerShell' }
 $protectedRunner = Join-Path $protectedRoot 'mcp-powershell-admin-runner.ps1'
 $configPath = Join-Path $protectedRoot 'config.json'
@@ -44,7 +46,18 @@ if ($ScopedTaskAuthorizations) {
     $inheritBoth = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
     $noPropagation = [Security.AccessControl.PropagationFlags]::None
     $allow = [Security.AccessControl.AccessControlType]::Allow
-    $serviceIdentity = $identity.User
+    if ([string]::IsNullOrWhiteSpace($DispatcherAccount) -or $ManagedProjectRoot -cnotmatch '^[A-Za-z]:\\') {
+        throw 'Scoped registration requires a dedicated local DispatcherAccount and the absolute ManagedProjectRoot.'
+    }
+    $dispatchers = @(Get-LocalUser -Name $DispatcherAccount | Where-Object { $_.Name -eq $DispatcherAccount })
+    if ($dispatchers.Count -ne 1) { throw 'The dispatcher must name exactly one local account.' }
+    $dispatcher = $dispatchers[0]
+    $serviceIdentity = $dispatcher.SID
+    if (-not $dispatcher.Enabled -or $serviceIdentity.Value -eq $identity.User.Value -or
+        @(Get-LocalGroupMember -SID $administrators | Where-Object { $_.SID -eq $serviceIdentity }).Count -ne 0) {
+        throw 'The dispatcher must be a separate enabled local account outside Administrators.'
+    }
+    $journalRoot = Join-Path (Resolve-Path -LiteralPath $ManagedProjectRoot).ProviderPath 'data\outputs\logs\development_runtime\operation-journal'
 
     function Get-AccessRuleKeys([Security.AccessControl.DirectorySecurity]$Acl) {
         return @($Acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | ForEach-Object {
@@ -104,7 +117,8 @@ if ($ScopedTaskAuthorizations) {
             throw 'The scoped runner installation target is invalid.'
         }
     }
-    $config = [ordered]@{ schema_version = 2; expected_user_sid = $identity.User.Value; approved_scripts = $true }
+    $config = [ordered]@{ schema_version = 3; expected_user_sid = $identity.User.Value;
+        dispatcher_sid = $serviceIdentity.Value; journal_root = $journalRoot; approved_scripts = $true }
     $requestRoot = $protectedRoot
 }
 else {
@@ -178,6 +192,12 @@ $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minu
 $task = New-ScheduledTask -Action $action -Principal $taskPrincipal -Settings $settings -Description 'Bounded elevated PowerShell maintenance runner for Writer Workbench MCP. No trigger; on-demand only.'
 
 Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-Null
+if ($ScopedTaskAuthorizations) {
+    $scheduler = New-Object -ComObject 'Schedule.Service'
+    $scheduler.Connect()
+    $registeredTask = $scheduler.GetFolder('\').GetTask($TaskName)
+    $registeredTask.SetSecurityDescriptor("D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;$($serviceIdentity.Value))", 0x10)
+}
 
 $registered = Get-ScheduledTask -TaskName $TaskName
 if ([string]$registered.Principal.RunLevel -ne 'Highest') {
@@ -200,6 +220,7 @@ if ([string]$registered.Actions.Arguments -notlike "*$protectedRunner*") {
     config_path = $configPath
     request_root = $requestRoot
     scoped_task_authorizations = [bool]$ScopedTaskAuthorizations
+    dispatcher_sid = if ($ScopedTaskAuthorizations) { $serviceIdentity.Value } else { $null }
     task_authorization_root = if ($ScopedTaskAuthorizations) { Join-Path $protectedRoot 'grants' } else { $null }
     uac_disabled = $false
 } | ConvertTo-Json -Depth 3

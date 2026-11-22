@@ -2,9 +2,11 @@
 
 ## 啟用任務授權
 
-在 Nexa 主機的維護時段，透過已檢閱的發布版本，在提升權限的 64 位元 Windows PowerShell 執行 `scripts/register-mcp-powershell-admin-runner.ps1 -ScopedTaskAuthorizations`。它會以既有 Windows Task Scheduler 機制建立 `WriterWorkbench-PowerShellScopedAdminRunner`，並在 `Program Files` 建立受保護的授權庫。Windows ACL 允許管理員與 SYSTEM 寫入授權、撤銷記錄與收據。一般 MCP 和 Pi worker 程序只有供請求標記使用的收件匣可寫，同一個登入帳號可藉由一般與提升權限的 token 分工。既有緊急維護入口繼續使用原本的排程。
+在 Nexa 主機的維護時段，以已檢閱的發布版本及提升權限的 64 位元 Windows PowerShell 執行 `scripts/register-mcp-powershell-admin-runner.ps1 -ScopedTaskAuthorizations -DispatcherAccount <本機帳號> -ManagedProjectRoot <專案絕對路徑>`。派送帳號須為 Nexa 專用的啟用中本機標準帳號。操作員以自己的管理員身分註冊 `WriterWorkbench-PowerShellScopedAdminRunner`。新版授權庫在 `Program Files\WriterWorkbench-PiMaintenance-v3`。派送帳號可讀取授權及收據、可寫入請求收件匣，並可在 Task Scheduler 讀取和啟動該排程。管理員與 SYSTEM 維護受保護的設定、授權和收據。
 
-將註冊結果的 `task_authorization_root` 設為 `NEXA_PI_TASK_AUTHORIZATION_ROOT`。正式切換時設定 `NEXA_PI_REQUIRE_TASK_AUTHORIZATION=1`，使 Pi 的一般寫入、驗證、提交及檢查點要求有效授權。從同一啟動環境啟動 MCP 與 durable worker。安裝完成後，先以一般程序確認授權目錄可讀、寫入受阻，再執行服務驗收。
+以派送帳號啟動 MCP 與 durable worker，將註冊結果的 `task_authorization_root` 設為 `NEXA_PI_TASK_AUTHORIZATION_ROOT`，並設定 `NEXA_PI_REQUIRE_TASK_AUTHORIZATION=1`。發布程式、依賴、Git 設定與 Journal 須放在其他一般登入身分無法變更的位置。派送帳號用 AppContainer 執行工作區程式及測試。啟用強制授權後，開發 MCP 寫入透過 Pi 派送，診斷 fallback 保留唯讀查詢。
+
+從舊版升級前，先等待已派送的維護結束，並按維護規程停用舊版 scoped 排程。用同名排程註冊新版，保留舊授權、腳本和收據目錄。操作員在新版重發仍需要的任務授權，並視歷史恢復需求授予派送帳號舊收據目錄的唯讀權限。驗收需分別以派送帳號與一般登入帳號確認收件匣及排程權限。
 
 工作台先用既有 Workstream 和 Workspace 流程建立作用中的獨立工作區。授權操作員在已設定相同授權目錄的提升權限終端執行 `node scripts/manage-pi-task-authorization.mjs issue task.json`。`task.json` 提供 `goal`、`workspace_id`、`capabilities` 陣列，以及 UTC epoch 毫秒的 `expires_at_ms`。主機由工作區登錄資料解析工作流身分。授權記錄的 `task_authorization_id` 會寫入關聯 Pi 執行紀錄。
 
@@ -22,7 +24,7 @@ Windows 正式環境已觀察到 Node 預設的測試子程序模式在 AppConta
 
 ## 預先授權維護 Windows 服務
 
-維護已安裝的專案服務時，授權操作員在 `task.json` 的 `capabilities` 加入 `windows.service.ensure_running`，並在 `windows_services` 列出核准的服務名稱。GPT 交付的步驟以 `service_name` 指定其中一個目標。Pi 透過現有 `powershell_admin_run` 提交範圍標記。受保護的 Task Scheduler runner 從授權庫獨立核對目標、工作區、工作流、期限及撤銷狀態，再確認服務、啟動已停止的服務並等待 `Running`。同一份授權可維護多個核准目標。
+維護已安裝的專案服務時，授權操作員在 `task.json` 的 `capabilities` 加入 `windows.service.ensure_running`，並在 `windows_services` 列出核准的服務名稱。GPT 交付的步驟以 `service_name` 指定其中一個目標。Pi 透過現有 `powershell_admin_run` 提交範圍標記。受保護的 Task Scheduler runner 獨立核對授權、撤銷狀態、目標與已落盤的 Journal 子操作，再確認服務、啟動已停止的服務並等待 `Running`。同一份授權可維護多個核准目標。
 
 其他管理員維護可使用 `windows.powershell.run_approved`。操作員在提升權限的終端把已審核的 UTF-8 腳本放入註冊根目錄的 `approved-scripts/<script_id>.ps1`，並以 `Get-FileHash -Algorithm SHA256` 取得摘要。在 `task.json` 的 `windows_scripts` 列出 `script_id` 與小寫 `script_sha256`，再用相同欄位交付 Pi 步驟。runner 核對保護目錄、授權範圍和完整腳本位元組，最多執行 45 秒。固定工作目錄與系統 PowerShell 由 runner 選擇。授權和收據包含腳本摘要、派送狀態、結束碼及輸出樣本雜湊。收件匣只接收範圍標記。
 
@@ -51,7 +53,7 @@ Windows 正式環境已觀察到 Node 預設的測試子程序模式在 AppConta
 
 ## 查詢與對帳
 
-新會話可用 `dev_pi_execution_status` 同時提供 `workstream_id` 和 `workspace_id`，查詢最新批次、第一個待辦步驟、最後錯誤與現有檢查點。用 `next_before_sequence` 翻閱舊批次，再以 `operation_id` 或 `intent_id` 查閱確切請求、完成步驟與測試收據。檔案、提交及整合候選的來源資料仍由 `dev_workspace_get_provenance` 查詢。
+新會話可用 `dev_pi_execution_status` 同時提供 `workstream_id` 和 `workspace_id`，查詢最新批次、第一個待辦步驟、最後錯誤與現有檢查點。檢查點暫時無法查詢時，歷史結果仍包含 `checkpoint_status` 與可用的任務紀錄。用 `next_before_sequence` 翻閱舊批次，再以 `operation_id` 或 `intent_id` 查閱確切請求、完成步驟與測試收據。檔案、提交及整合候選的來源資料仍由 `dev_workspace_get_provenance` 查詢。
 
 `dev_workspace_journal_status` 的 `writes_available` 顯示共用日誌可否驗證並接受新資料。`isolated_operations` 列出待處理事件、對應資源及恢復狀態。遇到 `JOURNAL_SCOPE_ISOLATED` 時，依回傳的操作識別碼和範圍查閱既有證據。可驗證與可寫入的 Journal 即使有局部事件，仍會受理互不重疊的工作。
 

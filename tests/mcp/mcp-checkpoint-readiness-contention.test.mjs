@@ -123,6 +123,14 @@ async function verifyIndependentMutation(parent) {
         WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL: '0', WRITER_WORKBENCH_ISOLATED_TEST_CHECKPOINT: '0',
         WRITER_WORKBENCH_ISOLATED_TEST_TRANSACTION: '0' },
     }));
+    const begun = await client.callTool({ name: 'dev_workspace_begin_workstream',
+      arguments: { label: 'History during checkpoint contention' } });
+    assert.equal(begun.isError, undefined);
+    const { workstream_id, revision } = JSON.parse(begun.content[0].text);
+    const isolated = await client.callTool({ name: 'dev_workspace_create_isolated',
+      arguments: { workstream_id, expected_workstream_revision: revision } });
+    assert.equal(isolated.isError, undefined, isolated.content[0].text);
+    const { workspace_id } = JSON.parse(isolated.content[0].text);
     let checkpointFinished = false;
     const checkpoint = client.callTool({ name: 'dev_workspace_create_checkpoint',
       arguments: { workspace_id: 'dev_workspace_' + 'e'.repeat(24) } }, undefined, { timeout: 10_000 })
@@ -136,6 +144,14 @@ async function verifyIndependentMutation(parent) {
     assert.equal(checkpointFinished, false);
     assert.equal(await readFile(path.join(repository, file), 'utf8'), text);
     assert.equal(await readFile(lock, 'utf8'), bytes);
+    const history = await client.callTool({ name: 'dev_pi_execution_status',
+      arguments: { workstream_id, workspace_id } }, undefined, { timeout: 7000 });
+    assert.equal(history.isError, undefined, history.content[0].text);
+    const page = JSON.parse(history.content[0].text);
+    assert.equal(page.workstream.workstream_id, workstream_id);
+    assert.deepEqual(page.operations, []);
+    assert.deepEqual(page.checkpoint_status, { available: false, code: 'CHECKPOINT_STORE_BUSY' });
+    assert.equal(page.checkpoints, null);
     await rm(lock);
     const unregistered = await checkpoint;
     assert(unregistered instanceof Error || unregistered.isError, 'The unregistered fixture workspace must not produce a checkpoint');

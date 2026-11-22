@@ -566,6 +566,11 @@ export function createDevTestRunner({
     fail: failDevJournalOperation, markDegraded: markDevJournalDegraded },
 } = {}) {
   return async function runTests(input = {}) {
+    const { usesScopedAdminDispatcherRoot } = await import("./mcp-powershell-maintenance-tools.mjs");
+    if (usesScopedAdminDispatcherRoot()) {
+      throw Object.assign(new Error("Use workspace.powershell_isolated to test under the scoped dispatcher."),
+        { code: "ISOLATED_VERIFICATION_REQUIRED" });
+    }
     const startedAt = Date.now();
     const suite = input?.suite;
     const definition = suiteDefinitions[suite];

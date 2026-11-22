@@ -22,9 +22,11 @@ export const runPiManagedMcpCall=async(callback,authorizeDispatch)=>{
  await authorizeDispatch();
  return managed.run(authorizeDispatch,callback);
 };
-export async function guardPiDirectExecution({route,tool,mutation=false,params={},auditFallback,resolveWorkspace}){
+export async function guardPiDirectExecution({route,tool,mutation=false,params={},auditFallback,resolveWorkspace,
+ requireTaskAuthorization=process.env.NEXA_PI_REQUIRE_TASK_AUTHORIZATION==='1'}){
  const authorizeDispatch=managed.getStore();
  if(typeof authorizeDispatch==="function"){await authorizeDispatch();return;}
+ if(mutation&&requireTaskAuthorization)reliableFailure("PI_EXECUTION_INTENT_REQUIRED");
  const p=params._meta?.pi_fallback;
  if(p===undefined){
   try {if(await admitPiLightweightRead({tool,mutation,params,resolveWorkspace}))return;}

@@ -8,6 +8,7 @@ import {mkdtemp,rm,readFile} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {createDevOperationJournalService} from "../../server/src/mcp-development-journal-tools.mjs";
+import {journalIncident,journalIsolationOverlaps,journalMutationDetails,journalOperationScope} from "../../server/src/mcp-development-journal-isolation.mjs";
 import {createPiProductionRouteStore,validatePiProductionRouteHistory} from "../../server/src/pi-production-execution-route.mjs";
 import {createPiProductionExecutionController,guardPiDirectExecution,runPiManagedMcpCall,assertPiManagedMcpCall} from "../../server/src/pi-production-execution-controller.mjs";
 import {createPiReliableExecutionStore} from "../../server/src/pi-reliable-execution-store.mjs";
@@ -79,6 +80,27 @@ test("default direct calls require explicit audited fallback and reject forged i
 test("fallback requires mutation idempotency and fails closed when audit fails",async t=>{const f=await fixture(t);await enable(f);const params={_meta:{pi_fallback:{purpose:"emergency",reason:"Explicit GPT action",decision_id:"gpt-emergency-002"}}};
  await assert.rejects(guardPiDirectExecution({route:f.route,tool:"dev_create_file",mutation:true,params,auditFallback:async()=>{}}),{code:"FALLBACK_IDEMPOTENCY_REQUIRED"});
  params._meta.reconciliation_key="fallback-key-001";await assert.rejects(guardPiDirectExecution({route:f.route,tool:"dev_create_file",mutation:true,params,auditFallback:async()=>{throw new Error("audit failed");}}),/audit failed/);});
+test("required task authorization closes direct mutation fallback in both route modes", async () => {
+ const params = { _meta: { pi_fallback: { purpose: "emergency", reason: "Fixture", decision_id: "gpt-fixture" },
+   reconciliation_key: "fixture-key-01" } };
+ for (const revision of [0, 1]) {
+  const args = { route: { inspect: async () => ({ revision }) }, tool: "dev_create_file", mutation: true,
+   requireTaskAuthorization: true, params, auditFallback: async () => assert.fail("unapproved mutation reached audit") };
+  await assert.rejects(guardPiDirectExecution(args), { code: "PI_EXECUTION_INTENT_REQUIRED" });
+  await runPiManagedMcpCall(() => guardPiDirectExecution(args), async () => {});
+ }
+});
+test("an unresolved approved script isolates only its own target", () => {
+ const base = { operation_type: "mcp_mutation", tool_name: "powershell_admin_run" };
+ const script = id => ({ ...base, ...journalMutationDetails(base.tool_name, { script_authorization: { script_id: id } }, true) });
+ const service = { ...base, result: { service_name: "OtherService" } };
+ const historical = journalIncident(base, null, [{ ...script("maintenance-a"), operation_type: "powershell_admin_maintenance" }]);
+ const current = journalOperationScope(script("maintenance-a"));
+ assert.deepEqual(historical.scope, current);
+ assert.equal(journalIsolationOverlaps(current, journalOperationScope(script("maintenance-a"))), true);
+ assert.equal(journalIsolationOverlaps(current, journalOperationScope(script("maintenance-b"))), false);
+ assert.equal(journalIsolationOverlaps(current, journalOperationScope(service)), false);
+});
 test("hash-valid malformed route history fails safe",async t=>{const f=await fixture(t);await enable(f);const events=await f.journal.readProductionRoutes();events[0].result.route_record="{}";
  assert.throws(()=>validatePiProductionRouteHistory(events),{code:"CORRUPT_ROUTE_STATE"});});
 

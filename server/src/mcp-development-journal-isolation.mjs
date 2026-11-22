@@ -25,6 +25,9 @@ export function journalMutationDetails(tool, args, piManaged) {
   if (piManaged && tool === "powershell_admin_run" && args.service_authorization) {
     return { result: { service_name: args.service_authorization.service_name } };
   }
+  if (piManaged && tool === "powershell_admin_run" && args.script_authorization) {
+    return { result: { script_id: args.script_authorization.script_id } };
+  }
   return {};
 }
 
@@ -46,6 +49,9 @@ export function journalOperationScope(operation) {
     if (result?.isolation_mode === "appcontainer") return { level: "operation", resource: "appcontainer" };
     if (tool_name === "powershell_admin_run" && typeof result?.service_name === "string") {
       return { level: "resource", resource: `windows.service:${result.service_name.toLowerCase()}`, tool_name };
+    }
+    if (tool_name === "powershell_admin_run" && typeof result?.script_id === "string") {
+      return { level: "resource", resource: `windows.script:${result.script_id.toLowerCase()}`, tool_name };
     }
     return { level: "tool", tool_name };
   }

@@ -69,7 +69,42 @@ function Confirm-MaintenanceGrant([string]$GrantId, [string]$Binding, [long]$Cre
         $null = [IO.File]::GetAttributes($revocation)
         throw 'The protected grant has been revoked.'
     } catch [IO.FileNotFoundException] {
-        return $targets[0]
+        return [pscustomobject]@{ grant = $grant; target = $targets[0] }
+    }
+}
+
+function Assert-JournalAdmission($Marker, [string]$JournalRoot, $Authorization, [bool]$ScriptRequest) {
+    $events = [IO.Path]::Combine($JournalRoot, 'events')
+    for ($directory = [IO.DirectoryInfo]::new($events); $null -ne $directory; $directory = $directory.Parent) {
+        Assert-PlainDirectory $directory.FullName
+    }
+    $sequenceText = $Marker.Groups['sequence'].Value
+    $sequence = [long]$sequenceText
+    $eventId = 'dev_journal_event_' + $Marker.Groups['event'].Value
+    $event = Read-ProtectedJson ([IO.Path]::Combine($events, "$sequenceText-$eventId.json"))
+    $head = Read-ProtectedJson ([IO.Path]::Combine($JournalRoot, 'head.json'))
+    $grant = $Authorization.grant
+    $result = $event.result
+    if ($head.schema_version -ne 1 -or $sequence -lt 1 -or $head.latest_sequence -lt $sequence -or
+        $event.schema_version -ne 1 -or $event.sequence -ne $sequence -or $event.journal_event_id -cne $eventId -or
+        $event.event_hash -cnotmatch '^[a-f0-9]{64}$' -or
+        ($head.latest_sequence -eq $sequence -and ($head.latest_event_id -cne $eventId -or $head.latest_event_hash -cne $event.event_hash)) -or
+        $event.operation_id -cne ('dev_operation_' + $Marker.Groups['id'].Value) -or
+        $event.parent_operation_id -cnotmatch '^dev_operation_[a-f0-9]{32}$' -or
+        $event.stage -cne 'operation_started' -or $event.tool_name -cne 'powershell_admin_run' -or
+        $event.operation_type -cne 'powershell_admin_maintenance' -or
+        $event.workspace_id -cne $grant.workspace_id -or $event.workstream_id -cne $grant.workstream_id -or
+        $result.elevated -ne $true -or $result.scoped_admin_dispatch_protocol -ne 3 -or
+        $result.task_authorization_id -cne $grant.task_authorization_id -or
+        $result.scoped_admin_scope_binding -cne $Marker.Groups['binding'].Value) {
+        throw 'The scoped maintenance request has no matching committed Journal admission.'
+    }
+    if ($ScriptRequest) {
+        if ($result.script_id -cne $Authorization.target.script_id -or $result.script_sha256 -cne $Authorization.target.script_sha256) {
+            throw 'The Journal admission does not authorize this script.'
+        }
+    } elseif ($result.service_name -cne $Authorization.target) {
+        throw 'The Journal admission does not authorize this service.'
     }
 }
 
@@ -153,7 +188,9 @@ function Invoke-ApprovedScript([string]$Source, [string]$Root, [string]$Processi
 }
 
 $config = Read-ProtectedJson $ConfigPath
-if ($config.schema_version -ne 2 -or $config.expected_user_sid -cne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) {
+if ($config.schema_version -ne 3 -or $config.expected_user_sid -cne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -or
+    $config.dispatcher_sid -cnotmatch '^S-1-5-21-(?:\d+-){3}\d+$' -or $config.dispatcher_sid -ceq $config.expected_user_sid -or
+    $config.journal_root -isnot [string] -or $config.journal_root -cnotmatch '^[A-Za-z]:\\') {
     throw 'Protected runner identity or configuration mismatch.'
 }
 $root = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($ConfigPath))
@@ -166,7 +203,7 @@ foreach ($directory in @($requests, $processing, $results, $grants)) { Assert-Pl
 
 # Only the marker's name is input. The elevated runner never opens or executes
 # a file supplied through the writable inbox.
-$markerPattern = '^(?<id>[a-f0-9]{32})~(?<grant>pi_task_[a-f0-9]{32})~(?<binding>[a-f0-9]{32})~(?<time>[0-9]{13})(?<kind>~script)?\.scoped-request$'
+$markerPattern = '^(?<id>[a-f0-9]{32})~(?<grant>pi_task_[a-f0-9]{32})~(?<binding>[a-f0-9]{32})~(?<time>[0-9]{13})~(?<sequence>[0-9]{12})~(?<event>[a-f0-9]{32})(?<kind>~script)?\.scoped-request$'
 $pending = [IO.Directory]::EnumerateFiles($requests, '*.scoped-request') |
     Where-Object { [IO.Path]::GetFileName($_) -cmatch $markerPattern } | Select-Object -First 1
 if (-not $pending) { exit 0 }
@@ -192,7 +229,9 @@ $result = @{ schema_version = 2; request_id = $requestId; task_authorization_id 
     service_name = $null; script_id = $null; script_sha256 = $null; execution_ok = $false; exit_code = $null; timed_out = $false; stdout = ''; stderr = '';
     stdout_truncated = $false; stderr_truncated = $false; dispatch_started = $false; reason = 'SCOPED_ADMIN_AUTHORIZATION_DENIED' }
 try {
-    $target = Confirm-MaintenanceGrant $grantId $binding ([long]$marker.Groups['time'].Value) $grants $scriptRequest
+    $authorization = Confirm-MaintenanceGrant $grantId $binding ([long]$marker.Groups['time'].Value) $grants $scriptRequest
+    Assert-JournalAdmission $marker $config.journal_root $authorization $scriptRequest
+    $target = $authorization.target
     if ($scriptRequest) {
         if ($config.approved_scripts -ne $true) { throw 'Approved scripts are unavailable.' }
         $source = Read-ApprovedScript ([IO.Path]::Combine($root, 'approved-scripts')) $target
