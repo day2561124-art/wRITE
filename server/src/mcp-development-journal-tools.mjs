@@ -1614,15 +1614,30 @@ export function createDevOperationJournalService({
     return resolveDevWorkspaceExecutionContext({ workspace_id: workspaceId }, { mutation: false });
   };
 
+  function recoveryGraph(verification) {
+    const dangling = new Set(verification.dangling_operations);
+    const unsettled = new Set([...dangling, ...verification.active_operations]);
+    const starts = [];
+    const children = new Map();
+    for (const event of verification.events) {
+      if (event.stage !== "operation_started" || !unsettled.has(event.operation_id)) continue;
+      if (dangling.has(event.operation_id)) starts.push(event);
+      if (!event.parent_operation_id) continue;
+      const siblings = children.get(event.parent_operation_id) ?? [];
+      siblings.push(event.operation_id);
+      children.set(event.parent_operation_id, siblings);
+    }
+    return { starts, unsettled, children };
+  }
+
   async function recoverDanglingSnapshot(verification, resolveContext = resolveRecoveryContext, scheduled = false) {
     if (explicitDegraded) return;
-    const dangling = new Set(verification.dangling_operations);
-    const starts = verification.events.filter(event => event.stage === "operation_started" && dangling.has(event.operation_id));
+    const { starts, unsettled, children } = recoveryGraph(verification);
     let scheduledAttempts = 0;
     // Recover inner operations before their boundary admission.
     for (const started of starts.reverse()) {
       const operationId = started.operation_id;
-      if (!canObserveRecovery(started)) continue;
+      if (!canObserveRecovery(started) || children.get(operationId)?.some(id => unsettled.has(id))) continue;
       if (scheduled && !canAttemptRecovery(operationId)) continue;
       if (scheduled && scheduledAttempts >= recoveryBatchLimit) break;
       let recovery = recoveringOperations.get(operationId);
@@ -1650,6 +1665,7 @@ export function createDevOperationJournalService({
         const current = await verify();
         if (current.dangling_operations.includes(operationId)) throw error;
       }
+      unsettled.delete(operationId);
     }
   }
 
@@ -1662,7 +1678,8 @@ export function createDevOperationJournalService({
   function canObserveRecovery(started) {
     // Interrupted validation and reviewed resolution have separate evidence
     // owners, and cannot be concluded from a generic workspace snapshot.
-    return !manualRecoveryTypes.has(started.operation_type) && isLocalOrphan(started);
+    const interruptedGc = started.operation_type === "checkpoint_gc" && started.result?.dry_run !== true;
+    return !interruptedGc && !manualRecoveryTypes.has(started.operation_type) && isLocalOrphan(started);
   }
 
   function canAttemptRecovery(operationId) {
@@ -1676,8 +1693,9 @@ export function createDevOperationJournalService({
     for (const id of recoveryAttempts.keys()) if (!dangling.has(id)) recoveryAttempts.delete(id);
     if (dangling.size === 0) return;
     let nextDue = Infinity;
-    for (const event of verification.events) {
-      if (event.stage !== "operation_started" || !dangling.has(event.operation_id) || !canObserveRecovery(event)) continue;
+    const { starts, children } = recoveryGraph(verification);
+    for (const event of starts) {
+      if (!canObserveRecovery(event) || children.has(event.operation_id)) continue;
       const attempt = recoveryAttempts.get(event.operation_id);
       if ((attempt?.count ?? 0) < recoveryAttemptLimit) nextDue = Math.min(nextDue, attempt?.due ?? 0);
     }
@@ -1825,8 +1843,13 @@ export function createDevOperationJournalService({
       }
 
       await terminal(operationId, "operation_recovered", {
-        beforeAppend: () => {
+        beforeAppend: latest => {
           if (!isLocalOrphan(started)) throw new Error("JOURNAL_RECOVERY_OWNER_NOT_PROVEN_DEAD");
+          const pending = new Set([...latest.active_operations, ...latest.dangling_operations]);
+          if (latest.events.some(event => event.parent_operation_id === operationId
+            && event.stage === "operation_started" && pending.has(event.operation_id))) {
+            throw new Error("JOURNAL_CHILD_RECOVERY_PENDING");
+          }
         },
         reconciles_event_id: started.journal_event_id,
         targets: observedTargets.length > 0 ? observedTargets : started.targets,
