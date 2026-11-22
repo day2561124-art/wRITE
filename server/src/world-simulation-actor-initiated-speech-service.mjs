@@ -11,6 +11,7 @@ import {
 } from "./world-simulation-goal-implementation-intention-activation-service.mjs";
 import { runWorldSimulationNativeCapability } from "./world-simulation-neural-service.mjs";
 import { adjudicateWorldSimulationCausality } from "./world-simulation-causal-rule-engine.mjs";
+import { buildWorldSimulationSubjectiveChoiceCommitmentReceipts } from "./world-simulation-subjective-choice-commitment-receipt-service.mjs";
 
 export const worldSimulationActorInitiatedSpeechVersion =
   "world-actor-initiated-speech-v1";
@@ -256,7 +257,7 @@ export async function runWorldSimulationActorInitiatedSpeech(input = {}, options
       reject("WORLD_ACTOR_SPEECH_ACTION_CANDIDATE_MUTATED",
         "Action proposer cannot change World-owned action payloads behind a stable action ID.");
   }
-  const response=await invokeBrain({
+  const actionDecisionPacket={
     character:actor,
     cognition:{
       autonomous_opportunity:{
@@ -274,7 +275,8 @@ export async function runWorldSimulationActorInitiatedSpeech(input = {}, options
       action_choice_owner:"character_brain",
       causal_result_owner:"world_simulation_causal_rule_engine",
     },
-  },actor,sessionId,options,before);
+  };
+  const response=await invokeBrain(actionDecisionPacket,actor,sessionId,options,before);
   if (object(response).goal_intents!==undefined || object(response).plan_intents!==undefined)
     reject("WORLD_ACTOR_SPEECH_MIXED_COGNITIVE_WRITE_UNSUPPORTED",
       "Actor-initiated action cannot mix goal or plan writes into its causal turn.");
@@ -296,6 +298,15 @@ export async function runWorldSimulationActorInitiatedSpeech(input = {}, options
     character:actor,selection:"candidate_action_intent",
     action_id:actionId,intent:trustedCandidate.intent??null,candidate:clone(trustedCandidate),
   }];
+  // One genuine Phase74D receipt for the exact character-facing menu and
+  // selected World action. Receipts record choice, never success or truth.
+  const subjectiveChoiceCommitmentReceipts=
+    buildWorldSimulationSubjectiveChoiceCommitmentReceipts({
+      world_simulation_session_id:sessionId,turn_id:turnId,
+      state_revision:before.revision,world_state_hash:before.state_hash,
+      decision_packets:[actionDecisionPacket],
+      selected_action_intents:selected,
+    });
   const current=await getWorldSimulationState(sessionId,options);
   assertExactState(before,current);
   const event={
@@ -330,6 +341,10 @@ export async function runWorldSimulationActorInitiatedSpeech(input = {}, options
     expected_revision:before.revision,expected_state_hash:before.state_hash,
     turn_id:turnId,next_world_state:causal.next_world_state,event:null,
     selected_action_intents:selected,
+    subjective_choice_commitment_receipts:clone(subjectiveChoiceCommitmentReceipts),
+    // Preserve only source increments admitted by the *actual* causal owner.
+    // No fabricated listener, release timestamp or interpretation.
+    communication_observer_increment_admissions:clone(causal.communication_observer_increment_admissions??[]),
     state_transitions:array(causal.state_transitions),
     action_outcomes:array(causal.action_outcomes),
     knowledge_transitions:array(causal.knowledge_transitions),
