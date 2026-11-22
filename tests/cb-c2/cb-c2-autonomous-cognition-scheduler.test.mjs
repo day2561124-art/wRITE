@@ -3,6 +3,8 @@ import { rm } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  createWorldSimulationCharacterRuntimeManager,
+  runWorldSimulationTurn,
   buildWorldSimulationLoopContract,
   dispatchWorldSimulationAutonomousCognitionOpportunities,
   scheduleWorldSimulationAutonomousCognitionOpportunities,
@@ -11,6 +13,8 @@ import { projectRoot } from "../../server/src/project-paths.mjs";
 import { beginWorldSimulationSession } from "../../server/src/world-simulation-session-service.mjs";
 import { commitWorldSimulationTurn, getWorldSimulationHistory, getWorldSimulationState } from "../../server/src/world-simulation-state-service.mjs";
 import { hashAgentRunValue } from "../../server/src/agent-run-service.mjs";
+import { buildCharacterCommunicationActionCandidate } from "../../server/src/character-communication-foundation-service.mjs";
+import { nativeImplementationIntentionActivationCapability } from "../../server/src/world-simulation-goal-implementation-intention-activation-service.mjs";
 import { buildWorldSimulationSubjectiveClaims } from "../../server/src/world-simulation-subjective-claim-projection-service.mjs";
 import { resolveWorldSimulationSubjectiveBeliefs } from "../../server/src/world-simulation-subjective-belief-resolution-service.mjs";
 import { buildWorldSimulationSubjectiveBeliefRevisions } from "../../server/src/world-simulation-subjective-belief-revision-service.mjs";
@@ -656,6 +660,132 @@ try {
   },{fixtureRoot:goalFixtureRoot});
   assert.equal(planReplay.scheduler_projection.opportunity_count,0,
     "Successfully authored plan opportunity must be durably suppressed on replay.");
+
+  // Cross-path acceptance: an eventless C2 goal and Phase69A plan must be
+  // usable in a subsequent real, queued World observation turn. The later
+  // observation is an explicitly declared TEST fixture, not an event
+  // fabricated by the eventless cognition writer. A chosen speech action
+  // must cause a committed World communication outcome, not passive intent.
+  const inquiryAlly="同伴・計時器研究員";
+  const inquiryWords="你有查過這個計時器的實際上限嗎？";
+  const speechCandidate=buildCharacterCommunicationActionCandidate({
+    character,
+    cognition:{communication_goal:{
+      character,purpose:"request_information",mode:"direct",
+      addressee:inquiryAlly,public_content:inquiryWords,
+      communication_opportunity:"initiate",
+    }},
+  });
+  assert.ok(speechCandidate);
+  const actionScene="c2_followup_room";
+  const actionEventId="c2_followup_inquiry_opportunity";
+  const actionWorld={
+    ...structuredClone(planAfter.state),
+    event_queue:[{
+      event_id:actionEventId,type:"observation",scene_id:actionScene,
+      participants:[character],summary:"同伴在附近，可以詢問計時器規格",
+    }],
+    scenes:{
+      [actionScene]:{
+        scene_id:actionScene,
+        simulation_time:planAfter.state.simulation_time,
+        dimensions:{width_m:6,depth_m:6},
+        entity_positions:{
+          [character]:{x:1,y:1},
+          [inquiryAlly]:{x:2,y:1},
+        },
+        observable_by:{
+          [character]:{visual:["同伴在一旁翻閱計時器規格"],audible:[]},
+          [inquiryAlly]:{visual:[],audible:[]},
+        },
+      },
+    },
+    characters:{
+      ...structuredClone(planAfter.state.characters),
+      [inquiryAlly]:{known:[]},
+    },
+    available_actions:{[character]:[speechCandidate]},
+  };
+  const actionSession=await beginWorldSimulationSession({
+    source_text:"C2 eventless plan followed by source-declared World observation fixture",
+    characters:Object.keys(actionWorld.characters),
+    initial_world_state:actionWorld,
+  },{fixtureRoot:goalFixtureRoot});
+  const actionSid=actionSession.world_simulation_session_id;
+  const actionRuntimeManager=createWorldSimulationCharacterRuntimeManager({
+    identityResolver:async who=>({
+      entity_id:"cb_c2_followup_actor",canonical_name:who,
+      formal:true,identity_source:"cb_c3_eventless_plan_world_handoff_test",
+    }),
+  });
+  let activationSeen=false;
+  let guidanceSeen=false;
+  const actionTurn=await runWorldSimulationTurn({
+    world_simulation_session_id:actionSid,event_id:actionEventId,
+  },{
+    fixtureRoot:goalFixtureRoot,
+    characterRuntimeManager:actionRuntimeManager,
+    characterBrainNativeCapabilities:[nativeImplementationIntentionActivationCapability],
+    characterBrain:async packet=>{
+      assert.equal(packet.character,character);
+      if(packet.cognition?.implementation_intention_activation){
+        const activation=packet.cognition.implementation_intention_activation;
+        activationSeen=true;
+        assert.equal(activation.plans.length,1,
+          "A C2-authored Phase69A plan must re-enter the normal Phase69C World cue resolver.");
+        assert.equal(activation.plans[0].if_cue.label,
+          "timer_doubt_requires_verification");
+        return {
+          plan_activation_context_token:activation.context_token,
+          activated_plan_tokens:[activation.plans[0].plan_token],
+        };
+      }
+      const guidance=packet.cognition?.implementation_intention_guidance;
+      guidanceSeen=guidance?.implementation_intentions?.some(plan=>
+        plan.then_response.label==="ask_trusted_ally")??false;
+      assert.equal(guidanceSeen,true,
+        "The plan produced by eventless C2 must guide the next real World decision.");
+      assert.ok(packet.candidate_action_intents.some(row=>
+        row.action_id===speechCandidate.action_id),
+        "World must supply a real available communication candidate.");
+      return {action_id:speechCandidate.action_id};
+    },
+  });
+  const actionHistory=await getWorldSimulationHistory(
+    actionSid,{fixtureRoot:goalFixtureRoot});
+  const actionState=await getWorldSimulationState(
+    actionSid,{fixtureRoot:goalFixtureRoot});
+  const actionReceipt=actionHistory.turns.find(turn=>
+    turn.turn_id===actionTurn.turn_id &&
+    turn.revision_to===actionTurn.revision);
+  assert.ok(actionReceipt,"A selected inquiry must have an exact committed World receipt.");
+  const causalInquiries=(actionReceipt.action_outcomes??[]).filter(outcome=>
+    outcome.actor===character &&
+    outcome.action_id===speechCandidate.action_id &&
+    outcome.result==="communication_emitted");
+  console.log(JSON.stringify({
+    scenario:"c2_plan_to_eventful_world_inquiry",
+    c2_goals_prior:(planAfter.state.motivational_goal_history??[]).length,
+    c2_plans_prior:(planAfter.state.goal_implementation_intention_history??[]).length,
+    activation_seen:activationSeen,guidance_seen:guidanceSeen,
+    selected_action:actionTurn.selected_action_intents?.[0]?.action_id??null,
+    causal_speech_outcomes:causalInquiries.length,
+    world_revision:actionState.revision,
+    information_verified:false,
+  }));
+  assert.equal(actionTurn.committed,true);
+  assert.equal(activationSeen,true);
+  assert.equal(guidanceSeen,true);
+  assert.equal(actionState.revision,1);
+  assert.equal(actionTurn.selected_action_intents?.[0]?.action_id,
+    speechCandidate.action_id);
+  assert.equal(causalInquiries.length,1,
+    "C2 goal-to-plan continuity must result in actual World speech, not a passive action receipt.");
+  assert.equal(causalInquiries[0].communication_event?.addressee,inquiryAlly);
+  assert.equal(causalInquiries[0].communication_event?.semantic_content,inquiryWords);
+  assert.equal(causalInquiries[0].communication_event?.world_truth_claimed,false);
+  assert.equal((actionState.state.motivational_goal_history??[]).length,2);
+  assert.equal((actionState.state.goal_implementation_intention_history??[]).length,1);
 
   // A committed goal does not automatically demand a plan. Without an
   // explicit plan_intents reply, a C2 thought must remain read-only.
