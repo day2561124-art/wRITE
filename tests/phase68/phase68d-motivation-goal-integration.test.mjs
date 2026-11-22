@@ -608,6 +608,7 @@ assert.deepEqual(
 const fixtureRoot = path.join(projectRoot, "tests", ".tmp",
   `cbc3-native-goal-${process.pid}-${Date.now()}`);
 const sessionOptions = { fixtureRoot };
+const trustedAlly = "同伴・研究助手";
 await rm(fixtureRoot, { recursive: true, force: true });
 try {
   const session = await beginWorldSimulationSession({
@@ -625,17 +626,37 @@ try {
       scenes: { room: {
         scene_id: "room", simulation_time: "2026-09-26T00:00:00.000Z",
         dimensions: { width_m: 6, depth_m: 6 },
-        entity_positions: { [rio]: { x: 1, y: 1 } },
-        observable_by: { [rio]: { visual: [], audible: [] } },
+        entity_positions: { [rio]: { x: 1, y: 1 }, [trustedAlly]: {x: 2, y: 1} },
+        observable_by: {
+          [rio]: { visual: [], audible: [] },
+          [trustedAlly]: { visual: [], audible: [] },
+        },
       }, "room-reentry": {
         scene_id: "room-reentry", simulation_time: "2026-09-26T00:00:00.000Z",
         dimensions: { width_m: 6, depth_m: 6 },
-        entity_positions: { [rio]: { x: 1, y: 1 } },
-        observable_by: { [rio]: { visual: ["同伴請求協助"], audible: [] } },
+        entity_positions: { [rio]: { x: 1, y: 1 }, [trustedAlly]: {x: 2, y: 1} },
+        observable_by: {
+          [rio]: { visual: ["同伴請求協助"], audible: [] },
+          [trustedAlly]: { visual: [], audible: [] },
+        },
       } },
-      characters: { [rio]: { known: [], current_goal: "等待同伴" } },
+      characters: {
+        [rio]: { known: [], current_goal: "等待同伴" },
+        [trustedAlly]: { known: [] },
+      },
       available_actions: { [rio]: [{
-        action_id: "ask-trusted-ally", intent: "向可信任的同伴求助", duration_ms: 100,
+        action_id: "ask-trusted-ally",
+        intent: "向可信任的同伴求助", duration_ms: 100,
+        target: trustedAlly,
+        communication: {
+          channel: "speech",
+          addressee: trustedAlly,
+          message: {
+            speech_act: "request_information",
+            semantic_content: "我想確認計時器的實際上限，你有看過規格嗎？",
+            epistemic_status: "unverified",
+          },
+        },
       }] },
     },
   }, sessionOptions);
@@ -833,7 +854,9 @@ try {
   assert.equal(publicEvent?.actor, rio);
   assert.equal(publicEvent?.channel, "speech");
   assert.equal(publicEvent?.world_truth_claimed, false);
-  assert.ok(publicEvent?.addressee && publicEvent.addressee !== rio);
+  assert.equal(publicEvent?.addressee, trustedAlly);
+  assert.equal(publicEvent?.semantic_content,
+    "我想確認計時器的實際上限，你有看過規格嗎？");
   assert.equal(reentryTurn.selected_action_intents[0].candidate.communication?.channel, "speech");
   const afterReentry = await getWorldSimulationState(
     session.world_simulation_session_id, sessionOptions);
