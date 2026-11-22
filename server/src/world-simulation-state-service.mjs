@@ -286,7 +286,7 @@ export async function commitWorldSimulationTurn(
       "autonomous_actor_initiated_action");
     const selections = input.selected_action_intents ?? [];
     const outcomes = input.action_outcomes ?? [];
-    if (meta.version !== "cb-c4-world-owned-eventless-actor-speech-v1"
+    if (meta.version !== "world-actor-initiated-speech-v1"
       || input.event != null
       || input.autonomous_cognition_goal_commitment != null
       || input.autonomous_cognition_plan_commitment != null
@@ -310,7 +310,7 @@ export async function commitWorldSimulationTurn(
         outcome?.actor === meta.character && outcome?.action_id === meta.action_id)
       || input.causal_resolution_id !== meta.causal_resolution_id) {
       const error = new Error("Actor-initiated eventless speech needs exact World causal evidence.");
-      error.code = "CB_C4_WORLD_SPEECH_COMMIT_METADATA_INVALID";
+      error.code = "WORLD_ACTOR_SPEECH_WORLD_SPEECH_COMMIT_METADATA_INVALID";
       throw error;
     }
   }

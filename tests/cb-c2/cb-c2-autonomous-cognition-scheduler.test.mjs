@@ -707,7 +707,7 @@ try {
     },
     available_actions:{[character]:[speechCandidate]},
   };
-  // CB-C4: an actor with a prior C2 committed goal and Phase69A plan can
+  // Actor-initiated speech: an actor with a prior C2 committed goal and Phase69A plan can
   // select a canonical World speech candidate from a fresh internal cue.
   // There is NO queued observation event, invented ally answer or belief
   // verification. Phase69C activation and actual causal speech must both occur.
@@ -716,7 +716,7 @@ try {
     event_queue:[],
   };
   const spontaneousSession=await beginWorldSimulationSession({
-    source_text:"CB-C4 World-owned actor-initiated speech with no external event",
+    source_text:"actor-initiated World speech World-owned actor-initiated speech with no external event",
     characters:Object.keys(spontaneousWorld.characters),
     initial_world_state:spontaneousWorld,
   },{fixtureRoot:goalFixtureRoot});
@@ -802,7 +802,7 @@ try {
   // Absence of choice must not create a dummy external World turn.
   for(const behavior of ["decline","foreign_action"]){
     const fresh=await beginWorldSimulationSession({
-      source_text:"CB-C4 refusal or forged action "+behavior,
+      source_text:"actor-initiated World speech refusal or forged action "+behavior,
       characters:Object.keys(spontaneousWorld.characters),
       initial_world_state:spontaneousWorld,
     },{fixtureRoot:goalFixtureRoot});
@@ -824,7 +824,7 @@ try {
         : {action_id:behavior==="decline"?"reject_all":"forged_action_id"},
     });
     if(behavior==="foreign_action"){
-      await assert.rejects(call(),error=>error?.code==="CB_C4_ACTION_NOT_AVAILABLE");
+      await assert.rejects(call(),error=>error?.code==="WORLD_ACTOR_SPEECH_ACTION_NOT_AVAILABLE");
     }else{
       const declined=await call();
       assert.equal(declined.committed,false);
@@ -840,7 +840,7 @@ try {
   // Actor-originated action must lose a CAS race instead of replaying an
   // old choice, even if its cognition and chosen candidate were valid.
   const autonomousRace=await beginWorldSimulationSession({
-    source_text:"CB-C4 actor speech competing World commit",
+    source_text:"actor-initiated World speech actor speech competing World commit",
     characters:Object.keys(spontaneousWorld.characters),
     initial_world_state:spontaneousWorld,
   },{fixtureRoot:goalFixtureRoot});
@@ -868,7 +868,7 @@ try {
     },{fixtureRoot:goalFixtureRoot});
     actorRaceWinnerCount++;
     return {action_id:speechCandidate.action_id};
-  }}),error=>error?.code==="CB_C4_WORLD_STATE_STALE");
+  }}),error=>error?.code==="WORLD_ACTOR_SPEECH_WORLD_STATE_STALE");
   const autonomousRaceAfter=await getWorldSimulationState(
     autonomousRaceSid,{fixtureRoot:goalFixtureRoot});
   const autonomousRaceHistory=await getWorldSimulationHistory(
@@ -898,7 +898,7 @@ try {
       delete guardedWorld.scenes[actionScene].entity_positions[inquiryAlly];
     }
     const guarded=await beginWorldSimulationSession({
-      source_text:"CB-C4 guarded scenario "+fault,
+      source_text:"actor-initiated World speech guarded scenario "+fault,
       characters:Object.keys(guardedWorld.characters),
       initial_world_state:guardedWorld,
     },{fixtureRoot:goalFixtureRoot});
@@ -915,7 +915,7 @@ try {
       called++;return {action_id:speechCandidate.action_id};
     }});
     if(fault==="external_event_pending"){
-      await assert.rejects(runGuard(),error=>error?.code==="CB_C4_EXTERNAL_EVENT_PENDING");
+      await assert.rejects(runGuard(),error=>error?.code==="WORLD_ACTOR_SPEECH_EXTERNAL_EVENT_PENDING");
     }else{
       const blocked=await runGuard();
       assert.equal(blocked.status,"no_grounded_speech_candidate");

@@ -13,7 +13,7 @@ import { runWorldSimulationNativeCapability } from "./world-simulation-neural-se
 import { adjudicateWorldSimulationCausality } from "./world-simulation-causal-rule-engine.mjs";
 
 export const worldSimulationActorInitiatedSpeechVersion =
-  "cb-c4-world-owned-eventless-actor-speech-v1";
+  "world-actor-initiated-speech-v1";
 
 function object(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -41,14 +41,14 @@ function presentAt(point) {
 function sceneForActor(worldState, actor) {
   const found = Object.entries(object(worldState.scenes)).filter(([,scene]) =>
     presentAt(exactCharacterValue(scene?.entity_positions, actor)));
-  if (found.length !== 1) reject("CB_C4_ACTOR_SCENE_UNRESOLVED",
+  if (found.length !== 1) reject("WORLD_ACTOR_SPEECH_ACTOR_SCENE_UNRESOLVED",
     "Actor-initiated speech requires exactly one committed scene containing the actor.");
   return { sceneId: found[0][0], scene: found[0][1] };
 }
 function eligibleSpeechCandidates(worldState, actor, scene) {
   const positions = object(scene.entity_positions);
   const list = array(exactCharacterValue(worldState.available_actions, actor));
-  if (list.length > 24) reject("CB_C4_ACTION_CATALOG_UNBOUNDED",
+  if (list.length > 24) reject("WORLD_ACTOR_SPEECH_ACTION_CATALOG_UNBOUNDED",
     "Actor-initiated speech requires a bounded World action catalog.");
   const ids = new Set();
   const admitted = [];
@@ -57,7 +57,7 @@ function eligibleSpeechCandidates(worldState, actor, scene) {
     const communication = object(c.communication);
     if (typeof c.action_id !== "string" || !c.action_id.trim()
       || typeof c.intent !== "string" || !c.intent.trim()
-      || ids.has(c.action_id)) reject("CB_C4_ACTION_CATALOG_INVALID",
+      || ids.has(c.action_id)) reject("WORLD_ACTOR_SPEECH_ACTION_CATALOG_INVALID",
         "World action catalog contains a malformed or duplicate candidate.");
     ids.add(c.action_id);
     if (communication.channel !== "speech") continue;
@@ -69,25 +69,25 @@ function eligibleSpeechCandidates(worldState, actor, scene) {
   return admitted;
 }
 function assertNoConcurrentWorldWork(state) {
-  if (array(state.event_queue).length) reject("CB_C4_EXTERNAL_EVENT_PENDING",
+  if (array(state.event_queue).length) reject("WORLD_ACTOR_SPEECH_EXTERNAL_EVENT_PENDING",
     "A queued World event has precedence over an actor-initiated speech turn.");
-  if (array(state.sound_events).length) reject("CB_C4_ACOUSTIC_INGRESS_PENDING",
+  if (array(state.sound_events).length) reject("WORLD_ACTOR_SPEECH_ACOUSTIC_INGRESS_PENDING",
     "Actor-initiated speech cannot skip unresolved acoustic perception.");
   if (Object.values(object(state.projectiles)).some(p => p?.active === true)
     || Object.values(object(state.ability_fields)).some(p => p?.active === true))
-    reject("CB_C4_PHYSICAL_PROCESS_PENDING",
+    reject("WORLD_ACTOR_SPEECH_PHYSICAL_PROCESS_PENDING",
       "Actor-initiated speech cannot bypass pending active physical processes.");
 }
 function assertExactState(before, after) {
   if (before.revision !== after.revision || before.state_hash !== after.state_hash)
-    reject("CB_C4_WORLD_STATE_STALE",
+    reject("WORLD_ACTOR_SPEECH_WORLD_STATE_STALE",
       "An actor-initiated action cannot reuse an obsolete World state.");
 }
 async function invokeBrain(packet, actor, sessionId, options, before) {
   const current = await getWorldSimulationState(sessionId, options);
   assertExactState(before, current);
   if (!projectWorldSimulationConsciousCognitionAdmission(current.state, actor).admitted)
-    reject("CB_C4_CONSCIOUS_ADMISSION_DENIED", "Sleeping actor cannot choose speech.");
+    reject("WORLD_ACTOR_SPEECH_CONSCIOUS_ADMISSION_DENIED", "Sleeping actor cannot choose speech.");
   if (options.characterRuntimeManager?.runCharacterTurn) {
     let callbackError=null, completed=false;
     const result=await options.characterRuntimeManager.runCharacterTurn({
@@ -103,7 +103,7 @@ async function invokeBrain(packet, actor, sessionId, options, before) {
       },
     },options);
     if(callbackError) throw callbackError;
-    if(!completed) reject("CB_C4_BRAIN_CALLBACK_NOT_COMPLETED",
+    if(!completed) reject("WORLD_ACTOR_SPEECH_BRAIN_CALLBACK_NOT_COMPLETED",
       "Actor cognition must actually invoke the Character Brain.");
     return result;
   }
@@ -111,7 +111,7 @@ async function invokeBrain(packet, actor, sessionId, options, before) {
 }
 
 /**
- * Narrow CB-C4 native slice: a currently admitted, awake actor may voluntarily
+ * Narrow actor-initiated World speech native slice: a currently admitted, awake actor may voluntarily
  * speak to a colocated character, using an existing World-owned candidate.
  * The internal cognition cue is not an external event. The causal rule engine,
  * native consistency critic and atomic World writer own the actual outcome.
@@ -119,23 +119,23 @@ async function invokeBrain(packet, actor, sessionId, options, before) {
  */
 export async function runWorldSimulationActorInitiatedSpeech(input = {}, options = {}) {
   if (typeof options.characterBrain !== "function")
-    reject("CB_C4_CHARACTER_BRAIN_REQUIRED", "Actor-initiated speech requires a Character Brain.");
+    reject("WORLD_ACTOR_SPEECH_CHARACTER_BRAIN_REQUIRED", "Actor-initiated speech requires a Character Brain.");
   if (options.causalAdjudicator !== undefined)
-    reject("CB_C4_CUSTOM_CAUSAL_ADJUDICATOR_FORBIDDEN",
+    reject("WORLD_ACTOR_SPEECH_CUSTOM_CAUSAL_ADJUDICATOR_FORBIDDEN",
       "Actor-initiated speech always uses canonical World causal rules.");
   const sessionId=input.world_simulation_session_id;
   const actor=input.character;
   if (typeof sessionId !== "string" || !sessionId.trim()
     || typeof actor !== "string" || !actor.trim())
-    reject("CB_C4_INPUT_INVALID", "Session and actor are required.");
+    reject("WORLD_ACTOR_SPEECH_INPUT_INVALID", "Session and actor are required.");
   await assertWorldSimulationSession(sessionId,options);
   const before=await getWorldSimulationState(sessionId,options);
   const state=before.state;
   assertNoConcurrentWorldWork(state);
   if (!projectWorldSimulationConsciousCognitionAdmission(state,actor).admitted)
-    reject("CB_C4_CONSCIOUS_ADMISSION_DENIED","Sleeping actor cannot initiate speech.");
+    reject("WORLD_ACTOR_SPEECH_CONSCIOUS_ADMISSION_DENIED","Sleeping actor cannot initiate speech.");
   if (!exactCharacterValue(state.characters,actor))
-    reject("CB_C4_ACTOR_NOT_FOUND","Actor must exist in committed World.");
+    reject("WORLD_ACTOR_SPEECH_ACTOR_NOT_FOUND","Actor must exist in committed World.");
   const {sceneId,scene}=sceneForActor(state,actor);
   const scheduled=await scheduleWorldSimulationAutonomousCognitionOpportunities({
     world_simulation_session_id:sessionId,
@@ -143,14 +143,14 @@ export async function runWorldSimulationActorInitiatedSpeech(input = {}, options
   },options);
   if (scheduled.state_revision !== before.revision
     || scheduled.world_state_hash !== before.state_hash)
-    reject("CB_C4_WORLD_STATE_STALE","Actor cognition opportunity lost its World source.");
+    reject("WORLD_ACTOR_SPEECH_WORLD_STATE_STALE","Actor cognition opportunity lost its World source.");
   const opportunities=scheduled.scheduler_projection.opportunities.filter(item=>
     sameCharacter(item.character,actor));
   if (opportunities.length===0) return Object.freeze({
     version:worldSimulationActorInitiatedSpeechVersion,
     status:"no_new_internal_opportunity",committed:false,action_selection_performed:false,
   });
-  if (opportunities.length!==1) reject("CB_C4_OPPORTUNITY_AMBIGUOUS",
+  if (opportunities.length!==1) reject("WORLD_ACTOR_SPEECH_OPPORTUNITY_AMBIGUOUS",
     "Actor-initiated speech requires one distinct canonical cognition opportunity.");
   const candidates=eligibleSpeechCandidates(state,actor,scene);
   if (!candidates.length) return Object.freeze({
@@ -188,7 +188,7 @@ export async function runWorldSimulationActorInitiatedSpeech(input = {}, options
     },
   },actor,sessionId,options,before);
   if (object(activation).action_id !== undefined)
-    reject("CB_C4_ACTION_STAGE_INVALID","Plan activation cannot directly select an action.");
+    reject("WORLD_ACTOR_SPEECH_ACTION_STAGE_INVALID","Plan activation cannot directly select an action.");
   const selectedPlans=resolveWorldSimulationNativeImplementationIntentionActivationIntent({
     resolver_view:resolverView,brain_result:activation,
   });
@@ -220,11 +220,11 @@ export async function runWorldSimulationActorInitiatedSpeech(input = {}, options
   for (const candidate of menu) {
     const source=candidates.find(item=>item.action_id===candidate?.action_id);
     if (!source || proposalIds.has(candidate.action_id))
-      reject("CB_C4_ACTION_CATALOG_EXPANDED",
+      reject("WORLD_ACTOR_SPEECH_ACTION_CATALOG_EXPANDED",
         "Neural action consideration cannot add or duplicate World candidates.");
     proposalIds.add(candidate.action_id);
     if (hashAgentRunValue(candidate)!==hashAgentRunValue(source))
-      reject("CB_C4_ACTION_CANDIDATE_MUTATED",
+      reject("WORLD_ACTOR_SPEECH_ACTION_CANDIDATE_MUTATED",
         "Action proposer cannot change World-owned action payloads behind a stable action ID.");
   }
   const response=await invokeBrain({
@@ -247,7 +247,7 @@ export async function runWorldSimulationActorInitiatedSpeech(input = {}, options
     },
   },actor,sessionId,options,before);
   if (object(response).goal_intents!==undefined || object(response).plan_intents!==undefined)
-    reject("CB_C4_MIXED_COGNITIVE_WRITE_UNSUPPORTED",
+    reject("WORLD_ACTOR_SPEECH_MIXED_COGNITIVE_WRITE_UNSUPPORTED",
       "Actor-initiated action cannot mix goal or plan writes into its causal turn.");
   const actionId=object(response).action_id;
   if (actionId==="reject_all" || actionId==null) return Object.freeze({
@@ -255,13 +255,13 @@ export async function runWorldSimulationActorInitiatedSpeech(input = {}, options
     status:"brain_declined_action",committed:false,action_selection_performed:false,
   });
   if (typeof actionId!=="string" || !actionId.trim())
-    reject("CB_C4_ACTION_SELECTION_INVALID","Actor must select a concrete candidate or decline.");
+    reject("WORLD_ACTOR_SPEECH_ACTION_SELECTION_INVALID","Actor must select a concrete candidate or decline.");
   const candidate=menu.find(item=>item?.action_id===actionId);
-  if (!candidate) reject("CB_C4_ACTION_NOT_AVAILABLE",
+  if (!candidate) reject("WORLD_ACTOR_SPEECH_ACTION_NOT_AVAILABLE",
     "Actor tried to select a speech action outside its World catalog.");
   const trustedCandidate=candidates.find(item=>item.action_id===actionId);
   if (!trustedCandidate || hashAgentRunValue(trustedCandidate)!==hashAgentRunValue(candidate))
-    reject("CB_C4_ACTION_CANDIDATE_MUTATED",
+    reject("WORLD_ACTOR_SPEECH_ACTION_CANDIDATE_MUTATED",
       "Causal action must retain the exact trusted World candidate.");
   const selected=[{
     character:actor,selection:"candidate_action_intent",
@@ -284,7 +284,7 @@ export async function runWorldSimulationActorInitiatedSpeech(input = {}, options
   });
   if (!array(causal.action_outcomes).some(outcome=>
     sameCharacter(outcome?.actor,actor) && outcome?.action_id===actionId))
-    reject("CB_C4_CAUSAL_OUTCOME_MISSING",
+    reject("WORLD_ACTOR_SPEECH_CAUSAL_OUTCOME_MISSING",
       "World must produce an actual action outcome for actor-initiated speech.");
   const critic=await runWorldSimulationNativeCapability("world_consistency_critic",{
     state_transitions:array(causal.state_transitions),
