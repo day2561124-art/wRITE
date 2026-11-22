@@ -46,7 +46,12 @@ const requiredSuites = plan.required_suites ?? [plan.suite];
 const steps = requiredSuites.map((suite) => {
   const script = suiteScripts[suite];
   if (!script) throw new Error(`CI affected selector returned unsupported suite: ${suite}`);
-  return [`CI affected gate -> ${suite}`, [script]];
+  // A complete communication suite contains many serial Native scenarios.
+  // Keep every inner test's existing watchdog; the outer suite needs its
+  // own bounded budget, rather than the default single-test 360s limit.
+  // CI #1278 passed the new C2/C3 assertions before this outer timer fired.
+  return [`CI affected gate -> ${suite}`, [script],
+    ...(suite === "communication" ? [{ timeoutMs: 900_000 }] : [])];
 });
 
 await runTestSteps(steps, {
