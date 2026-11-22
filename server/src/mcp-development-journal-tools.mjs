@@ -124,6 +124,15 @@ const gitSha1Pattern = /^[a-f0-9]{40}$/u;
 const stageSet = new Set(DEV_JOURNAL_STAGES);
 const linkTypeSet = new Set(DEV_JOURNAL_LINK_TYPES);
 const terminalStageSet = new Set(["operation_completed", "operation_failed", "operation_recovered"]);
+const recoveryAttemptLimit = 3;
+const recoveryBatchLimit = 8;
+const manualRecoveryTypes = new Set(["pi_terminal_resolution", "integration_validation", "test_evidence"]);
+
+function alreadyTerminal(operationId) {
+  return Object.assign(new Error(`Operation already has a terminal event: ${operationId}.`), {
+    code: "JOURNAL_OPERATION_ALREADY_TERMINAL",
+  });
+}
 
 function scopedAdminChildOutcome(started, terminal) {
   const before = started.result;
@@ -489,6 +498,14 @@ async function ensureStorageRoot(storageRoot) {
   const parent = path.dirname(storageRoot);
   if (!await assertSafeDirectory(parent, { allowMissing: true })) {
     const grandparent = path.dirname(parent);
+    if (grandparent === projectPaths.outputLogs) {
+      // A fresh installation may not contain generated runtime directories.
+      // Create the known project-owned chain without following a junction.
+      await assertSafeDirectory(projectRoot);
+      for (const directory of [path.dirname(projectPaths.outputs), projectPaths.outputs, grandparent]) {
+        await createSafeDirectoryIfMissing(directory);
+      }
+    }
     await assertSafeDirectory(grandparent);
     await createSafeDirectoryIfMissing(parent);
   }
@@ -704,6 +721,7 @@ export function createDevOperationJournalService({
   powershellResolutionPublicationHook,
   powershellEffectProfile = REVIEWED_POWERSHELL_EFFECT_PROFILE,
   indexRefreshRecoveryProfile = REVIEWED_INDEX_REFRESH,
+  backgroundRecovery = false,
 } = {}) {
   if (!Number.isSafeInteger(lockAcquireTimeoutMs) || lockAcquireTimeoutMs < 1) {
     throw new Error("lockAcquireTimeoutMs must be a positive safe integer.");
@@ -717,6 +735,10 @@ export function createDevOperationJournalService({
   // Only successfully classified snapshots are cached; public results never alias them.
   let verifiedSnapshot = null;
   const workspaceMutationState = new Map();
+  const recoveryAttempts = new Map();
+  const recoveringOperations = new Map();
+  let recoveryTimer = null;
+  let recoveryRunning = false;
 
   function mutationStateFor(workspaceId) {
     let state = workspaceMutationState.get(workspaceId);
@@ -1280,7 +1302,7 @@ export function createDevOperationJournalService({
             const event = verification.events[index];
             if (event.operation_id === input.operation_id && event.stage === "operation_started") break;
             if (event.operation_id === input.operation_id && terminalStageSet.has(event.stage)) {
-              throw new Error("Operation already has a terminal event: " + input.operation_id);
+              throw alreadyTerminal(input.operation_id);
             }
           }
         }
@@ -1583,19 +1605,103 @@ export function createDevOperationJournalService({
   async function reconcileDangling({ contextResolver } = {}) {
     const verification = await verify();
     if (verification.dangling_operations.length === 0) return verification;
-    runtimeHealth = "recovering";
-    reconciliationRequired = true;
-    const resolveContext = contextResolver ?? (async (workspaceId) => {
-      const { resolveDevWorkspaceExecutionContext } = await import("./mcp-development-workstream-tools.mjs");
-      return resolveDevWorkspaceExecutionContext({ workspace_id: workspaceId }, { mutation: false });
-    });
+    await recoverDanglingSnapshot(verification, contextResolver);
+    return verify();
+  }
 
+  const resolveRecoveryContext = async (workspaceId) => {
+    const { resolveDevWorkspaceExecutionContext } = await import("./mcp-development-workstream-tools.mjs");
+    return resolveDevWorkspaceExecutionContext({ workspace_id: workspaceId }, { mutation: false });
+  };
+
+  async function recoverDanglingSnapshot(verification, resolveContext = resolveRecoveryContext, scheduled = false) {
+    if (explicitDegraded) return;
+    const dangling = new Set(verification.dangling_operations);
+    const starts = verification.events.filter(event => event.stage === "operation_started" && dangling.has(event.operation_id));
+    let scheduledAttempts = 0;
     // Recover inner operations before their boundary admission.
-    for (const operationId of [...verification.dangling_operations].reverse()) {
-      const started = verification.events.find((event) => event.operation_id === operationId && event.stage === "operation_started");
-      if (!started) continue;
-      if(started.operation_type==="pi_terminal_resolution"&&[ISOLATION_RESOLUTION_TOOL,"pi.journal.resolve_powershell_effect"].includes(started.tool_name))continue;
-      if(started.operation_type==="pi_terminal_resolution"&&started.tool_name==="pi.journal.resolve_workstream_metadata_limit")continue;
+    for (const started of starts.reverse()) {
+      const operationId = started.operation_id;
+      if (!canObserveRecovery(started)) continue;
+      if (scheduled && !canAttemptRecovery(operationId)) continue;
+      if (scheduled && scheduledAttempts >= recoveryBatchLimit) break;
+      let recovery = recoveringOperations.get(operationId);
+      if (!recovery) {
+        if (scheduled) {
+          scheduledAttempts += 1;
+          const attempt = (recoveryAttempts.get(operationId)?.count ?? 0) + 1;
+          recoveryAttempts.set(operationId, { count: attempt, due: Date.now() + 500 * 2 ** (attempt - 1) });
+        }
+        recovery = recoverDanglingOperation(started, resolveContext).finally(() => recoveringOperations.delete(operationId));
+        recoveringOperations.set(operationId, recovery);
+      }
+      try {
+        await recovery;
+      } catch (error) {
+        if (runtimeHealth === "corrupt") throw error;
+        if (error?.code !== "JOURNAL_OPERATION_ALREADY_TERMINAL") {
+          const attempt = recoveryAttempts.get(operationId);
+          if (scheduled && attempt) attempt.code = /^[A-Z][A-Z0-9_]{0,63}$/u.test(error?.code ?? "")
+            ? error.code : "RECOVERY_OBSERVATION_FAILED";
+          continue;
+        }
+        // Another process may have appended a receipt from the same observation.
+        // Re-verify its terminal before dropping this recovery attempt.
+        const current = await verify();
+        if (current.dangling_operations.includes(operationId)) throw error;
+      }
+    }
+  }
+
+  function isLocalOrphan(started) {
+    const owner = started.diagnostic;
+    return owner?.hostname === os.hostname() && Number.isSafeInteger(owner.owner_pid)
+      && owner.owner_pid > 0 && !isProcessRunning(owner.owner_pid);
+  }
+
+  function canObserveRecovery(started) {
+    // Interrupted validation and reviewed resolution have separate evidence
+    // owners, and cannot be concluded from a generic workspace snapshot.
+    return !manualRecoveryTypes.has(started.operation_type) && isLocalOrphan(started);
+  }
+
+  function canAttemptRecovery(operationId) {
+    const attempt = recoveryAttempts.get(operationId);
+    return !attempt || attempt.count < recoveryAttemptLimit && attempt.due <= Date.now();
+  }
+
+  function scheduleRecovery(verification) {
+    if (!backgroundRecovery || recoveryRunning || recoveryTimer || explicitDegraded) return;
+    const dangling = new Set(verification.dangling_operations);
+    for (const id of recoveryAttempts.keys()) if (!dangling.has(id)) recoveryAttempts.delete(id);
+    if (dangling.size === 0) return;
+    let nextDue = Infinity;
+    for (const event of verification.events) {
+      if (event.stage !== "operation_started" || !dangling.has(event.operation_id) || !canObserveRecovery(event)) continue;
+      const attempt = recoveryAttempts.get(event.operation_id);
+      if ((attempt?.count ?? 0) < recoveryAttemptLimit) nextDue = Math.min(nextDue, attempt?.due ?? 0);
+    }
+    if (!Number.isFinite(nextDue)) return;
+    recoveryTimer = setTimeout(async () => {
+      recoveryTimer = null;
+      recoveryRunning = true;
+      let next;
+      try {
+        await recoverDanglingSnapshot(await verify(), resolutionContextResolver, true);
+        next = await verify();
+      } catch {
+        // Storage/integrity failures keep the existing shared write gate. A
+        // later verified admission or process restart can recheck the queue.
+      } finally {
+        recoveryRunning = false;
+      }
+      if (next) scheduleRecovery(next);
+    }, Math.max(25, nextDue - Date.now()));
+    recoveryTimer.unref();
+  }
+
+  async function recoverDanglingOperation(started, resolveContext) {
+      const operationId = started.operation_id;
       const transactionOperation = started.operation_type === "checkpoint_restore_transaction_create"
         || started.operation_type.startsWith("transaction_");
       const requiresWorkspaceContext = !started.operation_type.startsWith("checkpoint_")
@@ -1606,24 +1712,7 @@ export function createDevOperationJournalService({
         );
       let context = null;
       if (requiresWorkspaceContext) {
-        try {
-          context = await resolveContext(started.workspace_id);
-        } catch (error) {
-          runtimeHealth = "degraded";
-          reconciliationRequired = true;
-          lastHealthError = `Could not resolve dangling operation workspace ${started.workspace_id}: ${error.message}`;
-          continue;
-        }
-      }
-
-      // Test execution and integration worktree creation have effects outside
-      // artifact targets. Only the integration service can bind their cleanup
-      // to the candidate and runner ownership; do not manufacture no-effect.
-      if (["integration_validation", "test_evidence"].includes(started.operation_type)) {
-        lastHealthError = `Interrupted validation requires scoped recovery: ${operationId}.`;
-        runtimeHealth = "degraded";
-        reconciliationRequired = true;
-        continue;
+        context = await resolveContext(started.workspace_id);
       }
 
       let outcome = "no_effect_observed";
@@ -1736,6 +1825,9 @@ export function createDevOperationJournalService({
       }
 
       await terminal(operationId, "operation_recovered", {
+        beforeAppend: () => {
+          if (!isLocalOrphan(started)) throw new Error("JOURNAL_RECOVERY_OWNER_NOT_PROVEN_DEAD");
+        },
         reconciles_event_id: started.journal_event_id,
         targets: observedTargets.length > 0 ? observedTargets : started.targets,
         links: started.links,
@@ -1746,22 +1838,16 @@ export function createDevOperationJournalService({
           ...lifecycleFacts,
         },
       });
-      if (ambiguous) {
-        runtimeHealth = "degraded";
-        reconciliationRequired = true;
-        lastHealthError = `Ambiguous durable effect for operation ${operationId}.`;
-      }
-    }
-    return verify();
   }
 
   async function assertMutationAllowed() {
-    await verify();
+    const verified = await verify();
     if (explicitDegraded) {
       const error = new Error(`JOURNAL_${runtimeHealth.toUpperCase()}: development mutation is blocked until journal reconciliation succeeds.`);
       error.code = `JOURNAL_${runtimeHealth.toUpperCase()}`;
       throw error;
     }
+    scheduleRecovery(verified);
   }
 
   async function begin(input = {}) {
@@ -1793,7 +1879,7 @@ export function createDevOperationJournalService({
     const operationEvents = verification.events.filter((event) => event.operation_id === operationId);
     const started = operationEvents.find((event) => event.stage === "operation_started");
     if (!started) throw new Error(`Unknown operation: ${operationId}.`);
-    if (operationEvents.some((event) => terminalStageSet.has(event.stage))) throw new Error(`Operation already has a terminal event: ${operationId}.`);
+    if (operationEvents.some((event) => terminalStageSet.has(event.stage))) throw alreadyTerminal(operationId);
     const event = await append({
       operation_id: operationId,
       stage,
@@ -2180,6 +2266,17 @@ export function createDevOperationJournalService({
   }
 
   function statusFromVerification(verification) {
+    const isolated = verification.isolated_operations.slice(0, DEV_JOURNAL_MAX_QUERY_RESULTS).map(incident => {
+      const attempt = recoveryAttempts.get(incident.operation_id);
+      if (incident.code !== "DANGLING_OPERATION") return { ...incident, recovery: { state: "operator_review" } };
+      if (recoveringOperations.has(incident.operation_id)) return {
+        ...incident, recovery: { state: "recovering", attempt: attempt?.count ?? null },
+      };
+      if (!attempt) return incident;
+      const exhausted = attempt.count >= recoveryAttemptLimit;
+      return { ...incident, recovery: { state: exhausted ? "operator_review" : "scheduled", attempt: attempt.count,
+        retry_after_ms: exhausted ? null : attempt.due, last_error_code: attempt.code ?? null } };
+    });
     return {
       schema_version: DEV_JOURNAL_SCHEMA_VERSION,
       health: runtimeHealth,
@@ -2195,7 +2292,7 @@ export function createDevOperationJournalService({
       ambiguous_terminal_count: verification.ambiguous_terminal_count,
       ambiguous_terminal_operations: verification.ambiguous_terminal_operations,
       isolated_operation_count: verification.isolated_operations.length,
-      isolated_operations: verification.isolated_operations.slice(0, DEV_JOURNAL_MAX_QUERY_RESULTS),
+      isolated_operations: isolated,
       reconciliation_required: reconciliationRequired,
       last_health_error: lastHealthError,
       storage: "server_owned_per_event_files",
@@ -2204,6 +2301,11 @@ export function createDevOperationJournalService({
 
   async function initialize() {
     try {
+      if (backgroundRecovery) {
+        const verification = await verify();
+        scheduleRecovery(verification);
+        return statusFromVerification(verification);
+      }
       return statusFromVerification(await reconcileDangling());
     } catch {
       // Preserve read-only diagnosis and mutation gates on recovery failure.
@@ -2660,7 +2762,7 @@ function verifiedMcpTestResult(events,started,terminal) {
   };
 }
 
-const defaultJournal = createDevOperationJournalService();
+const defaultJournal = createDevOperationJournalService({ backgroundRecovery: true });
 export const recoverDevExecutionPublication = options => defaultJournal.recoverExecutionPublication(options);
 export const readDevProductionRoutes = () => defaultJournal.readProductionRoutes();
 export const appendDevProductionRoute = (record, options) => defaultJournal.appendProductionRoute(record, options);

@@ -80,7 +80,10 @@ test('real Listener cold start and controlled restart load profile without calle
  for(let generation=0;generation<2;generation++){
   const p=await port();stderr='';child=spawn(process.execPath,[path.join(repo,'server/src/launcher-test-entry.mjs'),'--config',path.join(repo,'config/mcp-http.example.json'),'--port',String(p)],{cwd:os.tmpdir(),env:{...cleanEnv(),MCP_TOOL_PROFILE:'chatgpt_developer'},windowsHide:true,stdio:['ignore','ignore','pipe','ipc']});child.stderr.on('data',b=>stderr+=b);
   const endpoint=`http://127.0.0.1:${p}`;
-  const health=await until(async()=>{if(child.exitCode!==null)throw Error(stderr);return fetch(endpoint+'/health').then(async r=>{if(!r.ok)return null;const h=await r.json();return Number.isInteger(h.pi_durable_worker?.pid)&&['ready','idle'].includes(h.pi_durable_worker.state)?h:null;}).catch(()=>null);},'fixture Listener not ready');worker=health.pi_durable_worker.pid;
+  let lastWorkerStatus;
+  const health=await until(async()=>{if(child.exitCode!==null)throw Error(stderr);return fetch(endpoint+'/health').then(async r=>{if(!r.ok)return null;const h=await r.json();lastWorkerStatus=h.pi_durable_worker;return Number.isInteger(lastWorkerStatus?.pid)&&['ready','idle'].includes(lastWorkerStatus.state)?h:null;}).catch(()=>null);},'fixture Listener not ready')
+    .catch(error=>{throw new Error(`${error.message}: ${JSON.stringify(lastWorkerStatus)}\n${stderr}`,{cause:error});});
+  worker=health.pi_durable_worker.pid;
   assert.match(stderr,/session lifecycle idle_timeout_ms=900000 max_idle_sessions=4 max_total_sessions=32/);
   assert.equal(health.pi_execution_protocol,'writer-workbench/pi-production/v1');assert(Number.isInteger(worker));
   const live=await fetch(endpoint+'/live').then(r=>r.json());assert.equal(live.live,true);assert.equal(live.session_count,0);

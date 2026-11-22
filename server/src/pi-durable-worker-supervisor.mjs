@@ -33,7 +33,9 @@ export function createPiDurableWorkerSupervisor({spawnProcess=spawn,root=project
     return;
    }
    if(!['ready','executing','idle','drained','failed'].includes(message.kind))return;
-   publish({state:message.kind,pid:worker.pid,operation_id:/^pi_operation_[a-f0-9]{32}$/.test(message.operation_id??'')?message.operation_id:null});
+   const failureCode=message.kind==='failed'&&/^[A-Z][A-Z0-9_]{0,63}$/.test(message.code??'')?message.code:null;
+   publish({state:message.kind,pid:worker.pid,operation_id:/^pi_operation_[a-f0-9]{32}$/.test(message.operation_id??'')?message.operation_id:null,
+    ...(failureCode?{last_failure_code:failureCode}:{})});
   });
   worker.once('error',()=>publish({state:'spawn_failed'}));
   worker.once('close',(code,signal)=>{

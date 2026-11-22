@@ -6459,8 +6459,7 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
   process.exit(0);
 }
 
-// Discovery must not wait for potentially large on-disk recovery scans.
-// Every operation beyond protocol discovery still awaits the same fail-closed gate.
+// Protocol discovery reports component readiness without awaiting recovery.
 function publishRuntimeReadiness(status) {
   if (typeof process.send !== "function" || process.connected === false) return;
   try {
@@ -6481,7 +6480,10 @@ const runtimeComponents = createRuntimeReadiness([
 
 if(process.argv.includes('--pi-worker')){
  const {runPiDurableWorker}=await import('./pi-durable-worker.mjs');
- await runPiDurableWorker({controller:piProductionController,ready:()=>{void runtimeComponents.start();}});
+ await runPiDurableWorker({controller:piProductionController,ready:()=>{
+  void runtimeComponents.start();
+  return runtimeComponents.ensure("journal");
+ }});
  process.disconnect?.();
  process.exit(0);
 }else{

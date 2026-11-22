@@ -157,6 +157,7 @@ async function runWorker(storageRoot, mode, extra = {}) {
       JOURNAL_WORKER_PATH: extra.path ?? "fixture.txt",
       JOURNAL_WORKER_BEFORE: extra.before ?? "AAA",
       JOURNAL_WORKER_EXPECTED: extra.expected ?? "BBB",
+      JOURNAL_WORKER_WORKSPACE: extra.workspaceId ?? workspaceId,
     },
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
@@ -200,7 +201,7 @@ if (process.argv[2] === "--worker") {
   } : {
     operation_type: "filesystem_patch",
     tool_name: "dev_apply_patch",
-    workspace_id: workspaceId,
+    workspace_id: process.env.JOURNAL_WORKER_WORKSPACE ?? workspaceId,
     ...(mode === "start-only" ? { reconciliation_key: "worker-stable-recovery-key",
       request_fingerprint_sha256: sha256("worker-request") } : {}),
     targets: [{
@@ -674,6 +675,58 @@ for (const warm of [false, true]) {
     const status = await service.status();
     assert.equal(status.health, "healthy");
     assert.equal(status.reconciliation_required, false);
+  } finally { await clean(fixture); }
+}
+
+// A failing workspace observation leaves the other orphan and independent
+// live mutations available while its read-only retry is pending.
+{
+  const fixture = await tempFixture("background-recovery");
+  try {
+    const missingWorkspace = "dev_workspace_" + "d".repeat(24);
+    const recoveredId = await runWorker(fixture.storageRoot, "start-only", { path: "healthy.txt" });
+    const delayedId = await runWorker(fixture.storageRoot, "start-only-scoped", { path: "delayed.txt", workspaceId: missingWorkspace });
+    await writeFile(path.join(fixture.workspaceRoot, "healthy.txt"), "BBB", "utf8");
+    await writeFile(path.join(fixture.workspaceRoot, "delayed.txt"), "AAA", "utf8");
+    let misses = 0;
+    let resolveDelayed = false;
+    const contextResolver = async (id) => {
+      if (id === missingWorkspace && !resolveDelayed) {
+        misses += 1;
+        throw Object.assign(new Error("workspace temporarily unavailable"), { code: "WORKSPACE_OFFLINE" });
+      }
+      return { root: fixture.workspaceRoot, current_head: zeroHead };
+    };
+    const service = createDevOperationJournalService({ storageRoot: fixture.storageRoot, backgroundRecovery: true,
+      resolutionContextResolver: contextResolver });
+    const peer = createDevOperationJournalService({ storageRoot: fixture.storageRoot });
+    const before = await service.verify();
+    assert.equal((await service.initialize()).isolated_operation_count, 2);
+    await peer.reconcileDangling({ contextResolver: async (id) => {
+      if (id === missingWorkspace) throw new Error("peer cannot observe delayed workspace");
+      return contextResolver(id);
+    } });
+    const related = await service.getOperation({ operation_id: recoveredId });
+    assert.equal(related.events.length, 2);
+    assert.equal(related.original_result.outcome, "intended_effect_observed");
+    const unrelated = await service.begin({ operation_type: "filesystem_patch", tool_name: "dev_apply_patch",
+      workspace_id: missingWorkspace, targets: [{ path: "unrelated.txt" }] });
+    await service.complete(unrelated.operation_id);
+    const deadline = Date.now() + 5000;
+    while (!misses && Date.now() < deadline) await delay(20);
+    assert.equal(misses, 1);
+    resolveDelayed = true;
+    let status = await service.status();
+    while (status.isolated_operation_count && Date.now() < deadline) {
+      await delay(25);
+      status = await service.status();
+    }
+    assert.equal(status.health, "healthy");
+    assert.equal(status.chain_verified, true);
+    assert.equal((await service.getOperation({ operation_id: delayedId })).original_result.outcome, "no_effect_observed");
+    const after = await service.verify();
+    assert.deepEqual(after.events.slice(0, before.events.length).map(event => event.event_hash),
+      before.events.map(event => event.event_hash));
   } finally { await clean(fixture); }
 }
 
