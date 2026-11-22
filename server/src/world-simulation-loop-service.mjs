@@ -4990,6 +4990,16 @@ export async function dispatchWorldSimulationAutonomousCognitionOpportunities(
     );
   }
 
+  // One cognitive transaction spans all C2 opportunities admitted against
+  // this World revision. This shared turn ID binds per-character opaque
+  // handles to the exact future Phase68D writer (never an external event).
+  const cognitiveGoalTurnId = `world_c2_goal_${hashAgentRunValue({
+    session_id: scheduled.world_simulation_session_id,
+    state_revision: scheduled.state_revision,
+    world_state_hash: scheduled.world_state_hash,
+    opportunity_ids: scheduled.scheduler_projection.opportunities.map(row => row.opportunity_id),
+  }).slice(0, 32)}`;
+  const selectedNativeGoalIntents = [];
   const dispatches = [];
   for (const opportunity of scheduled.scheduler_projection.opportunities) {
     const runtimeSnapshot = await characterRuntimeManager.inspectRuntime({
@@ -5062,20 +5072,13 @@ export async function dispatchWorldSimulationAutonomousCognitionOpportunities(
             );
           }
           brainInvoked = true;
-          // Use precisely the World revision already checked at actual Brain
-          // ingress. No second, potentially stale snapshot or raw World state
-          // enters the character packet. The opaque turn handle is scoped to
-          // this dispatch context, not the private scheduler opportunity ID.
-          const goalViewTurnId = `c2_goal_view_${hashAgentRunValue({
-            opportunity_id: opportunity.opportunity_id,
-            session_id: scheduled.world_simulation_session_id,
-            state_revision: current.revision,
-            world_state_hash: current.state_hash,
-          }).slice(0, 32)}`;
+          // Use only the just-verified committed World snapshot. The shared
+          // turn identifier allows the existing Native C3 validator and
+          // Phase68D writer to agree on the same resolver-view hash.
           const goalView = buildWorldSimulationNativeGoalDecisionView({
             world_state: current.state,
             character: opportunity.character,
-            turn_id: goalViewTurnId,
+            turn_id: cognitiveGoalTurnId,
           });
           const result = await options.characterBrain({
             ...packet,
@@ -5085,11 +5088,18 @@ export async function dispatchWorldSimulationAutonomousCognitionOpportunities(
               native_goal_decision_explicit_intent_only: true,
               native_goal_decision_world_write_authority: false,
               native_goal_decision_action_authority: false,
-              // C2 only delivers a bounded view. Even an explicit goal
-              // intent returned here has no eventless commit path yet.
-              native_goal_decision_intent_submission_supported: false,
+              // An explicit intent is admitted only after every Brain returns
+              // and the authoritative Phase68D / World CAS checks succeed.
+              native_goal_decision_intent_submission_supported: true,
             },
           });
+          if (isObject(result) && Object.hasOwn(result, "goal_intents")) {
+            selectedNativeGoalIntents.push({
+              character: opportunity.character,
+              context_token: result.goal_context_token,
+              goal_intents: cloneJson(result.goal_intents),
+            });
+          }
           brainCompleted = true;
           return result;
         } catch (error) {
@@ -5120,19 +5130,94 @@ export async function dispatchWorldSimulationAutonomousCognitionOpportunities(
     });
   }
 
+  // Nothing is committed merely because a C2 opportunity was dispatched.
+  // All explicit intents are resolved against the SAME revision; one invalid
+  // or foreign intent aborts the whole cognitive transaction before writing.
+  let goalEvents = [];
+  if (selectedNativeGoalIntents.length > 0) {
+    const current = await getWorldSimulationState(
+      scheduled.world_simulation_session_id, options,
+    );
+    if (current.revision !== scheduled.state_revision
+        || current.state_hash !== scheduled.world_state_hash) {
+      const error = new Error("C2 cognitive goal commit lost its World revision/hash.");
+      error.code = "WORLD_SIMULATION_AUTONOMOUS_GOAL_COMMIT_STALE";
+      error.consumed_opportunity_ids = [];
+      throw error;
+    }
+    const decisions = selectedNativeGoalIntents.flatMap(item =>
+      resolveWorldSimulationNativeGoalDecisionIntents({
+        world_state: current.state,
+        character: item.character,
+        turn_id: cognitiveGoalTurnId,
+        context_token: item.context_token,
+        goal_intents: item.goal_intents,
+      }).goal_decisions);
+    if (decisions.length > 0) {
+      const built = buildWorldSimulationMotivationalGoalEvents({
+        world_state: current.state,
+        resolver_world_state: current.state,
+        turn_id: cognitiveGoalTurnId,
+        goal_decisions: decisions,
+      });
+      const queue = buildWorldSimulationChronologicalMutationQueue({
+        turn_id: `${cognitiveGoalTurnId}:motivation_goal_integration`,
+        world_state_hash: hashAgentRunValue(current.state),
+        state_transitions: built.result.state_transitions,
+        elapsed_ms: 0,
+      });
+      const execution = executeWorldSimulationChronologicalMutationQueue({
+        world_state: current.state,
+        preview_world_state: built.result.preview_world_state,
+        queue,
+        scene_id: null,
+      });
+      // The atomic state/history writer accepts event:null for an honest
+      // internal cognition transaction. No action, tick, external event,
+      // memory rewrite, or new World-authority path is introduced.
+      await commitWorldSimulationTurn(
+        scheduled.world_simulation_session_id,
+        {
+          expected_revision: scheduled.state_revision,
+          expected_state_hash: scheduled.world_state_hash,
+          turn_id: cognitiveGoalTurnId,
+          next_world_state: execution.next_world_state,
+          event: null,
+          selected_action_intents: [],
+          action_outcomes: [],
+          state_transitions: built.result.state_transitions,
+          chronological_mutation_queue: queue,
+          chronological_mutation_execution: execution,
+          autonomous_cognition_goal_commitment: {
+            version: "cb-c2-eventless-goal-commitment-v1",
+            consumed_opportunity_ids: dispatches.map(item => item.opportunity_id),
+            goal_event_count: built.result.goal_events_created.length,
+          },
+        },
+        options,
+      );
+      goalEvents = built.result.goal_events_created;
+    }
+  }
+  const authors = new Set(goalEvents.map(event => event.character));
+  const reportedDispatches = dispatches.map(item => ({
+    ...item,
+    durable_cognitive_write_performed: authors.has(item.character),
+    world_mutation_performed: authors.has(item.character),
+  }));
   return Object.freeze({
     version: worldSimulationAutonomousCognitionSchedulerVersion,
     world_simulation_session_id: scheduled.world_simulation_session_id,
     state_revision: scheduled.state_revision,
     world_state_hash: scheduled.world_state_hash,
     event_queue_empty: scheduled.event_queue_empty,
-    dispatch_count: dispatches.length,
-    dispatches,
+    dispatch_count: reportedDispatches.length,
+    dispatches: reportedDispatches,
     consumed_opportunity_ids: dispatches.map((item) => item.opportunity_id),
     raw_character_brain_results_exposed: false,
-    durable_cognitive_write_performed: false,
+    durable_cognitive_write_performed: goalEvents.length > 0,
     action_selection_performed: false,
-    world_mutation_performed: false,
+    world_mutation_performed: goalEvents.length > 0,
   });
 }
 
