@@ -130,6 +130,8 @@ const linkTypeSet = new Set(DEV_JOURNAL_LINK_TYPES);
 const terminalStageSet = new Set(["operation_completed", "operation_failed", "operation_recovered"]);
 const recoveryAttemptLimit = 3;
 const recoveryBatchLimit = 8;
+const recoveryObservationType = "journal_recovery_observation";
+const recoveryObservationTool = "nexa.journal.observe_recovery";
 const manualRecoveryTypes = new Set(["pi_terminal_resolution", "integration_validation", "test_evidence"]);
 
 function alreadyTerminal(operationId) {
@@ -739,7 +741,6 @@ export function createDevOperationJournalService({
   // Only successfully classified snapshots are cached; public results never alias them.
   let verifiedSnapshot = null;
   const workspaceMutationState = new Map();
-  const recoveryAttempts = new Map();
   const recoveringOperations = new Map();
   let recoveryTimer = null;
   let recoveryRunning = false;
@@ -1634,36 +1635,93 @@ export function createDevOperationJournalService({
     return { starts, unsettled, children };
   }
 
+  function recoveryAttemptsFrom(verification) {
+    const attempts = new Map();
+    const admitted = new Map();
+    for (const event of verification.events) {
+      if (event.operation_type !== recoveryObservationType || event.tool_name !== recoveryObservationTool) continue;
+      if (event.stage === "operation_started") {
+        const { logical_operation_id: original, recovery_attempt: count, retry_after_ms: due } = event.result;
+        if (!operationIdPattern.test(original ?? "") || !Number.isSafeInteger(count) || count < 1 || count > recoveryAttemptLimit
+          || !Number.isSafeInteger(due) || due < 0) continue;
+        const record = { count, due, id: event.operation_id, code: null };
+        attempts.set(original, record);
+        admitted.set(event.operation_id, record);
+      } else {
+        const record = admitted.get(event.operation_id);
+        const code = event.result.recovery_error_code;
+        if (record && /^[A-Z][A-Z0-9_]{0,63}$/u.test(code ?? "")) record.code = code;
+      }
+    }
+    return attempts;
+  }
+
+  async function observeScheduledRecovery(started, resolveContext, prior) {
+    const operationId = started.operation_id;
+    if (started.operation_type === recoveryObservationType) {
+      // This orphan records a previous inspection of some other operation.
+      // Close its observation without repeating that inspection here.
+      return terminal(operationId, "operation_recovered", {
+        reconciles_event_id: started.journal_event_id,
+        result: { outcome: "no_effect_observed", recovery_error_code: "RECOVERY_OBSERVATION_INTERRUPTED" },
+      });
+    }
+    const observationId = operationIdGenerator();
+    if (!operationIdPattern.test(observationId)) throw new Error("Operation ID generator returned an invalid ID.");
+    if (!isLocalOrphan(started)) throw new Error("JOURNAL_RECOVERY_OWNER_NOT_PROVEN_DEAD");
+    const count = (prior?.count ?? 0) + 1;
+    const observation = await append({
+      operation_id: observationId,
+      stage: "operation_started",
+      operation_type: recoveryObservationType,
+      tool_name: recoveryObservationTool,
+      workspace_id: started.workspace_id,
+      workstream_id: started.workstream_id,
+      links: [{ relation: "related_to", operation_id: operationId }],
+      result: { logical_operation_id: operationId, recovery_attempt: count, retry_after_ms: Date.now() + 500 * 2 ** (count - 1) },
+    }, { beforeAppend: current => {
+      const latest = recoveryAttemptsFrom(current).get(operationId);
+      if (!current.dangling_operations.includes(operationId) || latest?.id !== prior?.id
+        || current.active_operations.includes(latest?.id)) {
+        throw Object.assign(new Error("The operation already has a current observer."), { code: "JOURNAL_RECOVERY_OBSERVER_CHANGED" });
+      }
+    } });
+    let observed;
+    try {
+      observed = await recoverDanglingOperation(started, resolveContext);
+    } catch (error) {
+      const code = /^[A-Z][A-Z0-9_]{0,63}$/u.test(error?.code ?? "") ? error.code : "RECOVERY_OBSERVATION_FAILED";
+      await fail(observation.operation_id, { result: { recovery_error_code: code, outcome: "failed_no_effect" } });
+      throw error;
+    }
+    await complete(observation.operation_id, { result: { observed_terminal_event_id: observed.journal_event_id,
+      observed_outcome: observed.result.outcome } });
+  }
+
   async function recoverDanglingSnapshot(verification, resolveContext = resolveRecoveryContext, scheduled = false) {
     if (explicitDegraded) return;
     const { starts, unsettled, children } = recoveryGraph(verification);
+    const attempts = scheduled ? recoveryAttemptsFrom(verification) : null;
     let scheduledAttempts = 0;
     // Recover inner operations before their boundary admission.
     for (const started of starts.reverse()) {
       const operationId = started.operation_id;
       if (!canObserveRecovery(started) || children.get(operationId)?.some(id => unsettled.has(id))) continue;
-      if (scheduled && !canAttemptRecovery(operationId)) continue;
+      const prior = attempts?.get(operationId);
+      if (scheduled && prior && (prior.count >= recoveryAttemptLimit || prior.due > Date.now() || unsettled.has(prior.id))) continue;
       if (scheduled && scheduledAttempts >= recoveryBatchLimit) break;
       let recovery = recoveringOperations.get(operationId);
       if (!recovery) {
-        if (scheduled) {
-          scheduledAttempts += 1;
-          const attempt = (recoveryAttempts.get(operationId)?.count ?? 0) + 1;
-          recoveryAttempts.set(operationId, { count: attempt, due: Date.now() + 500 * 2 ** (attempt - 1) });
-        }
-        recovery = recoverDanglingOperation(started, resolveContext).finally(() => recoveringOperations.delete(operationId));
+        if (scheduled) scheduledAttempts += 1;
+        recovery = (scheduled ? observeScheduledRecovery(started, resolveContext, prior) : recoverDanglingOperation(started, resolveContext))
+          .finally(() => recoveringOperations.delete(operationId));
         recoveringOperations.set(operationId, recovery);
       }
       try {
         await recovery;
       } catch (error) {
         if (runtimeHealth === "corrupt") throw error;
-        if (error?.code !== "JOURNAL_OPERATION_ALREADY_TERMINAL") {
-          const attempt = recoveryAttempts.get(operationId);
-          if (scheduled && attempt) attempt.code = /^[A-Z][A-Z0-9_]{0,63}$/u.test(error?.code ?? "")
-            ? error.code : "RECOVERY_OBSERVATION_FAILED";
-          continue;
-        }
+        if (error?.code !== "JOURNAL_OPERATION_ALREADY_TERMINAL") continue;
         // Another process may have appended a receipt from the same observation.
         // Re-verify its terminal before dropping this recovery attempt.
         const current = await verify();
@@ -1686,22 +1744,20 @@ export function createDevOperationJournalService({
     return !interruptedGc && !manualRecoveryTypes.has(started.operation_type) && isLocalOrphan(started);
   }
 
-  function canAttemptRecovery(operationId) {
-    const attempt = recoveryAttempts.get(operationId);
-    return !attempt || attempt.count < recoveryAttemptLimit && attempt.due <= Date.now();
-  }
-
   function scheduleRecovery(verification) {
     if (!backgroundRecovery || recoveryRunning || recoveryTimer || explicitDegraded) return;
-    const dangling = new Set(verification.dangling_operations);
-    for (const id of recoveryAttempts.keys()) if (!dangling.has(id)) recoveryAttempts.delete(id);
-    if (dangling.size === 0) return;
+    if (verification.dangling_operations.length === 0) return;
     let nextDue = Infinity;
-    const { starts, children } = recoveryGraph(verification);
+    const { starts, children, unsettled } = recoveryGraph(verification);
+    const attempts = recoveryAttemptsFrom(verification);
     for (const event of starts) {
       if (!canObserveRecovery(event) || children.has(event.operation_id)) continue;
-      const attempt = recoveryAttempts.get(event.operation_id);
-      if ((attempt?.count ?? 0) < recoveryAttemptLimit) nextDue = Math.min(nextDue, attempt?.due ?? 0);
+      const attempt = attempts.get(event.operation_id);
+      if ((attempt?.count ?? 0) < recoveryAttemptLimit && !unsettled.has(attempt?.id)) {
+        nextDue = Math.min(nextDue, attempt?.due ?? 0);
+      } else if (attempt && verification.active_operations.includes(attempt.id)) {
+        nextDue = Math.min(nextDue, Date.now() + 30_000);
+      }
     }
     if (!Number.isFinite(nextDue)) return;
     recoveryTimer = setTimeout(async () => {
@@ -1846,7 +1902,7 @@ export function createDevOperationJournalService({
         }
       }
 
-      await terminal(operationId, "operation_recovered", {
+      return terminal(operationId, "operation_recovered", {
         beforeAppend: latest => {
           if (!isLocalOrphan(started)) throw new Error("JOURNAL_RECOVERY_OWNER_NOT_PROVEN_DEAD");
           const pending = new Set([...latest.active_operations, ...latest.dangling_operations]);
@@ -2293,10 +2349,11 @@ export function createDevOperationJournalService({
   }
 
   function statusFromVerification(verification) {
+    const recoveryAttempts = verification.dangling_operations.length ? recoveryAttemptsFrom(verification) : new Map();
     const isolated = verification.isolated_operations.slice(0, DEV_JOURNAL_MAX_QUERY_RESULTS).map(incident => {
       const attempt = recoveryAttempts.get(incident.operation_id);
       if (incident.code !== "DANGLING_OPERATION") return { ...incident, recovery: { state: "operator_review" } };
-      if (recoveringOperations.has(incident.operation_id)) return {
+      if (recoveringOperations.has(incident.operation_id) || attempt && verification.active_operations.includes(attempt.id)) return {
         ...incident, recovery: { state: "recovering", attempt: attempt?.count ?? null },
       };
       if (!attempt) return incident;

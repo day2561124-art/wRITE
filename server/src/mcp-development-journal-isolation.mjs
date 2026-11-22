@@ -39,6 +39,9 @@ export function journalOperationScope(operation) {
   if (["pi_execution_projection", "pi_production_route", "pi_worker_deferral"].includes(operation_type)) {
     return { level: "operation", resource: result?.logical_operation_id ?? tool_name };
   }
+  if (operation_type === "journal_recovery_observation") {
+    return { level: "operation", resource: result?.logical_operation_id ?? tool_name };
+  }
   if (powerShellTools.has(tool_name)) {
     if (result?.isolation_mode === "appcontainer") return { level: "operation", resource: "appcontainer" };
     if (tool_name === "powershell_admin_run" && typeof result?.service_name === "string") {

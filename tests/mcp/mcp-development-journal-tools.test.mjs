@@ -727,6 +727,43 @@ for (const warm of [false, true]) {
     const after = await service.verify();
     assert.deepEqual(after.events.slice(0, before.events.length).map(event => event.event_hash),
       before.events.map(event => event.event_hash));
+    const attempts = after.events.filter(event => event.operation_type === "journal_recovery_observation"
+      && event.stage === "operation_started" && event.result.logical_operation_id === delayedId);
+    assert.deepEqual(attempts.map(event => event.result.recovery_attempt), [1, 2]);
+    assert(after.events.some(event => event.operation_id === attempts[0].operation_id && event.result.recovery_error_code === "WORKSPACE_OFFLINE"));
+  } finally { await clean(fixture); }
+}
+
+// A fresh instance observes the same exhausted budget and does not retry a
+// failed resource indefinitely or make up a terminal result for its effect.
+{
+  const fixture = await tempFixture("background-recovery-budget");
+  try {
+    const operationId = await runWorker(fixture.storageRoot, "start-only");
+    let observations = 0;
+    const options = { storageRoot: fixture.storageRoot, backgroundRecovery: true,
+      resolutionContextResolver: async () => {
+        observations += 1;
+        throw Object.assign(new Error("persistent fixture error"), { code: "WORKSPACE_OFFLINE" });
+      } };
+    const service = createDevOperationJournalService(options);
+    await service.initialize();
+    const end = Date.now() + 10_000;
+    let status;
+    do {
+      await delay(25);
+      status = await service.status();
+    } while (status.isolated_operations[0].recovery?.state !== "operator_review" && Date.now() < end);
+    assert.equal(observations, 3);
+    assert.equal(status.isolated_operations[0].recovery.last_error_code, "WORKSPACE_OFFLINE");
+    const fresh = createDevOperationJournalService(options);
+    assert.deepEqual((await fresh.initialize()).isolated_operations[0].recovery, status.isolated_operations[0].recovery);
+    const normal = await fresh.begin({ operation_type: "fixture", tool_name: "dev_unrelated", workspace_id: "dev_workspace_" + "9".repeat(24) });
+    await fresh.complete(normal.operation_id);
+    await delay(600);
+    assert.equal(observations, 3);
+    assert.equal((await fresh.getOperation({ operation_id: operationId })).terminal, false);
+    assert.equal((await fresh.status()).chain_verified, true);
   } finally { await clean(fixture); }
 }
 
