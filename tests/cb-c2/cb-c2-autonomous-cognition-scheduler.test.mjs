@@ -14,6 +14,7 @@ import { beginWorldSimulationSession } from "../../server/src/world-simulation-s
 import { commitWorldSimulationTurn, getWorldSimulationHistory, getWorldSimulationState } from "../../server/src/world-simulation-state-service.mjs";
 import { hashAgentRunValue } from "../../server/src/agent-run-service.mjs";
 import { runWorldSimulationActorInitiatedSpeech } from "../../server/src/world-simulation-actor-initiated-speech-service.mjs";
+import { assertWorldSimulationCommittedAcousticSource } from "../../server/src/world-simulation-native-committed-source-service.mjs";
 import { buildCharacterCommunicationActionCandidate } from "../../server/src/character-communication-foundation-service.mjs";
 import { nativeImplementationIntentionActivationCapability } from "../../server/src/world-simulation-goal-implementation-intention-activation-service.mjs";
 import { buildWorldSimulationSubjectiveClaims } from "../../server/src/world-simulation-subjective-claim-projection-service.mjs";
@@ -796,6 +797,114 @@ try {
     world_revision_after:spontaneousAfter.revision,
     causal_speech_outcomes:emitted.length,information_verified:false,
     replay_opportunities:spontaneousReplay.scheduler_projection.opportunity_count,
+  }));
+
+  // Acoustic RED acceptance: actual actor-initiated speech must be a complete
+  // CC-7AF source when the actor explicitly authored Mandarin surface text
+  // and the addressee has an audible, physically grounded scene position.
+  // A speech outcome alone does not establish that the listener heard it.
+  const acousticContent="你查過計時器的上限嗎";
+  const acousticCandidate=buildCharacterCommunicationActionCandidate({
+    character,cognition:{communication_goal:{
+      character,purpose:"request_information",mode:"direct",
+      addressee:inquiryAlly,public_content:acousticContent,
+      surface_realization:{
+        schema_version:"cc5-mandarin-clause-request-v1",
+        semantic_anchor:acousticContent,
+        clause:{
+          subject:"你",predicate:"查過",object:"計時器的上限",
+          sentence_final_particle:"嗎",
+        },
+      },
+    }},
+  });
+  assert.equal(acousticCandidate.communication.surface_realization_complete,true);
+  const acousticWorld=structuredClone(spontaneousWorld);
+  acousticWorld.available_actions[character]=[acousticCandidate];
+  acousticWorld.characters[character].speech_acoustics={sound_level_db_at_1m:65};
+  acousticWorld.scenes[actionScene].audibility_profiles={
+    [character]:{minimum_audible_db:35},
+    [inquiryAlly]:{minimum_audible_db:35},
+  };
+  const acousticSession=await beginWorldSimulationSession({
+    source_text:"World actor speech verified acoustic source",
+    characters:Object.keys(acousticWorld.characters),
+    initial_world_state:acousticWorld,
+  },{fixtureRoot:goalFixtureRoot});
+  const acousticSid=acousticSession.world_simulation_session_id;
+  const acousticTurn=await runWorldSimulationActorInitiatedSpeech({
+    world_simulation_session_id:acousticSid,character,
+    runtime_context_by_character:planCue,
+  },{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+    if(packet.cognition?.implementation_intention_activation){
+      const activation=packet.cognition.implementation_intention_activation;
+      assert.equal(activation.plans.length,1);
+      return {
+        plan_activation_context_token:activation.context_token,
+        activated_plan_tokens:[activation.plans[0].plan_token],
+      };
+    }
+    assert.ok(packet.candidate_action_intents.some(item=>
+      item.action_id===acousticCandidate.action_id));
+    return {action_id:acousticCandidate.action_id};
+  }});
+  assert.equal(acousticTurn.committed,true);
+  const acousticHistory=await getWorldSimulationHistory(
+    acousticSid,{fixtureRoot:goalFixtureRoot});
+  const acousticSnapshot=await getWorldSimulationState(
+    acousticSid,{fixtureRoot:goalFixtureRoot});
+  const acousticSourceTurn=acousticHistory.turns.at(-1);
+  const sourceOutcome=acousticSourceTurn.action_outcomes.find(item=>
+    item.actor===character && item.action_id===acousticCandidate.action_id
+    && item.result==="communication_emitted");
+  assert.equal(acousticSourceTurn.event,null);
+  assert.equal(sourceOutcome?.communication_event?.surface_realization_complete,true);
+  assert.equal(sourceOutcome?.communication_event?.world_truth_claimed,false);
+  assert.equal(sourceOutcome?.communication_acoustic_signal?.registered,true,
+    "World must register a genuine physical speech signal, not merely a plan.");
+  const sourceAdmission=(acousticSourceTurn.communication_observer_increment_admissions??[])
+    .find(item=>item.observer===inquiryAlly
+      && item.admission_status==="heard_acoustic_cues_only"
+      && item.audit?.source_action_id===sourceOutcome.action_id);
+  assert.ok(sourceAdmission?.observer_increment,
+    "Actor-originated World speech must persist the actual listener acoustic increment.");
+  assert.ok(acousticSourceTurn.subjective_choice_commitment_receipts?.receipt_bundle_hash,
+    "Actor-originated World speech must persist canonical Phase74D intent provenance.");
+  const sourceDependency={
+    session_id:acousticSid,
+    source_turn_id:acousticSourceTurn.turn_id,
+    source_turn_hash:hashAgentRunValue(acousticSourceTurn),
+    source_action_id:sourceOutcome.action_id,
+    source_character:character,observer:inquiryAlly,
+    observer_increment_ref:sourceAdmission.observer_increment.increment_ref,
+    release_time_ms:sourceAdmission.release_time_ms,
+    expected_source_receipt_bundle_hash:
+      acousticSourceTurn.subjective_choice_commitment_receipts.receipt_bundle_hash,
+    expected_source_revision_to:acousticSourceTurn.revision_to,
+    expected_source_next_state_hash:acousticSourceTurn.next_state_hash,
+    expected_current_revision:acousticSnapshot.revision,
+    expected_current_state_hash:acousticSnapshot.state_hash,
+  };
+  const sourceAudit=await assertWorldSimulationCommittedAcousticSource(
+    sourceDependency,{fixtureRoot:goalFixtureRoot});
+  assert.equal(sourceAudit.status,"committed_source_verified_without_retraction");
+  assert.equal(sourceAudit.speculative_dependency_authorized_to_speak,false);
+  assert.equal(sourceAudit.world_mutation_performed,false);
+  await assert.rejects(
+    assertWorldSimulationCommittedAcousticSource({
+      ...sourceDependency,observer_increment_ref:"forged_listener_increment",
+    },{fixtureRoot:goalFixtureRoot}),
+    error=>error?.code==="CC7AF_COMMITTED_SOURCE_INVALID",
+    "A forged listener hearing reference must never be recognized as a committed source.");
+  const unchangedAfterAudit=await getWorldSimulationState(
+    acousticSid,{fixtureRoot:goalFixtureRoot});
+  assert.equal(unchangedAfterAudit.state_hash,acousticSnapshot.state_hash);
+  console.log(JSON.stringify({
+    scenario:"world_actor_speech_committed_acoustic_source",
+    initial_event_queue_empty:acousticWorld.event_queue.length===0,
+    speech_emitted:true,registered_sound:true,
+    listener_increment_persisted:true,choice_receipt_persisted:true,
+    source_audit:sourceAudit.status,information_verified:false,
   }));
 
   // An actor can decline a real plan cue and a genuine available action.
