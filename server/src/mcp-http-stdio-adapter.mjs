@@ -96,7 +96,7 @@ export function createStdioSession(options = {}) {
   const retryMaxMs = boundedInteger(options.readonlyRetryMaxDelayMs, 2_000, retryBaseMs, 30_000);
   const random = options.retryRandom ?? Math.random;
   const retrySleep = options.retrySleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
-  const retryableCodes = new Set(['CHILD_HUNG', 'CHILD_DEAD', 'CHILD_PROTOCOL_OVERFLOW']);
+  const retryableCodes = new Set(['CHILD_HUNG', 'CHILD_DEAD', 'CHILD_PROTOCOL_OVERFLOW', 'TOOL_CALL_TIMEOUT']);
   function captureReadOnlyCatalog(response) {
     readOnlyTools.clear();
     for (const tool of response?.result?.tools ?? []) {
@@ -117,6 +117,7 @@ export function createStdioSession(options = {}) {
   let restarting = false;
   let recovering = false;
   let recoveryPromise = null;
+  let timeoutProbe = null;
   let recoveryBlockedReason = null;
   let lastRecovery = null;
   const recoveryAttemptTimestamps = [];
@@ -215,14 +216,18 @@ export function createStdioSession(options = {}) {
     const timer = setTimeout(() => {
       const entry = listeners.get(id);
       if (!entry || entry.generation !== listenerGeneration) return;
+      const toolTimeout = options.isolatedTimeout === true;
       const error = reliabilityError(
-        'CHILD_HUNG',
+        toolTimeout ? 'TOOL_CALL_TIMEOUT' : 'CHILD_HUNG',
         `MCP child call timed out after ${timeoutMs}ms`,
         { request_id: id, generation: listenerGeneration, timeout_ms: timeoutMs },
       );
-      notifyPendingListeners(error);
+      if (toolTimeout) settleListener(id, error, null);
+      else if (options.internal === true) settleListener(id, error, null);
+      else notifyPendingListeners(error);
       if (options.recoverOnTimeout !== false && initializedNotification) {
-        void scheduleRecovery('call_timeout');
+        if (toolTimeout) void probeTransportAfterTimeout(listenerGeneration);
+        else void scheduleRecovery('call_timeout');
       }
     }, timeoutMs);
     listeners.set(id, {
@@ -231,6 +236,31 @@ export function createStdioSession(options = {}) {
       generation: listenerGeneration,
       internal: options.internal === true,
     });
+  }
+
+  function probeTransportAfterTimeout(attemptedGeneration) {
+    if (closed || attemptedGeneration !== generation || recovering || restarting) {
+      return recoveryPromise ?? Promise.resolve(lastRecovery);
+    }
+    if (timeoutProbe?.generation === attemptedGeneration) return timeoutProbe.promise;
+    const probe = { generation: attemptedGeneration, promise: null };
+    timeoutProbe = probe;
+    probe.promise = (async () => {
+      try {
+        // Ping uses the protocol lane, independent of the timed-out tool.
+        // An authenticated error response still proves the transport answered.
+        await internalCall({ jsonrpc: '2.0', id: 'liveness-' + randomUUID(), method: 'ping',
+          params: { _meta: initializeRequest?.params?._meta } },
+        { timeoutMs: Math.min(callTimeoutMs, 5_000), recoverOnTimeout: false });
+        return { ok: true, generation: attemptedGeneration };
+      } catch {
+        if (closed || generation !== attemptedGeneration || recovering || restarting) return recoveryPromise ?? lastRecovery;
+        notifyPendingListeners(reliabilityError('CHILD_HUNG', 'MCP child did not answer its independent liveness probe.',
+          { generation: attemptedGeneration }));
+        return scheduleRecovery('transport_liveness_timeout');
+      }
+    })().finally(() => { if (timeoutProbe === probe) timeoutProbe = null; });
+    return probe.promise;
   }
 
   function bindChild(nextChild, childGeneration) {
@@ -762,7 +792,7 @@ export function createStdioSession(options = {}) {
       }
       const sent = { ...request, id: retryNumber === 0 ? originalId : 'retry-' + randomUUID() };
       registerListener(sent.id, (error, response) => error ? reject(error) : resolve(response),
-        { timeoutMs: timeoutForRequest(request), recoverOnTimeout: true });
+        { timeoutMs: timeoutForRequest(request), recoverOnTimeout: true, isolatedTimeout: request.method === 'tools/call' });
       send(sent);
     });
     void (async () => {
@@ -785,9 +815,11 @@ export function createStdioSession(options = {}) {
             release = retryBudget.acquire();
             if (!release) throw boundedFailure('shared_budget_exhausted');
             retries += 1;
-            // Recovery is single-flight. Never dispatch a retry into the failed generation.
-            const recovery = await (recoveryPromise ?? (generation === attemptedGeneration
-              ? scheduleRecovery('read_only_retry') : Promise.resolve(lastRecovery)));
+            // A tool timeout retries only on a responsive or recovered transport.
+            // An isolated timeout can leave the rest of its generation healthy.
+            const recovery = await (error.code === 'TOOL_CALL_TIMEOUT' ? probeTransportAfterTimeout(attemptedGeneration)
+              : recoveryPromise ?? (generation === attemptedGeneration
+                ? scheduleRecovery('read_only_retry') : Promise.resolve(lastRecovery)));
             if (!recovery?.ok || closed || finished) throw boundedFailure('child_recovery_unavailable');
             if (request.method === 'tools/call' && !readOnlyTools.has(request.params?.name)) {
               throw boundedFailure('read_only_classification_changed');

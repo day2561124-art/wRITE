@@ -4730,7 +4730,7 @@ for (const definition of toolDefinitions) {
 
 const workbenchTransportBoundary=createWorkbenchTransportBoundary();
 process.once('exit',()=>workbenchTransportBoundary.close());
-let trpgGMBridge = await loadTRPGGMBridge();
+let trpgGMBridge = await loadTRPGGMBridge({ disabled: true });
 const trpgGMToolNames = new Set(trpgGMBridge.tools.map(tool => tool.name));
 toolDefinitions.push(...trpgGMBridge.tools);
 const toolRegistry = new Map(toolDefinitions.map((tool) => [tool.name, tool]));
@@ -4863,10 +4863,27 @@ if (!toolProfiles.has(activeToolProfileName)) {
   throw new Error(`Unknown MCP tool profile: ${activeToolProfileName}`);
 }
 
-async function ensureTRPGGMBridge(){
-  if(trpgGMBridge.tools.length||activeToolProfileName==='chatgpt_public'||process.argv.includes('--pi-worker')||process.env.WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL==='1')return;
-  trpgGMBridge=await loadTRPGGMBridge({disabled:false});
-  for(const tool of trpgGMBridge.tools){if(toolRegistry.has(tool.name))continue;toolDefinitions.push(tool);toolRegistry.set(tool.name,tool);trpgGMToolNames.add(tool.name);chatgptDeveloperToolNames.add(tool.name);}
+async function initializeTRPGGMBridge() {
+  if (activeToolProfileName === "chatgpt_public" || process.argv.includes("--pi-worker")
+    || process.env.WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL === "1") return;
+  const bridge = await loadTRPGGMBridge({ disabled: false });
+  if (!bridge.tools.length) throw new Error("TRPG_GATEWAY_UNAVAILABLE");
+  trpgGMBridge = bridge;
+  for (const tool of bridge.tools) {
+    if (toolRegistry.has(tool.name)) continue;
+    toolDefinitions.push(tool);
+    toolRegistry.set(tool.name, tool);
+    trpgGMToolNames.add(tool.name);
+    chatgptDeveloperToolNames.add(tool.name);
+  }
+}
+
+async function waitForTRPGGMBridge(timeoutMs) {
+  let timer;
+  try {
+    await Promise.race([runtimeComponents.ensure("trpg").catch(() => {}),
+      new Promise(resolve => { timer = setTimeout(resolve, timeoutMs); })]);
+  } finally { clearTimeout(timer); }
 }
 function isToolAllowed(toolName) {
   return workbenchTransportBoundary.isToolAllowed(toolName)&&(activeToolProfile === null || activeToolProfile.has(toolName));
@@ -5912,6 +5929,12 @@ async function callToolDirect(params) {
     : "mcp-client";
 
   if (tool.risk !== "read") {
+    const sources = permissionSources[name] ?? [];
+    const requiredComponents = [
+      ...(sources.includes("development_checkpoint_store") ? ["checkpoint"] : []),
+      ...(sources.includes("development_transaction_store") ? ["transaction"] : []),
+    ];
+    await Promise.all(requiredComponents.map(runtimeComponents.ensure));
     const mutationArgs = args;
     // MCP metadata carries transport identity without weakening strict tool argument schemas.
     const key = normalizeMcpReconciliationKey(params._meta?.reconciliation_key);
@@ -5979,7 +6002,10 @@ async function dispatch(message) {
     const {workbench_http_access_token:discardedProof,workbench_purpose:discardedPurpose,...safeMeta}=meta;
     message={...message,params:{...message.params,_meta:{...safeMeta,...authentication.local?{}:{actor:authentication.principal}}}};
   }
-  if(['initialize','tools/list'].includes(message.method)||message.method==='tools/call'&&typeof message.params?.name==='string'&&message.params.name.startsWith('trpg.gm.'))await ensureTRPGGMBridge();
+  if (message.method === "tools/list") await waitForTRPGGMBridge(350);
+  if (message.method === "tools/call" && typeof message.params?.name === "string" && message.params.name.startsWith("trpg.gm.")) {
+    await waitForTRPGGMBridge(5_000);
+  }
 
   if (!("id" in message)) {
     if (message.method === "notifications/initialized" || message.method.startsWith("notifications/")) {
@@ -5989,6 +6015,7 @@ async function dispatch(message) {
   }
 
   if (message.method === "initialize") {
+    void runtimeComponents.start();
     const requestedVersion = isObject(message.params) ? optionalString(message.params.protocolVersion, "protocolVersion") : "";
     return makeResult(message.id, {
       protocolVersion: requestedVersion || defaultProtocolVersion,
@@ -6016,10 +6043,6 @@ async function dispatch(message) {
         .filter((tool) => isToolAllowed(tool.name))
         .map(publicToolDefinition),
     });
-  }
-
-  if (!(message.method === "tools/call" && trpgGMToolNames.has(message.params?.name))) {
-    await traceSpan("runtime.readiness",()=>ensureRuntimeReady());
   }
 
   if (message.method === "tools/call") {
@@ -6062,20 +6085,37 @@ async function dispatch(message) {
 }
 
 const maxPendingDispatchMessages = 256;
+const maxPendingPerDispatchLane = 48;
 const dispatchQueueOverloadMessage = (
   `Server overloaded: dispatch queue limit of ${maxPendingDispatchMessages} messages reached.`
 );
 
-let pending = Promise.resolve();
-let metadataPending = Promise.resolve();
-let piStatusPending = Promise.resolve();
+const dispatchLanes = new Map();
 let pendingDispatchMessages = 0;
 
+function dispatchLaneFor(message) {
+  if (message?.method !== "tools/call") return "protocol";
+  const name = message.params?.name;
+  if (typeof name !== "string") return "invalid_tool";
+  if (name.startsWith("trpg.gm.")) return "external:trpg";
+  if (/^(?:blender[._]|dev_blender_)/u.test(name)) return "external:blender";
+  if (name === "dev_git_remote_status" || name === "dev_git_push") return "external:git";
+  if (name === "powershell_run" || name === "powershell_admin_run") return name;
+  const tool = toolRegistry.get(name);
+  if (!tool) return "invalid_tool";
+  if (tool.risk === "read" && tool.annotations?.readOnlyHint === true) return `read:${name}`;
+  // Shared mutation workflows retain their existing order and effect locks.
+  return "mutation";
+}
+
 function enqueueMessage(message, framing) {
-  if (pendingDispatchMessages >= maxPendingDispatchMessages) {
+  const laneId = dispatchLaneFor(message);
+  const lane = dispatchLanes.get(laneId) ?? { pending: Promise.resolve(), count: 0 };
+  if (pendingDispatchMessages >= maxPendingDispatchMessages || lane.count >= maxPendingPerDispatchLane) {
     if (isObject(message) && Object.hasOwn(message, "id")) {
       writeMessage(
-        makeError(message.id ?? null, -32000, dispatchQueueOverloadMessage),
+        makeError(message.id ?? null, -32000, lane.count >= maxPendingPerDispatchLane
+          ? "Server overloaded: the requested tool execution queue is full." : dispatchQueueOverloadMessage),
         framing,
       );
     }
@@ -6083,17 +6123,11 @@ function enqueueMessage(message, framing) {
   }
 
   pendingDispatchMessages += 1;
+  lane.count += 1;
+  dispatchLanes.set(laneId, lane);
   const correlation=traceId(message?.params?._meta?.[REQUEST_TRACE_META_KEY]);
   const queuedAt=performance.now();
-  // This exact handler reads only the immutable server-owned schema registry.
-  // Keep its own serial lane; arbitrary reads and every mutation retain the
-  // existing execution queue. dispatch still enforces readiness and profile.
-  const metadata = message?.method === "tools/call"
-    && message?.params?.name === "dev_capability_get_schema"
-    && toolRegistry.get("dev_capability_get_schema")?.risk === "read"
-    && toolRegistry.get("dev_capability_get_schema")?.annotations?.readOnlyHint === true;
-  const observational=message?.method==='tools/call'&&message?.params?.name==='dev_pi_execution_status';
-  const next = (metadata ? metadataPending : observational ? piStatusPending : pending)
+  lane.pending = lane.pending
     .then(async () => {
       publishTrace(correlation,"mcp.queue_wait",performance.now()-queuedAt);
       await runRequestTrace(correlation,async()=>{
@@ -6109,10 +6143,9 @@ function enqueueMessage(message, framing) {
     })
     .finally(() => {
       pendingDispatchMessages -= 1;
+      lane.count -= 1;
+      if (lane.count === 0) dispatchLanes.delete(laneId);
     });
-  if (metadata) metadataPending = next;
-  else if(observational) piStatusPending=next;
-  else pending = next;
   return true;
 }
 
@@ -6410,14 +6443,13 @@ function maybeFinalizeEndOfInput() {
   inputEndFinalized = true;
   const parseError = getEndOfInputParseError();
   if (parseError) {
-    pending = pending.then(async () => {
+    void Promise.allSettled([...dispatchLanes.values()].map(lane => lane.pending)).then(async () => {
       await writeMessage(
         makeError(null, -32700, parseError.message),
         parseError.framing,
       );
-    });
+    }).catch(() => {});
   }
-  pending.catch(() => {});
 }
 
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
@@ -6438,15 +6470,16 @@ function publishRuntimeReadiness(status) {
   } catch {}
 }
 
-const ensureRuntimeReady = createRuntimeReadiness([
+const runtimeComponents = createRuntimeReadiness([
   ["journal", ()=>traceSpan("journal.readiness",initializeDevJournalRuntime)],
   ["checkpoint", ()=>traceSpan("checkpoint.readiness",initializeDevCheckpointRuntime)],
   ["transaction", ()=>traceSpan("transaction.readiness",initializeDevTransactionRuntime)],
-], () => {}, publishRuntimeReadiness);
+  ["trpg", initializeTRPGGMBridge],
+], publishRuntimeReadiness);
 
 if(process.argv.includes('--pi-worker')){
  const {runPiDurableWorker}=await import('./pi-durable-worker.mjs');
- await runPiDurableWorker({controller:piProductionController,ready:ensureRuntimeReady});
+ await runPiDurableWorker({controller:piProductionController,ready:()=>{void runtimeComponents.start();}});
  process.disconnect?.();
  process.exit(0);
 }else{

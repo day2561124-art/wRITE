@@ -947,7 +947,7 @@ function sessionReadiness(entry) {
   } else if (child.recovery_blocked_reason) {
     code = runtime.state === 'failed' ? 'RUNTIME_NOT_READY' : 'CHILD_RECOVERY_BLOCKED';
     reason = child.recovery_blocked_reason;
-  } else if (runtime.state !== 'ready') {
+  } else if (!runtime.components && runtime.state !== 'ready') {
     code = 'RUNTIME_NOT_READY';
     reason = runtime.state === 'failed'
       ? 'runtime_recovery_failed'

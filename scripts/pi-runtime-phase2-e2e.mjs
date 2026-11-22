@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {cp,mkdir,mkdtemp,readFile,writeFile,readdir,symlink,rm,lstat} from 'node:fs/promises';
-import {execFile} from 'node:child_process';
+import {execFile,spawn} from 'node:child_process';
 import {promisify} from 'node:util';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
@@ -27,7 +27,7 @@ export async function runPhase2E2E({normalCalls=8,outputPath=null,keep=false,tra
   const root=await mkdtemp(path.join(os.tmpdir(),'pi-phase2-')),repo=path.join(root,'repo');
   await mkdir(repo);
   const git=args=>exec(process.platform==='win32'?'git.exe':'git',args,{cwd:repo,windowsHide:true,shell:false,timeout:30000,maxBuffer:1024*1024});
-  let client,transport,journal;
+  let client,transport,journal,worker;
   const samples=[],runs=[];
   let requestId=1;
   try {
@@ -36,7 +36,8 @@ export async function runPhase2E2E({normalCalls=8,outputPath=null,keep=false,tra
     await cp(path.join(source,'package.json'),path.join(repo,'package.json'));
     if(transportFactory)await cp(path.join(source,'package-lock.json'),path.join(repo,'package-lock.json'));
     await writeFile(path.join(repo,'.gitignore'),'node_modules/\ndata/outputs/\n');
-    await symlink(path.resolve(source,'..','node_modules'),path.join(repo,'node_modules'),'junction');
+    const dependencyRoot=process.env.WRITER_WORKBENCH_DEPENDENCY_ROOT??source;
+    await symlink(path.resolve(dependencyRoot,'node_modules'),path.join(repo,'node_modules'),process.platform==='win32'?'junction':'dir');
     await git(['init','-b','main']);
     await git(['add','.']);
     await git(['-c','user.name=Pi phase2 fixture','-c','user.email=pi-phase2@example.invalid','-c','core.hooksPath=NUL','commit','-m','Phase2 exact fixture']);
@@ -48,18 +49,36 @@ export async function runPhase2E2E({normalCalls=8,outputPath=null,keep=false,tra
     journal=createDevOperationJournalService({storageRoot:journalRoot});
     await createPiProductionRouteStore({journal}).change({mode:'pi_default',expected_revision:0,
       decision_id:'gpt-phase2-fixture',gate_hash:'a'.repeat(64)},{validateGate:async()=>true});
-    const env={...process.env,MCP_TOOL_PROFILE:'chatgpt_developer',PI_PRESSURE_PHASE2_FIXTURE_ROOT:repo};
+    const env={...process.env,MCP_TOOL_PROFILE:'chatgpt_developer',PI_PRESSURE_PHASE2_FIXTURE_ROOT:repo,NEXA_PI_REQUIRE_TASK_AUTHORIZATION:'0'};
     for(const key of Object.keys(env))if(key.startsWith('WRITER_WORKBENCH_ISOLATED_TEST_'))delete env[key];
     transport=transportFactory?await transportFactory({repo,root,env}):new StdioClientTransport({command:process.execPath,args:['--import',
       new URL('./pi-runtime-phase2-trace.mjs',import.meta.url).href,path.join(repo,'server/src/mcp-server.mjs')],cwd:repo,env,stderr:'pipe'});
     transport.stderr?.on('data',chunk=>process.stderr.write(chunk));
     client=new Client({name:'pi-phase2-e2e',version:'1'});await client.connect(transport);
-    async function call(name,args,expectedError=false) {
+    if (!transportFactory) {
+      worker=spawn(process.execPath,[path.join(repo,'server/src/mcp-server.mjs'),'--pi-worker'],
+        {cwd:repo,env,windowsHide:true,stdio:['ignore','ignore','pipe','ipc']});
+      worker.stderr?.on('data',chunk=>process.stderr.write(chunk));
+    }
+    async function call(name,args,expectedError=false,meta) {
       const start=performance.now();
       const request_id=String(requestId++);
       try {
-        const response=await client.callTool({name,arguments:args},undefined,{timeout:300000});
-        const value=decode(response);
+        const response=await client.callTool({name,arguments:args,...(meta?{_meta:meta}:{})},undefined,{timeout:300000});
+        let value=decode(response);
+        if (name==='dev_pi_execute_intent') {
+          const intent=JSON.parse(args.intent_json);
+          const terminal=new Set(['COMPLETED','DECISION_REQUIRED','BLOCKED','FAILED','CANCELLED']);
+          const deadline=Date.now()+120_000;
+          const statusArgs={operation_id:value.state.operation_id,...(intent.bootstrap?{bootstrap:true}:{
+            workstream_id:intent.context.workstream_id,workspace_id:intent.context.workspace_id})};
+          while(!terminal.has(value.state.status)){
+            if(Date.now()>=deadline)throw Error('Fixture durable worker did not finish');
+            await new Promise(resolve=>setTimeout(resolve,150));
+            const status=await client.callTool({name:'dev_pi_execution_status',arguments:statusArgs});
+            value=decode(status).operation;
+          }
+        }
         samples.push({request_id,name,ms:performance.now()-start,ok:!response.isError,request_result:value.state?.status??null});
         process.stderr.write(JSON.stringify({tool:name,status:value.state?.status??null,ms:samples.at(-1).ms})+'\n');
         return value;
@@ -102,10 +121,14 @@ export async function runPhase2E2E({normalCalls=8,outputPath=null,keep=false,tra
       {intent_json:JSON.stringify(powershell('phase2-concurrent-'+i+'-0001'))})));
     assert(concurrent.every(value=>value.state.status==='COMPLETED'));
     const competition=await Promise.all([
-      call('dev_pi_execute_intent',{intent_json:JSON.stringify(powershell('phase2-queue-holder-0001',"Start-Sleep -Seconds 2; Write-Output 'PI_PHASE2_OK'"))}),
+      call('powershell_run',{workspace_id:shared,command:"Start-Sleep -Seconds 2; Write-Output 'PI_PHASE2_OK'"},false,
+        {reconciliation_key:'phase2-queue-holder-0001',pi_fallback:{purpose:'diagnostic',reason:'Isolated transport contention fixture',
+          decision_id:'gpt-phase2-queue-holder'}}),
       ...Array.from({length:3},()=>call('dev_capability_get_schema',{capability_name:'host.powershell'})),
+      call('dev_read_file',{path:'package.json',workspace_id:context.workspace_id}),
     ]);
-    assert.equal(competition[0].state.status,'COMPLETED');
+    assert.match(competition[0].stdout,/PI_PHASE2_OK/u);
+    assert.equal(typeof competition.at(-1).content,'string');
     const extraDispatches=beforeFaults?await beforeFaults({call,powershell,receipt,runs,context}):0;
     const nonzero=await call('dev_pi_execute_intent',{intent_json:JSON.stringify(powershell('phase2-nonzero-0001','exit 7'))});
     const nonzeroFact=receipt(nonzero);
@@ -113,10 +136,13 @@ export async function runPhase2E2E({normalCalls=8,outputPath=null,keep=false,tra
     assert.equal(nonzero.state.status,'DECISION_REQUIRED');
     assert.equal((await journal.status()).health,'healthy');
     const timeoutIntent=powershell('phase2-timeout-0001','Start-Sleep -Seconds 3',1000);
-    const timeout=await call('dev_pi_execute_intent',{intent_json:JSON.stringify(timeoutIntent)},true);
-    assert.match(timeout.error,/JOURNAL_DEGRADED/);
-    const retry=await call('dev_pi_execute_intent',{intent_json:JSON.stringify(timeoutIntent)},true);
-    assert.match(retry.error,/JOURNAL_DEGRADED/);
+    const timeout=await call('dev_pi_execute_intent',{intent_json:JSON.stringify(timeoutIntent)});
+    assert.equal(timeout.state.status,'DECISION_REQUIRED');
+    const retry=await call('dev_pi_execute_intent',{intent_json:JSON.stringify(timeoutIntent)});
+    assert.equal(retry.state.operation_id,timeout.state.operation_id);
+    assert.equal(retry.projection_hash,timeout.projection_hash);
+    const unrelated=await call('dev_read_file',{path:'package.json',workspace_id:context.workspace_id});
+    assert.equal(typeof unrelated.content,'string');
     const health=await journal.status();
     assert.equal(health.chain_verified,true);
     assert.equal(health.health,'degraded');
@@ -134,7 +160,8 @@ export async function runPhase2E2E({normalCalls=8,outputPath=null,keep=false,tra
       source_commit:'8e9b561b86e009e8df86734d980aa586538d8f2e',context,runs,samples,trace,
       server_sha256:createHash('sha256').update(await readFile(path.join(repo,'server/src/mcp-server.mjs'))).digest('hex'),
       nonzero:{status:nonzero.state.status,exit_code:nonzeroFact.exit_code,ok:nonzeroFact.ok,error:nonzero.result},
-      timeout:{error:timeout.error,retry_error:retry.error,timed_out:timeoutFact.timed_out,exit_code:timeoutFact.exit_code,ok:timeoutFact.ok,
+      timeout:{status:timeout.state.status,duplicate_same_projection:retry.projection_hash===timeout.projection_hash,
+        unrelated_read_survived:true,timed_out:timeoutFact.timed_out,exit_code:timeoutFact.exit_code,ok:timeoutFact.ok,
         reconciliation:'required; automatic restoration deliberately not asserted'},
       concurrent_statuses:concurrent.map(r=>r.state.status),journal:health,physical_dispatches:started.length,
       duplicate_same_operation:true,unauthorized_no_dispatch:true,shared_fixture_head_unchanged:true};
@@ -147,6 +174,14 @@ export async function runPhase2E2E({normalCalls=8,outputPath=null,keep=false,tra
     throw error;
   } finally {
     if(client)await client.close().catch(()=>{});
+    if(worker && worker.exitCode===null && worker.signalCode===null){
+      await new Promise(resolve=>{
+        const timer=setTimeout(()=>{worker.kill();},5000);
+        worker.once('close',()=>{clearTimeout(timer);resolve();});
+        if(worker.connected)worker.send({protocol:'writer-workbench/pi-durable-worker/v1',kind:'drain'},()=>{});
+        else worker.kill();
+      });
+    }
     await transport?.cleanupFixture?.();
     if(!keep) {
       assert.equal(path.dirname(path.resolve(root)),path.resolve(os.tmpdir()));

@@ -38,21 +38,23 @@ try {
     ['checkpoint', async () => { order.push('checkpoint'); await service.initialize(); }],
     ['transaction', async () => order.push('transaction')],
   ]);
-  const first = ready();
+  const first = ready.ensure('checkpoint');
   first.catch(() => {});
-  assert.equal(ready(), first, 'All callers must share the same ordered recovery');
+  assert.equal(ready.ensure('checkpoint'), first, 'Checkpoint callers share one recovery attempt');
+  await ready.ensure('journal');
+  await ready.ensure('transaction');
   await delay(500);
-  assert.deepEqual(order, ['journal', 'checkpoint']);
+  assert.deepEqual(order, ['checkpoint', 'journal', 'transaction']);
   assert.equal(recovered, 0, 'No recovery may run while the live holder owns the lock');
   assert.equal(ready.getStatus().state, 'running');
   const owner = JSON.parse(await readFile(lockPath, 'utf8'));
   assert.equal(owner.pid, holder.pid, 'A waiting initializer must not revoke or replace a live owner');
   await first;
   assert.equal(ready.getStatus().state, 'ready');
-  assert.deepEqual(order, ['journal', 'checkpoint', 'transaction']);
+  assert.deepEqual(order, ['checkpoint', 'journal', 'transaction']);
   assert.equal(recovered, 1);
   assert.deepEqual(await exited, {code:0, signal:null});
-  await ready();
+  await ready.ensure('checkpoint');
   assert.equal(recovered, 1, 'Readiness runs once after legitimate lock release');
 
   const busyRoot = path.join(root, 'persistent');
@@ -69,17 +71,19 @@ try {
   let attempts = 0;
   const failed = createRuntimeReadiness([
     ['checkpoint', async () => { attempts++; await busy.initialize(); }],
-    ['transaction', async () => assert.fail('Transaction must stay blocked')],
-  ]);
+    ['transaction', async () => ({ initialized: true })],
+  ], undefined, { maxAttempts: 1 });
   const started = performance.now();
-  await assert.rejects(failed(), {code:'CHECKPOINT_STORE_BUSY'});
+  const blocked = assert.rejects(failed.ensure('checkpoint'), {code:'CHECKPOINT_STORE_BUSY'});
+  assert.deepEqual(await failed.ensure('transaction'), { initialized: true });
+  await blocked;
   const elapsed = performance.now() - started;
   assert.ok(elapsed >= 29000 && elapsed < 45000, `Readiness lock wait must be bounded, observed ${elapsed}ms`);
-  assert.equal(failed.getStatus().state, 'failed');
-  await assert.rejects(failed(), {code:'CHECKPOINT_STORE_BUSY'});
-  assert.equal(attempts, 1, 'Failed readiness stays failed rather than rerunning recovery');
+  assert.equal(failed.getStatus().components.checkpoint.state, 'unavailable');
+  await assert.rejects(failed.ensure('checkpoint'), {code:'CHECKPOINT_STORE_BUSY'});
+  assert.equal(attempts, 1, 'The same component respects its cooldown');
   assert.equal(await readFile(busyLock, 'utf8'), ownerBytes, 'Timeout must preserve the live lock');
-  console.log(JSON.stringify({result:'PASS', released_live_owner:true, ordered_recovery:true, ordinary_budget_preserved:true, sticky_failure:true, persistent_wait_ms:Math.round(elapsed)}));
+  console.log(JSON.stringify({result:'PASS', released_live_owner:true, independent_recovery:true, ordinary_budget_preserved:true, bounded_retry:true, persistent_wait_ms:Math.round(elapsed)}));
 } finally {
   if (holder && holder.exitCode === null && holder.signalCode === null) {
     holder.kill();

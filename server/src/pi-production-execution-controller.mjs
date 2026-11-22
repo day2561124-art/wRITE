@@ -24,9 +24,12 @@ export const runPiManagedMcpCall=async(callback,authorizeDispatch)=>{
 export async function guardPiDirectExecution({route,tool,mutation=false,params={},auditFallback,resolveWorkspace}){
  const authorizeDispatch=managed.getStore();
  if(typeof authorizeDispatch==="function"){await authorizeDispatch();return;}
- if((await route.inspect()).revision===0)return;
  const p=params._meta?.pi_fallback;
- if(p===undefined&&await admitPiLightweightRead({tool,mutation,params,resolveWorkspace}))return;
+ if(p===undefined){
+  try {if(await admitPiLightweightRead({tool,mutation,params,resolveWorkspace}))return;}
+  catch(error){if((await route.inspect().catch(()=>null))?.revision===0)return;throw error;}
+ }
+ if((await route.inspect()).revision===0)return;
  if(!p||Object.keys(p).sort().join(",")!=="decision_id,purpose,reason"||!["diagnostic","emergency"].includes(p.purpose)
   ||typeof p.reason!=="string"||!p.reason.trim()||p.reason.length>256||!/^gpt-[A-Za-z0-9._:-]{1,120}$/u.test(p.decision_id))reliableFailure("PI_EXECUTION_INTENT_REQUIRED");
  if(mutation&&!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(params._meta?.reconciliation_key??""))reliableFailure("FALLBACK_IDEMPOTENCY_REQUIRED");

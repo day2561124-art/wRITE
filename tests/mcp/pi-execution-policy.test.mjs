@@ -137,7 +137,10 @@ test("read route is finite, workspace-bound and cannot admit shell or mutation",
   await assert.rejects(guardPiDirectExecution({ route, tool: "dev_pi_execute_readonly", params: {}, resolveWorkspace: binding }), { code: "PI_EXECUTION_INTENT_REQUIRED" });
   await assert.rejects(guardPiDirectExecution({ route, tool: "dev_read_file", params: { arguments: { workspace_id: null } }, resolveWorkspace: binding }), { code: "PI_EXECUTION_INTENT_REQUIRED" });
   await assert.rejects(guardPiDirectExecution({ route, tool: "dev_read_file", params, resolveWorkspace: async () => ({ workspace_id: "other" }) }), { code: "WORKSPACE_IDENTITY_MISMATCH" });
-  await assert.rejects(guardPiDirectExecution({ route: { inspect: async () => { throw Error("corrupt route"); } }, tool: "dev_read_file", params, resolveWorkspace: binding }), /corrupt route/);
+  const corruptRoute = { inspect: async () => { throw Error("corrupt route"); } };
+  await guardPiDirectExecution({ route: corruptRoute, tool: "dev_read_file", params, resolveWorkspace: binding });
+  await assert.rejects(guardPiDirectExecution({ route: corruptRoute, tool: "dev_apply_patch", params,
+    mutation: true, resolveWorkspace: binding }), /corrupt route/u);
 });
 
 test("lightweight reads reuse real path, secret, symlink and output limits in separate workspaces", async t => {
@@ -211,12 +214,15 @@ test("authorized PowerShell retains formal Pi persistence, exact dispatch and du
   assert.equal((await journal.status()).health, "healthy");
 });
 
-test("real MCP permits explicit scoped reads without mutation transactions and blocks direct mutations", async t => {
+for (const damagedJournal of [false, true]) test(damagedJournal
+  ? "real MCP preserves authorized reads and shared integrity enforcement with a corrupt Journal"
+  : "real MCP permits explicit scoped reads without mutation transactions and blocks direct mutations", async t => {
   const group = randomUUID();
   const root = path.join(os.tmpdir(), "writer-workbench-operation-journal-test-" + group);
   t.after(() => rm(root, { recursive: true, force: true }));
   const journal = createDevOperationJournalService({ storageRoot: path.join(root, "operation-journal") });
   await createPiProductionRouteStore({ journal }).change({ mode: "pi_default", decision_id: "gpt-policy-wire", gate_hash: "a".repeat(64), expected_revision: 0 }, { validateGate: async () => true });
+  if (damagedJournal) await writeFile(path.join(root, "operation-journal", "head.json"), "{corrupt fixture head");
   const adapterUrl = new URL("../../server/src/mcp-http-stdio-adapter.mjs", import.meta.url).href;
   const oauthUrl=new URL("./fixtures/workbench-http-test-security.mjs",import.meta.url).href;
   const code = `import {createStdioSession} from ${JSON.stringify(adapterUrl)};
@@ -239,6 +245,7 @@ test("real MCP permits explicit scoped reads without mutation transactions and b
         ['powershell_run',{command:"Write-Output 'must-not-dispatch'"}],
         ['powershell_admin_run',{command:'Get-Process'}],
       ]) results[name]=await call({jsonrpc:'2.0',id:name,method:'tools/call',params:{name,arguments:{...args,...(name.startsWith('dev_capability')||name==='dev_pi_runtime_status'?{}:{workspace_id:'dev_workspace_shared_repository_v1'})}}});
+      results.journal=await call({jsonrpc:'2.0',id:'journal',method:'tools/call',params:{name:'dev_workspace_journal_status',arguments:{}}});
       console.log(JSON.stringify(results));
     } finally {session.close();}`;
   const { stdout } = await promisify(execFile)(process.execPath, ["--input-type=module", "-e", code], {
@@ -250,6 +257,15 @@ test("real MCP permits explicit scoped reads without mutation transactions and b
   for (const name of ["dev_read_file", "dev_search_files", "dev_git_status", "dev_capability_list", "dev_pi_runtime_status"]) {
     assert.equal(results[name].error, undefined, JSON.stringify(results[name]));
     assert.notEqual(results[name].result.isError, true, JSON.stringify(results[name]));
+  }
+  const health = JSON.parse(results.journal.result.content[0].text);
+  if (damagedJournal) {
+    assert.equal(health.health, "corrupt");
+    assert.equal(health.chain_verified, false);
+    for (const name of ["dev_create_file", "powershell_run", "powershell_admin_run"]) {
+      assert.ok(results[name].error || results[name].result?.isError, JSON.stringify(results[name]));
+    }
+    return;
   }
   for (const name of ["dev_create_file", "powershell_run", "powershell_admin_run"]) {
     assert.equal(results[name].error.message, "PI_EXECUTION_INTENT_REQUIRED");
