@@ -577,6 +577,122 @@ try {
       state_unchanged:true,history_unchanged:true,
     }));
   }
+
+  // Two real prior-turn subjective beliefs, with separate owners, must be
+  // processed as ONE eventless goal transaction. A foreign/invalid second
+  // Brain intent cannot leave the first character's goal partially written.
+  const second = "內在提示角色";
+  const secondMemory = structuredClone(memory);
+  secondMemory.memory_id = "memory_c2_other_actor_observation";
+  secondMemory.content.description = "門邊的時鐘看起來慢了五分鐘。";
+  secondMemory.internal_provenance.event_id = "other_actor_observation";
+  secondMemory.internal_provenance.observation_hash = "other_actor_observation_hash";
+  let multiState = {
+    ...structuredClone(baseWorldState),
+    memories: {
+      [character]:[structuredClone(memory)],
+      [second]:[secondMemory],
+      "無事角色":[],
+    },
+  };
+  const multiClaims = buildWorldSimulationSubjectiveClaims({
+    world_state: multiState, turn_id: sourceTurn,
+    source_memory_records:[
+      {character,memory_record:memory},
+      {character:second,memory_record:secondMemory},
+    ],
+    claim_proposals:[
+      {proposal_ref:"first_own_evidence",character,
+        proposition:"我看見計時器上標著四十分鐘。",
+        evidence:[{source_memory_ref:memory.memory_id,relation:"supports"}]},
+      {proposal_ref:"second_own_evidence",character:second,
+        proposition:"我看見門邊的時鐘可能慢了五分鐘。",
+        evidence:[{source_memory_ref:secondMemory.memory_id,relation:"supports"}]},
+    ],
+  });
+  multiState = executeFixture(multiState,"multi_subjective_claim",multiClaims);
+  const multiResolution=resolveWorldSimulationSubjectiveBeliefs({
+    world_state:multiState,turn_id:sourceTurn,
+  });
+  const multiRevision=buildWorldSimulationSubjectiveBeliefRevisions({
+    world_state:multiState,turn_id:sourceTurn,resolution:multiResolution.result,
+  });
+  multiState=executeFixture(multiState,"multi_subjective_belief_revision",multiRevision);
+  assert.equal(multiState.subjective_belief_revision_history.length,2);
+  const multiRuntime={
+    [character]:{idle:true},
+    [second]:{pending_internal_cues:[{
+      kind:"memory_reactivation",source_ref:"runtime-current-mind-other-memory-cue",
+    }]},
+  };
+  for(const invalidSecond of [false,true]){
+    const multiSession=await beginWorldSimulationSession({
+      source_text:`CB-C2 atomic goal batch ${invalidSecond?"reject":"commit"}`,
+      characters:Object.keys(baseWorldState.characters),
+      initial_world_state:multiState,
+    },{fixtureRoot:goalFixtureRoot});
+    const multiSid=multiSession.world_simulation_session_id;
+    const pre=await getWorldSimulationState(multiSid,{fixtureRoot:goalFixtureRoot});
+    const historyPre=await getWorldSimulationHistory(multiSid,{fixtureRoot:goalFixtureRoot});
+    const seenCharacters=[];
+    const invoke=()=>dispatchWorldSimulationAutonomousCognitionOpportunities({
+      world_simulation_session_id:multiSid,
+      runtime_context_by_character:multiRuntime,
+    },{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+      seenCharacters.push(packet.character);
+      const view=packet.native_goal_decision;
+      assert.equal(view.character,packet.character);
+      assert.equal(view.motivation_basis.length,1);
+      const goal={
+        operation:"propose",goal_kind:"achieve_state",domain:"inquiry",
+        target_descriptor:{label:packet.character===character
+          ?"查證計時器實際上限":"查證門邊的時鐘走時"},
+        motivation_basis_tokens:[view.motivation_basis[0].source_token],
+        motivation_relations:["supports"],
+      };
+      if(invalidSecond && packet.character===second){
+        goal.motivation_basis_tokens=["foreign_or_forged_source"];
+      }
+      return {goal_context_token:view.context_token,goal_intents:[goal]};
+    }});
+    if(invalidSecond){
+      await assert.rejects(invoke(),error =>
+        error?.code==="WORLD_SIMULATION_NATIVE_GOAL_SOURCE_TOKEN_INVALID",
+      "The second Brain's illegal source must abort all other goal intents.");
+    }else{
+      const result=await invoke();
+      assert.equal(result.dispatch_count,2);
+      assert.equal(result.action_selection_performed,false);
+      assert.equal(result.durable_cognitive_write_performed,true);
+      assert.equal(result.world_mutation_performed,true);
+    }
+    assert.deepEqual([...seenCharacters].sort(),[character,second].sort());
+    const post=await getWorldSimulationState(multiSid,{fixtureRoot:goalFixtureRoot});
+    const historyPost=await getWorldSimulationHistory(multiSid,{fixtureRoot:goalFixtureRoot});
+    assert.equal(post.revision,pre.revision+(invalidSecond?0:1));
+    assert.equal(historyPost.turns.length,historyPre.turns.length+(invalidSecond?0:1));
+    assert.equal((post.state.motivational_goal_history??[]).length,invalidSecond?0:2);
+    assert.deepEqual(post.state.event_queue,pre.state.event_queue);
+    assert.equal(post.state.simulation_time,pre.state.simulation_time);
+    if(invalidSecond){
+      assert.equal(post.state_hash,pre.state_hash);
+      assert.deepEqual(historyPost.turns,historyPre.turns);
+    }else{
+      assert.equal(historyPost.turns.at(-1).event,null);
+      assert.equal(historyPost.turns.at(-1).autonomous_cognition_goal_commitment?.goal_event_count,2);
+      const alreadyCommitted=await scheduleWorldSimulationAutonomousCognitionOpportunities({
+        world_simulation_session_id:multiSid,
+        runtime_context_by_character:multiRuntime,
+      },{fixtureRoot:goalFixtureRoot});
+      assert.equal(alreadyCommitted.scheduler_projection.opportunity_count,0,
+        "Both participant opportunities must be durably consumed after the batch.");
+    }
+    console.log(JSON.stringify({
+      scenario:"c2_eventless_goal_two_actor_atomicity",invalid_second:invalidSecond,
+      checked_brains:seenCharacters.length,goal_events:(post.state.motivational_goal_history??[]).length,
+      state_revision:post.revision,history_turns:historyPost.turns.length,
+    }));
+  }
 } finally {
   await rm(goalFixtureRoot,{recursive:true,force:true});
 }
