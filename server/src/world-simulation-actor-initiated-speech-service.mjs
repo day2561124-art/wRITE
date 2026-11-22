@@ -95,8 +95,16 @@ async function invokeBrain(packet, actor, sessionId, options, before) {
       brain_input:packet,
       characterBrain:async incoming=>{
         try {
+          if(completed) reject("WORLD_ACTOR_SPEECH_DUPLICATE_BRAIN_INVOCATION",
+            "An actor-initiated decision cannot call the Character Brain twice.");
+          if(!sameCharacter(incoming?.character,actor))
+            reject("WORLD_ACTOR_SPEECH_CHARACTER_MISMATCH",
+              "Actor-initiated World speech must use the scheduled character identity.");
           const atIngress=await getWorldSimulationState(sessionId,options);
           assertExactState(before,atIngress);
+          if(!projectWorldSimulationConsciousCognitionAdmission(atIngress.state,actor).admitted)
+            reject("WORLD_ACTOR_SPEECH_CONSCIOUS_ADMISSION_DENIED",
+              "The character is no longer admitted for conscious speech.");
           completed=true;
           return await options.characterBrain(incoming);
         } catch(error) {callbackError=error;throw error;}
