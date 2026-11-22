@@ -809,6 +809,27 @@ try {
     "candidate_action_intent");
   assert.equal(reentryTurn.selected_action_intents[0].action_id,
     "ask-trusted-ally");
+  // A selected action is NOT an executed investigation. This must be an
+  // actual public causal World communication outcome, not a passive marker.
+  const reachedWorld = reentryTurn.action_outcomes.filter(outcome =>
+    outcome.actor === rio && outcome.action_id === "ask-trusted-ally");
+  console.log(JSON.stringify({
+    scenario: "cb_c3_inquiry_action_causal_receipt",
+    selected_action: reentryTurn.selected_action_intents[0].action_id,
+    actual_outcome_kinds: reachedWorld.map(outcome => outcome.result),
+    emitted_communication: reachedWorld.some(outcome => outcome.result === "communication_emitted"),
+    inspection_completed: false,
+    information_verified: false,
+  }));
+  assert.equal(reachedWorld.filter(outcome => outcome.result === "communication_emitted").length, 1,
+    "CB-C3 causal gap: a committed goal and activated plan must yield a real World inquiry action outcome, not merely select a passive action.");
+  const publicEvent = reachedWorld.find(outcome => outcome.result === "communication_emitted")
+    ?.communication_event;
+  assert.equal(publicEvent?.actor, rio);
+  assert.equal(publicEvent?.channel, "speech");
+  assert.equal(publicEvent?.world_truth_claimed, false);
+  assert.ok(publicEvent?.addressee && publicEvent.addressee !== rio);
+  assert.equal(reentryTurn.selected_action_intents[0].candidate.communication?.channel, "speech");
   const afterReentry = await getWorldSimulationState(
     session.world_simulation_session_id, sessionOptions);
   assert.equal(afterReentry.revision, afterIdle.revision + 1);
