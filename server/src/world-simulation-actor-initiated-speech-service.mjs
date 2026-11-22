@@ -216,10 +216,17 @@ export async function runWorldSimulationActorInitiatedSpeech(input = {}, options
     version:worldSimulationActorInitiatedSpeechVersion,
     status:"no_admitted_action_candidates",committed:false,action_selection_performed:false,
   });
-  for (const candidate of menu)
-    if (!candidates.some(source=>source.action_id===candidate?.action_id))
+  const proposalIds=new Set();
+  for (const candidate of menu) {
+    const source=candidates.find(item=>item.action_id===candidate?.action_id);
+    if (!source || proposalIds.has(candidate.action_id))
       reject("CB_C4_ACTION_CATALOG_EXPANDED",
-        "Neural action consideration cannot add new World candidates.");
+        "Neural action consideration cannot add or duplicate World candidates.");
+    proposalIds.add(candidate.action_id);
+    if (hashAgentRunValue(candidate)!==hashAgentRunValue(source))
+      reject("CB_C4_ACTION_CANDIDATE_MUTATED",
+        "Action proposer cannot change World-owned action payloads behind a stable action ID.");
+  }
   const response=await invokeBrain({
     character:actor,
     cognition:{
@@ -252,9 +259,13 @@ export async function runWorldSimulationActorInitiatedSpeech(input = {}, options
   const candidate=menu.find(item=>item?.action_id===actionId);
   if (!candidate) reject("CB_C4_ACTION_NOT_AVAILABLE",
     "Actor tried to select a speech action outside its World catalog.");
+  const trustedCandidate=candidates.find(item=>item.action_id===actionId);
+  if (!trustedCandidate || hashAgentRunValue(trustedCandidate)!==hashAgentRunValue(candidate))
+    reject("CB_C4_ACTION_CANDIDATE_MUTATED",
+      "Causal action must retain the exact trusted World candidate.");
   const selected=[{
     character:actor,selection:"candidate_action_intent",
-    action_id:actionId,intent:candidate.intent??null,candidate:clone(candidate),
+    action_id:actionId,intent:trustedCandidate.intent??null,candidate:clone(trustedCandidate),
   }];
   const current=await getWorldSimulationState(sessionId,options);
   assertExactState(before,current);
