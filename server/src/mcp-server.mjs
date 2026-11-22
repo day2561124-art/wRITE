@@ -6111,11 +6111,13 @@ function dispatchLaneFor(message) {
 function enqueueMessage(message, framing) {
   const laneId = dispatchLaneFor(message);
   const lane = dispatchLanes.get(laneId) ?? { pending: Promise.resolve(), count: 0 };
-  if (pendingDispatchMessages >= maxPendingDispatchMessages || lane.count >= maxPendingPerDispatchLane) {
+  const globalOverload = pendingDispatchMessages >= maxPendingDispatchMessages;
+  const toolOverload = laneId !== "protocol" && lane.count >= maxPendingPerDispatchLane;
+  if (globalOverload || toolOverload) {
     if (isObject(message) && Object.hasOwn(message, "id")) {
       writeMessage(
-        makeError(message.id ?? null, -32000, lane.count >= maxPendingPerDispatchLane
-          ? "Server overloaded: the requested tool execution queue is full." : dispatchQueueOverloadMessage),
+        makeError(message.id ?? null, -32000, globalOverload ? dispatchQueueOverloadMessage
+          : "Server overloaded: the requested tool execution queue is full."),
         framing,
       );
     }
