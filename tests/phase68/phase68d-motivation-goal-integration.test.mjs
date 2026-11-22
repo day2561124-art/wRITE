@@ -8,7 +8,7 @@ import {
   runWorldSimulationTurn,
 } from "../../server/src/world-simulation-loop-service.mjs";
 import { beginWorldSimulationSession } from "../../server/src/world-simulation-session-service.mjs";
-import { getWorldSimulationState } from "../../server/src/world-simulation-state-service.mjs";
+import { getWorldSimulationHistory, getWorldSimulationState } from "../../server/src/world-simulation-state-service.mjs";
 import { projectWorldSimulationEffectiveGoalImplementationIntentions } from "../../server/src/world-simulation-goal-to-plan-implementation-intention-service.mjs";
 import { nativeImplementationIntentionActivationCapability } from "../../server/src/world-simulation-goal-implementation-intention-activation-service.mjs";
 
@@ -811,7 +811,12 @@ try {
     "ask-trusted-ally");
   // A selected action is NOT an executed investigation. This must be an
   // actual public causal World communication outcome, not a passive marker.
-  const reachedWorld = reentryTurn.action_outcomes.filter(outcome =>
+  const committedHistory = await getWorldSimulationHistory(
+    session.world_simulation_session_id, sessionOptions);
+  const reentryReceipt = committedHistory.turns.find(turn =>
+    turn.turn_id === reentryTurn.turn_id && turn.revision_to === reentryTurn.revision);
+  assert.ok(reentryReceipt, "Inquiry outcome must be read from the exact committed World turn.");
+  const reachedWorld = (reentryReceipt.action_outcomes ?? []).filter(outcome =>
     outcome.actor === rio && outcome.action_id === "ask-trusted-ally");
   console.log(JSON.stringify({
     scenario: "cb_c3_inquiry_action_causal_receipt",
