@@ -394,6 +394,9 @@ export async function commitWorldSimulationTurn(
             ...(input.autonomous_cognition_plan_commitment != null
               ? { autonomous_cognition_plan_commitment:
                   input.autonomous_cognition_plan_commitment } : {}),
+            ...(input.autonomous_actor_initiated_action != null
+              ? { autonomous_actor_initiated_action:
+                  input.autonomous_actor_initiated_action } : {}),
             selected_action_intents: input.selected_action_intents ?? [],
             subjective_choice_commitment_receipts:
               input.subjective_choice_commitment_receipts ?? null,
