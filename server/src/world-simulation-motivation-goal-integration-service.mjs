@@ -140,6 +140,10 @@ function canonicalMotivationSources(worldState) {
         character,
         character_view: {
           claim_type: optionalString(belief.claim_type) ?? "subjective_belief",
+          // Phase66 already validated this active, same-character proposition.
+          // Preserve its meaning without forwarding raw memory, provenance,
+          // probability, or objective-world authority.
+          proposition: belief.proposition,
           subjective_not_world_truth: true,
         },
       });
