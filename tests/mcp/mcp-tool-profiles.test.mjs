@@ -172,6 +172,7 @@ const fullResponses = await runStdioSession("full", [listRequest]);
 const fullNames = fullResponses[0].result.tools.map((tool) => tool.name);
 const registeredNames = extractDirectMcpToolNames(await readFile(serverPath, "utf8"));
 assert.deepEqual(fullNames, registeredNames, "full tools/list drifted from the MCP registry");
+assert.equal(fullNames.includes("blender_list_scene_objects"), false);
 for (const toolName of retiredLegacyWritingToolNames) {
   assert.equal(fullNames.includes(toolName), false, `${toolName} must remain retired from the MCP registry`);
 }
@@ -328,6 +329,12 @@ const developerResponses = await runStdioSession("chatgpt_developer", [
   listRequest,
   {
     jsonrpc: "2.0",
+    id: "blender-invalid-input",
+    method: "tools/call",
+    params: { name: "blender_list_scene_objects", arguments: { code: "not accepted" } },
+  },
+  {
+    jsonrpc: "2.0",
     id: "pi-runtime-status",
     method: "tools/call",
     params: {
@@ -336,14 +343,38 @@ const developerResponses = await runStdioSession("chatgpt_developer", [
     },
   },
 ]);
-const developerList = developerResponses[0];
+const developerList = developerResponses.find(response => response.id === listRequest.id);
 const developerNames = developerList.result.tools.map((tool) => tool.name);
 assert.deepEqual(
   [...developerNames].sort(),
-  [...publicToolNames, "dev_pi_execute_intent", "dev_pi_execution_status", "dev_pi_runtime_status", "dev_pi_execute_readonly", "dev_capability_get_schema", "dev_capability_list", "dev_apply_patch", "dev_run_tests", "powershell_run", "powershell_admin_run", "dev_git_commit", "dev_git_push"].sort(),
+  [...publicToolNames, "blender_list_scene_objects", "blender_inspect_scene", "blender_edit_scene", "dev_pi_execute_intent", "dev_pi_execution_status", "dev_pi_runtime_status", "dev_pi_execute_readonly", "dev_capability_get_schema", "dev_capability_list", "dev_apply_patch", "dev_run_tests", "powershell_run", "powershell_admin_run", "dev_git_commit", "dev_git_push"].sort(),
   "chatgpt_developer must equal chatgpt_public plus the development filesystem/range/write/test/Git/workstream/worktree tools",
 );
 assert.equal(publicToolMap.has("dev_pi_runtime_status"), false, "Pi runtime status leaked into chatgpt_public");
+const developerBlenderTool = developerList.result.tools.find((tool) => tool.name === "blender_list_scene_objects");
+assert.equal(publicToolMap.has("blender_list_scene_objects"), false);
+for (const name of ["blender_inspect_scene", "blender_edit_scene"]) {
+  assert.equal(publicToolMap.has(name), false);
+  assert.equal(fullNames.includes(name), false);
+}
+const inspectBlender = developerList.result.tools.find(tool => tool.name === "blender_inspect_scene");
+const editBlender = developerList.result.tools.find(tool => tool.name === "blender_edit_scene");
+assert.equal(inspectBlender.annotations.readOnlyHint, true);
+assert.equal(editBlender.annotations.readOnlyHint, false);
+assert.equal(editBlender.inputSchema.additionalProperties, false);
+assert.deepEqual(editBlender.inputSchema.required, ["scene", "scene_id", "operations"]);
+assert.equal(editBlender._meta["armed-academy/permission"].log_required, true);
+assert.equal(developerBlenderTool.annotations?.readOnlyHint, true);
+assert.equal(developerBlenderTool.annotations?.destructiveHint, false);
+assert.equal(developerBlenderTool.annotations?.openWorldHint, false);
+assert.deepEqual(developerBlenderTool.inputSchema?.properties, {});
+assert.equal(developerBlenderTool.inputSchema?.additionalProperties, false);
+assert.deepEqual(developerBlenderTool._meta?.["armed-academy/permission"]?.allowed_sources,
+  ["local_blender_current_scene_object_names_and_types"]);
+const invalidBlenderRequest = developerResponses.find(response => response.id === "blender-invalid-input");
+assert(invalidBlenderRequest?.error || invalidBlenderRequest?.result?.isError);
+assert.match(JSON.stringify(invalidBlenderRequest), /code|argument/i);
+assert.doesNotMatch(JSON.stringify(invalidBlenderRequest), /BLENDER_UNAVAILABLE|BLENDER_TIMEOUT/);
 const developerPiTool = developerList.result.tools.find((tool) => tool.name === "dev_pi_runtime_status");
 assert(developerPiTool, "chatgpt_developer is missing dev_pi_runtime_status");
 assert.equal(developerPiTool.annotations?.readOnlyHint, true);
@@ -1634,7 +1665,7 @@ try {
   });
   assert.deepEqual(
     adapterList.result.tools.map((tool) => tool.name).sort(),
-    [...new Set([...publicToolNames, "dev_pi_execute_intent", "dev_pi_execution_status", "dev_pi_runtime_status", "dev_pi_execute_readonly", "dev_capability_get_schema", "dev_capability_list", "dev_apply_patch", "dev_run_tests", "powershell_run", "powershell_admin_run", "dev_git_commit", "dev_git_push"])].sort(),
+    [...new Set([...publicToolNames, "blender_list_scene_objects", "blender_inspect_scene", "blender_edit_scene", "dev_pi_execute_intent", "dev_pi_execution_status", "dev_pi_runtime_status", "dev_pi_execute_readonly", "dev_capability_get_schema", "dev_capability_list", "dev_apply_patch", "dev_run_tests", "powershell_run", "powershell_admin_run", "dev_git_commit", "dev_git_push"])].sort(),
     "HTTP stdio adapter did not honor MCP_TOOL_PROFILE=chatgpt_developer",
   );
 } finally {

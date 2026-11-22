@@ -879,6 +879,14 @@ function summarizeToolArguments(args, toolName = "") {
   if (isWorldSimulationMcpToolName(toolName)) {
     return summarizeWorldSimulationMcpAuditArguments(args);
   }
+  if (toolName === "blender_edit_scene") {
+    return {
+      scene: summarizeInputValue(args.scene),
+      scene_id: summarizeInputValue(args.scene_id),
+      operations: summarizeInputValue(JSON.stringify(args.operations ?? null), "newText"),
+      operation_count: Array.isArray(args.operations) ? args.operations.length : null,
+    };
+  }
   const summary = {};
   for (const [key, value] of Object.entries(args)) {
     if (["powershell_run", "powershell_admin_run"].includes(toolName) && key === "command" && typeof value === "string") {
@@ -4779,6 +4787,9 @@ const chatgptPublicToolNames = new Set([
 ]);
 
 const chatgptDeveloperToolNames = new Set([
+  "blender_list_scene_objects",
+  "blender_inspect_scene",
+  "blender_edit_scene",
   "dev_pi_execute_intent",
   "dev_pi_execution_status",
   ...chatgptPublicToolNames,
@@ -4859,6 +4870,51 @@ const toolProfiles = new Map([
 const activeToolProfileName = process.env.MCP_TOOL_PROFILE?.trim() || "full";
 const activeToolProfile = toolProfiles.get(activeToolProfileName);
 
+// Host-local Blender is an opt-in Nexa developer surface, not part of the core inventory.
+if (activeToolProfileName === "chatgpt_developer") {
+  const blenderSceneResult = async operation => {
+    let result;
+    try {
+      result = await operation();
+    } catch {
+      result = { ok: false, code: "BLENDER_COMPONENT_UNAVAILABLE", message: "The local Blender connector could not load." };
+    }
+    return result.ok ? jsonContent(result) : { ...jsonContent(result), isError: true };
+  };
+  const blenderTool = {
+    name: "blender_list_scene_objects",
+    description: "List object names and types in the current Blender scene via the local Blender Lab add-on. Read only, at most 256 objects. Requires an open Blender instance with the local server started.",
+    risk: "read",
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    inputSchema: baseSchema(),
+    handler: () => blenderSceneResult(async () => (await import("./mcp-blender-scene-read.mjs")).listBlenderSceneObjects()),
+  };
+  const inspectTool = {
+    name: "blender_inspect_scene",
+    description: "Inspect the active Blender scene, selected objects and active camera. Supply an exact object name to read transform, material/modifier names, and up to 128 local mesh vertices.",
+    risk: "read",
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    inputSchema: baseSchema({ object: { type: "string", maxLength: 63 } }),
+    handler: args => blenderSceneResult(async () => (await import("./mcp-blender-editor.mjs")).blenderEditor.inspect(args)),
+  };
+  const editTool = {
+    name: "blender_edit_scene",
+    description: "Edit the named active Blender scene in Object Mode, in order, without saving. Read scene, scene_id, and exact object names with blender_inspect_scene. Operations use {op,name}. collection creates a collection. primitive requires kind CUBE, PLANE, UV_SPHERE, ICO_SPHERE, CYLINDER, CONE or TORUS. mesh requires vertices ([[x,y,z]]), faces (index arrays), optional edges. light requires kind POINT, AREA, SUN or SPOT and power, optional color [r,g,b] and size. camera accepts lens. set_light adjusts power, color or size on a light. set_camera sets lens on a camera. assign_material uses an existing material_name. Creation except collection accepts collection, location, rotation in degrees and scale, each a triple. transform sets any of those triples. rename uses new_name. visibility uses hidden. material uses material_name and color [r,g,b,a], optional roughness and metallic. bevel uses width, segments and optional modifier_name. vertices uses updates [{index,co:[x,y,z]}]. active_camera chooses a camera. No arbitrary Python, files, saving, or deletion. Do not replay uncertain edits.",
+    risk: "low-risk-write",
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    inputSchema: baseSchema({
+      scene: { type: "string", minLength: 1, maxLength: 63 },
+      scene_id: { type: "string", pattern: "^[1-9][0-9]{0,19}$", maxLength: 20 },
+      operations: { type: "array", minItems: 1, maxItems: 24, items: { type: "object" } },
+    }, ["scene", "scene_id", "operations"]),
+    handler: args => blenderSceneResult(async () => (await import("./mcp-blender-editor.mjs")).blenderEditor.edit(args)),
+  };
+  for (const tool of [blenderTool, inspectTool, editTool]) {
+    toolDefinitions.push(tool);
+    toolRegistry.set(tool.name, tool);
+  }
+}
+
 if (!toolProfiles.has(activeToolProfileName)) {
   throw new Error(`Unknown MCP tool profile: ${activeToolProfileName}`);
 }
@@ -4890,6 +4946,9 @@ function isToolAllowed(toolName) {
 }
 
 const permissionSources = {
+  blender_list_scene_objects: ["local_blender_current_scene_object_names_and_types"],
+  blender_inspect_scene: ["local_blender_current_scene_geometry_and_object_properties"],
+  blender_edit_scene: ["local_blender_active_scene", "validated_scene_edit_operations"],
   dev_list_directory: ["repository_directory"],
   dev_read_file: ["repository_text_file"],
   dev_read_file_range: ["repository_large_text_file"],

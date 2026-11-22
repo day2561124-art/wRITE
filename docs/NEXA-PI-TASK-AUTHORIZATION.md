@@ -51,6 +51,12 @@
 
 新會話可用 `dev_pi_execution_status` 同時提供 `workstream_id` 和 `workspace_id`，查詢最新批次、第一個待辦步驟、最後錯誤與現有檢查點。用 `next_before_sequence` 翻閱舊批次，再以 `operation_id` 或 `intent_id` 查閱確切請求、完成步驟與測試收據。檔案、提交及整合候選的來源資料仍由 `dev_workspace_get_provenance` 查詢。
 
+`dev_workspace_journal_status` 的 `writes_available` 顯示共用日誌可否驗證並接受新資料。`isolated_operations` 列出待處理事件、對應資源及恢復狀態。遇到 `JOURNAL_SCOPE_ISOLATED` 時，依回傳的操作識別碼和範圍查閱既有證據。可驗證與可寫入的 Journal 即使有局部事件，仍會受理互不重疊的工作。
+
+Nexa 在背景觀測同一主機上已確認退出的操作所有者。可核對的結果會追加恢復收據，解除相應隔離。對帳仍須查核當下資源狀態。終態不明、來源主機不明或需要特定元件證據的操作會留待查核。若 Pi 在取得執行所有權前反覆失敗，`dev_pi_execution_status` 的 `worker_deferral` 會指出已記錄的錯誤、重試次數及下一次可執行時間。任務達到重試上限時，其他任務仍可進入派送。
+
+單一 HTTP MCP 工具逾時時，轉接層會用 MCP `ping` 確認該子程序是否仍可回應。若原子程序仍可用，同一會話的獨立請求繼續處理。已派送的寫入應依既有操作收據查核結果。
+
 `dev_workspace_journal_status` 提供未對帳終態的操作與事件識別碼。候選分支套用了本機已使用的歷史收據讀取驗證，範圍涵蓋 Pi worker 更新及兩次 TRPG 啟動事件。這些事件仍使用原始雜湊和歷史順序驗證。
 
 正式 Journal 查核基準為序列 `66036`。序列 `65527` 已有對帳收據。剩餘的一對同次 TRPG 啟動操作是 `dev_operation_7d331e6fcd994db98a23a25f83a16483` 與 `dev_operation_d11a295a8f864caaa4e733ecaf551257`。獨立主機日誌記錄 `SUPERVISOR_START`、`CHILD_START` 和 `READY`。收據保留 PowerShell 結束碼和草稿橋接結果為未知，禁止重播。
@@ -62,3 +68,5 @@
 ## Git 整合基準
 
 候選建立於已核對的 GitHub `main` `174ca070`。本機 `main` 為 `2955dc44`，本機 `origin/main` 為 `cdf828fb`。相對 GitHub，本機 `main` 有 2 筆 Blender 提交，另缺 34 筆遠端提交。根工作樹當時有 58 筆 Git 狀態項目，涵蓋 Canon 和視覺資料、隧道與啟動器、MCP 和 TRPG 程式、測試，以及其他既有工作樹。工作樹與來源不明的本機修改留在原位置。僅針對正式 Journal 已使用的收據讀取邏輯，從本機草稿移植並驗證歷史相容性。
+
+候選分支後續合入 GitHub `main` `4167fe84`，並依正式 Nexa 既有的開發者工具契約，移植已提交的 Blender 工具與測試。保留原本的場景識別與操作驗證。Blender 連線及編輯器腳本在個別工具呼叫時載入，供應端失效時由該工具回報。

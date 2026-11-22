@@ -105,6 +105,8 @@ try {
   await runTestScript("tests/mcp/trpg-gm-bridge.test.mjs");
   await runTestScript("tests/mcp/trpg-gm-http-auth.test.mjs");
   await runTestScript("tests/mcp/trpg-gm-parent-isolation.test.mjs");
+  await runTestScript("tests/mcp/mcp-blender-scene-read.test.mjs");
+  await runTestScript("tests/mcp/mcp-blender-editor.test.mjs");
   for (const scriptPath of [...testScripts, ...piTestScripts, ...(await import("./mcp-suite-groups.mjs")).mcpPiPostSealScripts, "tests/mcp/pi-bootstrap-wire.test.mjs"]) {
     await runTestScript(scriptPath);
   }
