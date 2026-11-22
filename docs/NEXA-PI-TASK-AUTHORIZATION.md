@@ -14,7 +14,7 @@
 
 授權操作員可在 `capabilities` 加入 `workspace.powershell_isolated`。使用 `autonomous_engineering` 加上 `task_authorization_id` 時，`command` 會由現有 `powershell_run` 的 Windows AppContainer 路徑執行。Windows x64 主機使用內附 .NET Framework 編譯器和 Windows PowerShell。每次執行使用零網路 capability 的容器身分、專用工作目錄及限制子程序數與記憶體的 Windows Job。
 
-`sandbox_paths` 選擇要複製的工作區 UTF-8 檔案。`cwd` 以註冊工作區為基準。`output_paths` 選擇要帶回的 UTF-8 產物。回傳資料包括產物的原始 SHA-256、執行後 SHA-256 和限量內容，供同一授權下的 `filesystem.write` 或 `filesystem.patch` 審核及套用。臨時資料與子程序在完成後清理，逾時和非零結束碼保留在 Journal 收據。
+`sandbox_paths` 選擇要複製的工作區 UTF-8 檔案。`sandbox_directories` 可一併選擇至多 8 個工作區來源目錄，合計最多 512 個檔案及 8 MiB。遞迴選取沿用開發搜尋的排除規則，略過憑證、連結和產物目錄。`cwd` 以註冊工作區為基準。`output_paths` 選擇要帶回的 UTF-8 產物。回傳資料包括產物的原始 SHA-256、執行後 SHA-256 和限量內容，供同一授權下的 `filesystem.write` 或 `filesystem.patch` 審核及套用。臨時資料與子程序在完成後清理，逾時和非零結束碼保留在 Journal 收據。
 
 環境內可執行 Windows 系統命令和已帶入的腳本。指定 `toolchain: "node"` 時，Nexa 將伺服器使用的 `node.exe` 和同目錄安裝的 npm 複製成唯讀工具鏈，環境預設使用離線 npm。可將工作區的本地套件及 package manifest 列入 `sandbox_paths`，再執行普通安裝與測試命令。套件的安裝檔與輸出留在該次執行的隔離環境。
 

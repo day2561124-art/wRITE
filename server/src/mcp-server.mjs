@@ -2030,7 +2030,7 @@ const toolDefinitions = [
   },
   {
     name: "powershell_run",
-    description: "Run non-elevated Windows PowerShell. Task-authorized workspace.powershell_isolated runs in AppContainer with selected UTF-8 workspace files and returns selected scratch artifacts. Legacy Pi host maintenance keeps the explicit local cwd, audit, timeout, and system-command guards.",
+    description: "Run non-elevated Windows PowerShell. Task-authorized workspace.powershell_isolated runs in AppContainer with selected UTF-8 workspace files and source directories and returns selected scratch artifacts. Legacy Pi host maintenance keeps the explicit local cwd, audit, timeout, and system-command guards.",
     risk: "low-risk-write",
     annotations: { readOnlyHint: false },
     inputSchema: baseSchema({
@@ -2042,6 +2042,7 @@ const toolDefinitions = [
       cwd: { type: "string", default: "." },
       sandbox: { type: "boolean", const: true },
       sandbox_paths: { type: "array", maxItems: 64, items: { type: "string", minLength: 1, maxLength: 512 } },
+      sandbox_directories: { type: "array", maxItems: 8, items: { type: "string", minLength: 1, maxLength: 512 } },
       output_paths: { type: "array", maxItems: 8, items: { type: "string", minLength: 1, maxLength: 512 } },
       toolchain: { type: "string", enum: ["node"] },
       timeoutMs: {
@@ -2056,7 +2057,7 @@ const toolDefinitions = [
         if (!isPiManagedMcpCall()) throw markPowerShellPreDispatchFailure(new Error("PI_TASK_AUTHORIZATION_REQUIRED"), "powershell_run");
         return jsonContent(await powershell_isolated_run(args));
       }
-      if (args.sandbox_paths !== undefined || args.output_paths !== undefined || args.toolchain !== undefined) {
+      if (args.sandbox_paths !== undefined || args.sandbox_directories !== undefined || args.output_paths !== undefined || args.toolchain !== undefined) {
         throw markPowerShellPreDispatchFailure(new Error("ISOLATED_TASK_AUTHORIZATION_REQUIRED"), "powershell_run");
       }
       return jsonContent(await powershell_run(args));

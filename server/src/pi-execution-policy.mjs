@@ -43,13 +43,15 @@ export async function adaptAuthorizedPiRequest(source, { resolveWorkspace } = {}
     hashExecutionInput(source);
     exact(source, ["request_kind", "intent_id", "goal", "workspace_id"],
       ["schema_version", "constraints", "completion_conditions", "permissions",
-        "requested_actions", "command", "cwd", "timeoutMs", "task_authorization_id", "sandbox_paths", "output_paths", "toolchain"]);
+        "requested_actions", "command", "cwd", "timeoutMs", "task_authorization_id", "sandbox_paths", "sandbox_directories",
+        "output_paths", "toolchain"]);
     if (source.schema_version !== undefined && source.schema_version !== 1) fail("UNSUPPORTED_INTENT_VERSION");
     const usesCommand = source.command !== undefined;
     const isolatedCommand = usesCommand && source.task_authorization_id !== undefined;
     if (usesCommand === (source.requested_actions !== undefined)
       || (!usesCommand && (source.timeoutMs !== undefined || source.cwd !== undefined))) fail("INVALID_AUTONOMOUS_ACTIONS");
-    if (!isolatedCommand && (source.sandbox_paths !== undefined || source.output_paths !== undefined || source.toolchain !== undefined)) fail("ISOLATED_TASK_AUTHORIZATION_REQUIRED");
+    if (!isolatedCommand && (source.sandbox_paths !== undefined || source.sandbox_directories !== undefined
+      || source.output_paths !== undefined || source.toolchain !== undefined)) fail("ISOLATED_TASK_AUTHORIZATION_REQUIRED");
     if (source.cwd !== undefined
       && (typeof source.cwd !== "string" || !source.cwd.trim() || source.cwd.length > 4096))
       fail("INVALID_HOST_CWD");
@@ -59,6 +61,7 @@ export async function adaptAuthorizedPiRequest(source, { resolveWorkspace } = {}
           ...(source.cwd === undefined ? {} : { cwd: source.cwd }),
           ...(source.timeoutMs === undefined ? {} : { timeoutMs: source.timeoutMs }),
           ...(source.sandbox_paths === undefined ? {} : { sandbox_paths: source.sandbox_paths }),
+          ...(source.sandbox_directories === undefined ? {} : { sandbox_directories: source.sandbox_directories }),
           ...(source.output_paths === undefined ? {} : { output_paths: source.output_paths }),
           ...(source.toolchain === undefined ? {} : { toolchain: source.toolchain }) } }]
       : source.requested_actions;

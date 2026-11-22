@@ -49,7 +49,8 @@ export const CAPABILITY_DEFINITIONS = Object.freeze([
   descriptor("git.status", "dev_git_status", "read", false, [], ["includeUntracked"]),
   descriptor("host.powershell", "powershell_run", "write", true, ["command"], ["cwd", "timeoutMs"], "host_maintenance"),
   descriptor("workspace.powershell", "powershell_run", "write", true, ["command"], ["cwd", "timeoutMs"], "workspace_shell"),
-  descriptor("workspace.powershell_isolated", "powershell_run", "write", true, ["command"], ["cwd", "timeoutMs", "sandbox_paths", "output_paths", "toolchain"]),
+  descriptor("workspace.powershell_isolated", "powershell_run", "write", true, ["command"],
+    ["cwd", "timeoutMs", "sandbox_paths", "sandbox_directories", "output_paths", "toolchain"]),
   descriptor("windows.service.ensure_running", "powershell_admin_run", "write", true, ["service_name"], [], "workspace",
     Object.freeze({ service_name: Object.freeze({ type: "string", pattern: WINDOWS_SERVICE_NAME.source, maxLength: 80 }) })),
   descriptor("git.commit", "dev_git_commit", "commit", true, ["message", "paths", "expectedHead"]),
@@ -163,7 +164,7 @@ function validateInput(action, context, bootstrap = false) {
   const input = action.input;
   if (action.capability === "workspace.powershell_isolated" && input.cwd !== undefined) relativePath(input.cwd);
   if ("toolchain" in input && input.toolchain !== "node") fail("INVALID_SANDBOX_TOOLCHAIN");
-  for (const [name, limit] of [["sandbox_paths", 64], ["output_paths", 8]]) {
+  for (const [name, limit] of [["sandbox_paths", 64], ["sandbox_directories", 8], ["output_paths", 8]]) {
     if (name in input) {
       strings(input[name], limit);
       input[name].forEach(relativePath);

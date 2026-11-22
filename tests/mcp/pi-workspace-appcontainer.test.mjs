@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createServer } from "node:net";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -191,6 +191,40 @@ test("AppContainer provisions Node and installs a workspace package offline", pl
   assert.equal(payload.toolchain, "node");
   await assert.rejects(readFile(path.join(f.context.root, "node_modules", "nexa-local-fixture", "index.js")), { code: "ENOENT" });
   assert.equal((await f.journal.status()).health, "healthy");
+});
+
+test("Pi stages a bounded nested source tree without importing credentials, links or generated dependencies", platform, async t => {
+  const f = await fixture(t);
+  const source = path.join(f.context.root, "src");
+  await mkdir(path.join(source, "nested"), { recursive: true });
+  await mkdir(path.join(source, "node_modules"));
+  await mkdir(path.join(f.root, "external"));
+  await Promise.all(Array.from({ length: 72 }, (_, index) => writeFile(path.join(source, `source-${index}.txt`), String(index))));
+  await writeFile(path.join(source, "nested", "probe.txt"), "nested-source");
+  await writeFile(path.join(source, "nested", ".env"), "fixture-only");
+  await writeFile(path.join(source, "node_modules", "dep.txt"), "generated");
+  await writeFile(path.join(f.root, "external", "external.txt"), "outside");
+  await symlink(path.join(f.root, "external"), path.join(source, "junction"), "junction");
+  const command = [
+    "if (Test-Path 'src/nested/.env') { exit 11 }",
+    "if (Test-Path 'src/node_modules/dep.txt') { exit 12 }",
+    "if (Test-Path 'src/junction/external.txt') { exit 13 }",
+    "if (@(Get-ChildItem 'src' -File -Recurse -Force).Count -ne 73) { exit 14 }",
+    "Get-Content 'src/nested/probe.txt'",
+  ].join("\n");
+  const executions = [];
+  for (const [index, sandbox_directories] of [["src", "src/nested"], ["src/nested", "src"]].entries()) {
+    const intent = await f.intent(`sandbox-source-tree-${index}`, command, {
+      sandbox_paths: ["src/source-0.txt"], sandbox_directories,
+    });
+    const completed = await f.controller.execute(intent);
+    assert.equal(completed.state.status, "COMPLETED", JSON.stringify(completed.command));
+    const result = JSON.parse(completed.receipts[0].evidence.content[0].text);
+    assert.equal(result.stdout.trim(), "nested-source");
+    assert.equal(result.input_file_count, 73);
+    executions.push(result.input_manifest_sha256);
+  }
+  assert.equal(executions[0], executions[1]);
 });
 
 for (const loseFirstShellResponse of [false, true]) {

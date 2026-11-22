@@ -407,7 +407,7 @@ export async function dev_read_file_range(input = {}, options = {}) {
   }, context);
 }
 
-function isExcludedSearchDirectory(name) {
+export function isExcludedSearchDirectory(name) {
   const lower = name.toLowerCase();
   return lower === ".git" || excludedSearchDirectoryNames.has(lower) || isSecretName(name);
 }

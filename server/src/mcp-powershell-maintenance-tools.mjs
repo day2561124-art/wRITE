@@ -546,7 +546,8 @@ export function createPowerShellMaintenanceTool({
         if (context.workspace_type !== "isolated_worktree" || context.workstream_state !== "active"
           || context.lifecycle_state !== "active" || context.mutation_allowed !== true) throw new Error("ISOLATED_WORKSPACE_REQUIRED");
         prepared = await prepareAppContainerPowerShell({ context, cwd, command: input.command, timeoutMs,
-          sandbox_paths: input.sandbox_paths, output_paths: input.output_paths, toolchain: input.toolchain });
+          sandbox_paths: input.sandbox_paths, sandbox_directories: input.sandbox_directories,
+          output_paths: input.output_paths, toolchain: input.toolchain });
       }
     } catch (error) {
       throw markPowerShellPreDispatchFailure(error, toolName);

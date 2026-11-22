@@ -1,11 +1,12 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, mkdtemp, opendir, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { assertAllowedPathPolicy, assertExistingSafePath, decodeText, isSupportedTextPath } from "./mcp-development-readonly-tools.mjs";
+import { assertAllowedPathPolicy, assertExistingSafePath, decodeText, isExcludedSearchDirectory, isSecretName,
+  isSupportedTextPath } from "./mcp-development-readonly-tools.mjs";
 import { controlledProcessEnvironment, redactProcessOutput } from "./process-control.mjs";
 
 const exec = promisify(execFile);
@@ -28,12 +29,43 @@ function relativePath(root, input) {
   return { target, name: segments.join("/") };
 }
 
-function selectedPaths(root, entries, limit) {
+function selectedPaths(root, entries, limit, requireText = true) {
   if (!Array.isArray(entries) || entries.length > limit) throw new Error("INVALID_SANDBOX_PATHS");
   const paths = entries.map(entry => relativePath(root, entry));
   if (new Set(paths.map(entry => entry.name.toLowerCase())).size !== paths.length
-    || paths.some(entry => !isSupportedTextPath(entry.target))) throw new Error("INVALID_SANDBOX_PATHS");
+    || (requireText && paths.some(entry => !isSupportedTextPath(entry.target)))) throw new Error("INVALID_SANDBOX_PATHS");
   return paths;
+}
+
+async function selectedSources(root, files, directories) {
+  const explicit = selectedPaths(root, files, 64);
+  const pending = selectedPaths(root, directories, 8, false);
+  const sources = new Map(explicit.map(entry => [entry.name.toLowerCase(), entry]));
+  const visited = new Set();
+  let entries = 0;
+  while (pending.length) {
+    const directory = pending.pop();
+    if (visited.has(directory.name.toLowerCase())) continue;
+    visited.add(directory.name.toLowerCase());
+    const info = await assertExistingSafePath(directory.target, "Sandbox directory", root);
+    if (!info.isDirectory()) throw new Error("INVALID_SANDBOX_DIRECTORY");
+    for await (const item of await opendir(directory.target)) {
+      if (++entries > 2048) throw new Error("SANDBOX_DIRECTORY_SCAN_LIMIT");
+      if (item.isSymbolicLink() || item.name.toLowerCase() === ".git" || isSecretName(item.name)) continue;
+      if (item.isDirectory() && !isExcludedSearchDirectory(item.name)) {
+        pending.push(relativePath(root, `${directory.name}/${item.name}`));
+      } else if (item.isFile() && isSupportedTextPath(item.name)) {
+        const source = relativePath(root, `${directory.name}/${item.name}`);
+        const key = source.name.toLowerCase();
+        if (sources.has(key) && sources.get(key).name !== source.name) throw new Error("SANDBOX_SOURCE_PATH_COLLISION");
+        sources.set(key, source);
+        if (sources.size > 512) throw new Error("SANDBOX_SOURCE_LIMIT");
+      }
+    }
+  }
+  const additional = [...sources.values()].slice(explicit.length);
+  additional.sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+  return [...explicit, ...additional];
 }
 
 async function checkedFile(target, root, limit) {
@@ -72,10 +104,11 @@ async function stageNodeToolchain(target) {
   await writeFile(path.join(target, "npm.cmd"), '@"%~dp0node.exe" "%~dp0npm\\bin\\npm-cli.js" %*\r\n', { flag: "wx" });
 }
 
-export async function prepareAppContainerPowerShell({ context, cwd, command, timeoutMs, sandbox_paths = [], output_paths = [], toolchain }) {
+export async function prepareAppContainerPowerShell({ context, cwd, command, timeoutMs,
+  sandbox_paths = [], sandbox_directories = [], output_paths = [], toolchain }) {
   if (process.platform !== "win32" || process.arch !== "x64") throw new Error("WINDOWS_APPCONTAINER_UNAVAILABLE");
   if (toolchain !== undefined && toolchain !== "node") throw new Error("INVALID_SANDBOX_TOOLCHAIN");
-  const sources = selectedPaths(context.root, sandbox_paths, 64);
+  const sources = await selectedSources(context.root, sandbox_paths, sandbox_directories);
   const outputs = selectedPaths(context.root, output_paths, 8);
   if (Buffer.byteLength(JSON.stringify(outputs.map(output => output.name))) > 4096) throw new Error("SANDBOX_OUTPUT_PATH_LIMIT");
   const relativeCwd = path.relative(context.root, cwd) || ".";
