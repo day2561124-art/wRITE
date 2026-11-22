@@ -6,6 +6,7 @@ import test from "node:test";
 import { createDevOperationJournalService } from "../../server/src/mcp-development-journal-tools.mjs";
 import { createPowerShellMaintenanceTool } from "../../server/src/mcp-powershell-maintenance-tools.mjs";
 import { adaptAuthorizedPiRequest } from "../../server/src/pi-execution-policy.mjs";
+import { hashExecutionInput } from "../../server/src/pi-execution-contract.mjs";
 import { createPiProductionExecutionController } from "../../server/src/pi-production-execution-controller.mjs";
 import { createPiProductionRouteStore } from "../../server/src/pi-production-execution-route.mjs";
 import { createPiTaskAuthorizationStore, createPiTaskPolicy } from "../../server/src/pi-task-authorization.mjs";
@@ -163,6 +164,42 @@ test("one elevated grant covers two exact services and reuses the protected Powe
   assert.equal(f.adminCalls.length, 2);
   await assert.rejects(f.controller().submit(await f.intent("service-revoked", [service("service", "NexaDev")], override)),
     { code: "PERMISSION_DENIED" });
+});
+
+test("Pi reuses exact sandbox and scoped service receipts after their transport responses are lost", async t => {
+  const f = await fixture(t);
+  const capabilities = ["workspace.powershell_isolated", "windows.service.ensure_running"];
+  const grant = await f.store.issue({ ...context, goal, capabilities, windows_services: ["NexaDev"], expires_at_ms: 200 });
+  const work = await f.intent("reconcile-command-receipts", [
+    { step_id: "shell", capability: capabilities[0], input: { command: "Write-Output 'fixture'" } },
+    { step_id: "service", capability: capabilities[1], input: { service_name: "NexaDev" }, depends_on: ["shell"] },
+  ], { task_authorization_id: grant.task_authorization_id });
+  const calls = [];
+  const controller = () => createPiProductionExecutionController({ journal: f.journal,
+    route: createPiProductionRouteStore({ journal: f.journal }),
+    authorizeTask: createPiTaskPolicy({ store: f.store, required: true }),
+    transport: {
+      resolveWorkspace: async () => workspace,
+      queryOperation: args => f.journal.getOperation(args),
+      callTool: async params => {
+        calls.push(params.arguments);
+        await f.journal.executeReconciled({ tool_name: params.name, reconciliation_key: params._meta.reconciliation_key,
+          request_fingerprint_sha256: hashExecutionInput({ tool_name: params.name, arguments: params.arguments }),
+          resolve_workspace_scope: async () => context }, async () => ({
+          content: [{ type: "text", text: JSON.stringify({ ok: true, execution_ok: true, timed_out: false, exit_code: 0 }) }],
+        }));
+        throw Object.assign(new Error("Lost the response after publishing the journal receipt"), { code: "TRANSPORT_ERROR" });
+      },
+    },
+  });
+  const completed = await controller().execute(work);
+  assert.equal(completed.state.status, "COMPLETED");
+  assert.deepEqual(completed.state.completed_steps, ["shell", "service"]);
+  assert.equal(calls[0].sandbox, true);
+  assert.equal(calls[1].service_authorization.task_authorization_id, grant.task_authorization_id);
+  assert.equal((await controller().execute(work)).state.operation_id, completed.state.operation_id);
+  assert.equal(calls.length, 2);
+  assert.equal((await f.journal.status()).health, "healthy");
 });
 
 test("verified Journal health reports the unresolved terminal identity", async t => {

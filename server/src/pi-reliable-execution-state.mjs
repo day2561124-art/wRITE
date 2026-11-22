@@ -82,13 +82,11 @@ function factualObjects(evidence) {
   }
   return values;
 }
-function reconciliationBinding(action,context,evidence,binding=null) {
-  const definition=capabilityDefinition(action.capability);
-  const effective=binding??context;
-  const args={...action.input,...(["workspace","workspace_shell"].includes(definition.scope)?{workspace_id:effective.workspace_id}:definition.scope==="host_maintenance"?{workspace_id:"dev_workspace_shared_repository_v1"}:{})};
-  if(binding && action.capability==="workspace.create_isolated") {args.workstream_id=binding.workstream_id;args.expected_workstream_revision=binding.workstream_revision;}
-  return evidence.reconciliation_key===action.idempotency_key
-    &&evidence.request_fingerprint_sha256===hashExecutionInput({tool_name:definition.tool,arguments:args});
+const capabilityPlanner = createMcpCapabilityAdapter();
+function reconciliationBinding(action,intent,evidence,binding=null) {
+  if (evidence.reconciliation_key !== action.idempotency_key) return false;
+  const step = capabilityPlanner.describe(intent, action.step_id, { binding });
+  return evidence.request_fingerprint_sha256 === hashExecutionInput({ tool_name: step.tool, arguments: step.arguments });
 }
 export function makeReliableProjection(body) {
   const record={...body,projection_hash:projectionHash(body)};
@@ -116,7 +114,7 @@ export function reduceReliableProjection(prior,command,now) {
       if(facts.some(x=>x?.isError===true||x?.ok===false||x?.execution_ok===false||x?.passed===false)
         ||(action.capability.startsWith("verification.")&&!facts.some(x=>x?.passed===true)))
         reliableFailure("INVALID_SUCCESS_RECEIPT");
-    } else if(!reconciliationBinding(action,prior.intent.context,r.evidence,prior.runtime.lifecycle_binding??null)
+    } else if(!reconciliationBinding(action,prior.intent,r.evidence,prior.runtime.lifecycle_binding??null)
       ||!/^dev_operation_[a-f0-9]{32}$/u.test(r.evidence.operation_id)
       ||(action.capability.startsWith("verification.")&&r.evidence.original_result?.passed!==true))
       reliableFailure("INVALID_RECONCILIATION");
@@ -194,7 +192,7 @@ export function reduceReliableProjection(prior,command,now) {
       receipt(command.receipt,action);
       if(state.status!=="RECONCILING"||command.receipt.kind!=="reconciled_facts"
         ||command.receipt.evidence.reconciliation_state!=="active"
-        ||!reconciliationBinding(action,prior.intent.context,command.receipt.evidence,prior.runtime.lifecycle_binding??null))reliableFailure("INVALID_RECONCILIATION");
+        ||!reconciliationBinding(action,prior.intent,command.receipt.evidence,prior.runtime.lifecycle_binding??null))reliableFailure("INVALID_RECONCILIATION");
       runtime.retry_at=new Date(Date.parse(now)+Math.min(runtime.retry_policy.max_delay_ms,
         runtime.retry_policy.base_delay_ms*2**(active.reconciliation_attempt-1))).toISOString();state.retry_count++;break;
     case "reconciliation_read_retry_scheduled":
@@ -229,7 +227,7 @@ export function reduceReliableProjection(prior,command,now) {
         if(state.status!=="RECONCILING"||!command.not_started_receipt)reliableFailure("UNSAFE_RETRY");
         receipt(command.not_started_receipt,action);
         const e=command.not_started_receipt.evidence;
-        if(e.reconciliation_state!=="not_admitted"||e.safe_same_key_retry!==true||!reconciliationBinding(action,prior.intent.context,e,prior.runtime.lifecycle_binding??null))
+        if(e.reconciliation_state!=="not_admitted"||e.safe_same_key_retry!==true||!reconciliationBinding(action,prior.intent,e,prior.runtime.lifecycle_binding??null))
           reliableFailure("UNSAFE_RETRY");
         Object.assign(state,transitionOperation(state,active.phase,now));
       } else if(command.not_started_receipt!==null)reliableFailure("UNSAFE_RETRY");
