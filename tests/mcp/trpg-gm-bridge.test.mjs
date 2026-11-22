@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {loadTRPGGMBridge,trpgPublicToolDefinition,isTRPGTransportTrusted,createWorkbenchTransportBoundary} from '../../server/src/mcp-trpg-gm-bridge.mjs';
+import {loadTRPGGMBridge,trpgPublicToolDefinition,trpgGatewayFailureCode,isTRPGTransportTrusted,createWorkbenchTransportBoundary} from '../../server/src/mcp-trpg-gm-bridge.mjs';
 const name='trpg.gm.get_round_context',write='trpg.gm.commit_round_result';
 let calls=0,disabled=0;
 const tool=(n=name)=>({name:n,description:'synthetic',risk:n===write?'high-risk-write':'read',annotations:{readOnlyHint:n!==write},inputSchema:{type:'object',properties:{},additionalProperties:false},handler:async args=>{calls++;return {content:[{type:'text',text:JSON.stringify(args)}]};}});
@@ -20,9 +20,13 @@ assert.equal((await loadTRPGGMBridge({load:async()=>{throw Error('must not load'
 assert.equal((await loadTRPGGMBridge({load:async()=>({loadWriterWorkbenchBridge:async()=>null}),disabled:false})).tools.length,0);
 const uncertain=await loadTRPGGMBridge({load:provider([{...tool(write),handler:async()=>{throw Error('SYNTHETIC_PRIVATE_ARGUMENT');}}]),disabled:false});
 const result=await uncertain.callTool(write,{private:'SYNTHETIC_PRIVATE_ARGUMENT'});assert.equal(result.isError,true);assert.ok(!JSON.stringify(result).includes('SYNTHETIC_PRIVATE_ARGUMENT'));
+assert.equal(trpgGatewayFailureCode(result),'TRPG_GATEWAY_UNAVAILABLE');
+const gatewayError=(status,code)=>({isError:true,content:[{type:'text',text:JSON.stringify({error:{status,code}})}]});
+assert.equal(trpgGatewayFailureCode(gatewayError(401,'UNAUTHORIZED')),'TRPG_GATEWAY_CREDENTIAL_REJECTED');
+assert.equal(trpgGatewayFailureCode(gatewayError(403,'CAMPAIGN_SCOPE_MISMATCH')),null);
 const source=readFileSync(new URL('../../server/src/mcp-server.mjs',import.meta.url),'utf8');
-assert.ok(source.includes('toolDefinitions.push(...trpgGMBridge.tools)'));
-assert.ok(source.indexOf('return trpgGMBridge.callTool(name, args)')<source.indexOf('const mutationArgs = args;'));
+const confidentialDispatch=source.indexOf('const result = await bridge.callTool(name, args)');
+assert.ok(confidentialDispatch>=0&&confidentialDispatch<source.indexOf('const mutationArgs = args;'));
 assert.ok(source.includes('if (trpgGMToolNames.has(tool.name)) return trpgPublicToolDefinition(tool)'));
 console.log('TRPG GM bridge contracts passed: scope, profiles, confidential dispatch, uncertainty, no Writer journal.');
 

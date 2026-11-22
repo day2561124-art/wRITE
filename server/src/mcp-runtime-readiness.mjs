@@ -5,6 +5,10 @@ export function createRuntimeReadiness(steps, onStatusChange, { clock = Date.now
   }]));
   let status;
 
+  function retry(name, wait) {
+    setTimeout(() => { void ensure(name).catch(() => {}); }, wait + 5).unref();
+  }
+
   function report() {
     const checks = Object.fromEntries([...components].map(([name, component]) => [name, {
       state: component.state, attempts: component.attempts,
@@ -43,7 +47,7 @@ export function createRuntimeReadiness(steps, onStatusChange, { clock = Date.now
       const canRetry = component.attempts < maxAttempts;
       const wait = canRetry ? 250 * 2 ** (component.attempts - 1) : 30_000;
       component.retryAfter = clock() + wait;
-      if (canRetry) setTimeout(() => { void ensure(name).catch(() => {}); }, wait + 5).unref();
+      if (canRetry) retry(name, wait);
       throw error;
     }).finally(() => {
       component.pending = null;
@@ -54,6 +58,17 @@ export function createRuntimeReadiness(steps, onStatusChange, { clock = Date.now
   }
 
   const start = () => Promise.allSettled([...components.keys()].map(ensure));
+  function invalidate(name, error) {
+    const component = components.get(name);
+    if (!component || component.state !== "ready") return;
+    component.state = "unavailable";
+    component.error = error;
+    component.result = null;
+    component.attempts = 0;
+    component.retryAfter = clock() + 250;
+    report();
+    retry(name, 250);
+  }
   report();
-  return Object.freeze({ ensure, start, getStatus: () => structuredClone(status) });
+  return Object.freeze({ ensure, start, invalidate, getStatus: () => structuredClone(status) });
 }

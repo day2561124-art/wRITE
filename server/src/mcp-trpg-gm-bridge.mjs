@@ -39,6 +39,17 @@ export function trpgPublicToolDefinition(tool){
    ...(tool.name===attachmentName?{'openai/fileParams':['file'],'trpg/idempotency':'The qualified attachment SHA-256 identifies the draft request; never publish through this tool.'}:tool.name===previewName?{'trpg/approval':'Preview only. Review the returned plan without changing the live world.'}:tool.name===publishName?{'trpg/approval':'Use the exact preview receipt and revision after explicit campaign publication authorization. On uncertainty, check status or retry the same receipt.'}:writeNames.has(tool.name)?{'trpg/idempotency':'Preserve GMResolution idempotency_key on retries; audit and transactions belong to TRPG, not Writer development journal.'}:{})}};
 }
 
+export function trpgGatewayFailureCode(result) {
+ const payload=result?.content?.[0]?.text;
+ if(result?.isError!==true||typeof payload!=='string'||payload.length>4096)return null;
+ try {
+  const fault=JSON.parse(payload).error;
+  if(fault?.status===401&&fault.code==='UNAUTHORIZED')return 'TRPG_GATEWAY_CREDENTIAL_REJECTED';
+  if(['TRPG_GATEWAY_UNAVAILABLE','GATEWAY_UNAVAILABLE'].includes(fault?.code))return 'TRPG_GATEWAY_UNAVAILABLE';
+ } catch { /* A malformed result has no credential authority. */ }
+ return null;
+}
+
 const loadSecurityModule=()=>import(pathToFileURL('E:\\TRPG\\apps\\gm-adapter\\dist\\workbench-security.js').href);
 async function defaultSecurityLoader(){
  const args=process.argv.filter(value=>value.startsWith('--workbench-security-config='));

@@ -1,4 +1,4 @@
-import {loadTRPGGMBridge,trpgPublicToolDefinition,createWorkbenchTransportBoundary} from './mcp-trpg-gm-bridge.mjs';
+import {loadTRPGGMBridge,trpgPublicToolDefinition,createWorkbenchTransportBoundary,trpgGatewayFailureCode} from './mcp-trpg-gm-bridge.mjs';
 import { fingerprintMcpMutationRequest, normalizeMcpReconciliationKey, MCP_RECONCILIATION_KEY_PATTERN_SOURCE } from "./mcp-operation-reconciliation-context.mjs";
 import "./mcp-stdio-guard.mjs";
 import {performance} from "node:perf_hooks";
@@ -4738,9 +4738,8 @@ for (const definition of toolDefinitions) {
 
 const workbenchTransportBoundary=createWorkbenchTransportBoundary();
 process.once('exit',()=>workbenchTransportBoundary.close());
-let trpgGMBridge = await loadTRPGGMBridge({ disabled: true });
-const trpgGMToolNames = new Set(trpgGMBridge.tools.map(tool => tool.name));
-toolDefinitions.push(...trpgGMBridge.tools);
+let trpgGMBridge = null;
+const trpgGMToolNames = new Set();
 const toolRegistry = new Map(toolDefinitions.map((tool) => [tool.name, tool]));
 
 const chatgptPublicToolNames = new Set([
@@ -4859,7 +4858,6 @@ const chatgptDeveloperToolNames = new Set([
   "dev_git_push",
 ]);
 
-for (const name of trpgGMToolNames) chatgptDeveloperToolNames.add(name);
 
 const toolProfiles = new Map([
   ["full", null],
@@ -4924,8 +4922,21 @@ async function initializeTRPGGMBridge() {
     || process.env.WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL === "1") return;
   const bridge = await loadTRPGGMBridge({ disabled: false });
   if (!bridge.tools.length) throw new Error("TRPG_GATEWAY_UNAVAILABLE");
+  installTRPGGMBridge(bridge);
+}
+
+function installTRPGGMBridge(bridge) {
+  for (let index = toolDefinitions.length - 1; index >= 0; index -= 1) {
+    if (!trpgGMToolNames.has(toolDefinitions[index].name)) continue;
+    toolDefinitions.splice(index, 1);
+  }
+  for (const name of trpgGMToolNames) {
+    toolRegistry.delete(name);
+    chatgptDeveloperToolNames.delete(name);
+  }
+  trpgGMToolNames.clear();
   trpgGMBridge = bridge;
-  for (const tool of bridge.tools) {
+  for (const tool of bridge?.tools ?? []) {
     if (toolRegistry.has(tool.name)) continue;
     toolDefinitions.push(tool);
     toolRegistry.set(tool.name, tool);
@@ -5982,7 +5993,16 @@ async function callToolDirect(params) {
 
   const args = isObject(params.arguments) ? params.arguments : {};
   // TRPG owns its authorization and atomic audit. Keep confidential game payloads out of Writer journals.
-  if (trpgGMToolNames.has(name)) return trpgGMBridge.callTool(name, args);
+  if (trpgGMToolNames.has(name)) {
+    const bridge = trpgGMBridge;
+    const result = await bridge.callTool(name, args);
+    const fault = trpgGatewayFailureCode(result);
+    if (fault && trpgGMBridge === bridge) {
+      installTRPGGMBridge(null);
+      runtimeComponents.invalidate("trpg", new Error(fault));
+    }
+    return result;
+  }
   const actor = isObject(params._meta) && typeof params._meta.actor === "string"
     ? params._meta.actor
     : "mcp-client";
@@ -6088,7 +6108,7 @@ async function dispatch(message) {
         },
       },
       serverInfo,
-      instructions: "Use tools/list and tools/call. Bounded development file and Git reads can run directly against their authorized workspace. Engineering routing is governed by dev_pi_execution_status. When pi_default is active, submit GPT-authored work through dev_pi_execute_intent with the operator-issued task_authorization_id when required. GPT decides, Pi schedules and records, MCP executes. Other direct engineering tools use diagnostic/emergency fallback metadata and mutations require a reconciliation_key. Consult persisted operation evidence after a Pi failure. High-risk writes retain their explicit confirmation guards." + (trpgGMBridge.instruction ? " TRPG GM: " + trpgGMBridge.instruction : ""),
+      instructions: "Use tools/list and tools/call. Bounded development file and Git reads can run directly against their authorized workspace. Engineering routing is governed by dev_pi_execution_status. When pi_default is active, submit GPT-authored work through dev_pi_execute_intent with the operator-issued task_authorization_id when required. GPT decides, Pi schedules and records, MCP executes. Other direct engineering tools use diagnostic/emergency fallback metadata and mutations require a reconciliation_key. Consult persisted operation evidence after a Pi failure. High-risk writes retain their explicit confirmation guards." + (trpgGMBridge?.instruction ? " TRPG GM: " + trpgGMBridge.instruction : ""),
     });
   }
 
