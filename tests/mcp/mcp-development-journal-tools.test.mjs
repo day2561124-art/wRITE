@@ -734,6 +734,64 @@ for (const warm of [false, true]) {
   } finally { await clean(fixture); }
 }
 
+// An ongoing observation in one workspace yields to independent orphans,
+// including ones discovered after the first observation has started.
+{
+  const fixture = await tempFixture("concurrent-background-recovery");
+  const heldWorkspace = "dev_workspace_" + "b".repeat(24);
+  let releaseHeld;
+  const held = new Promise(resolve => { releaseHeld = resolve; });
+  let heldStarted = false;
+  let service;
+  try {
+    for (const name of ["independent.txt", "held.txt", "late.txt"]) {
+      await writeFile(path.join(fixture.workspaceRoot, name), "BBB", "utf8");
+    }
+    const independent = await runWorker(fixture.storageRoot, "start-only-scoped", { path: "independent.txt" });
+    const blocked = await runWorker(fixture.storageRoot, "start-only-scoped", { path: "held.txt", workspaceId: heldWorkspace });
+    service = createDevOperationJournalService({ storageRoot: fixture.storageRoot, backgroundRecovery: true,
+      resolutionContextResolver: async id => {
+        if (id === heldWorkspace) {
+          heldStarted = true;
+          await held;
+        }
+        return { root: fixture.workspaceRoot, current_head: zeroHead };
+      } });
+    await service.initialize();
+    const deadline = Date.now() + 8000;
+    const waitFor = async inspect => {
+      while (!await inspect()) {
+        assert(Date.now() < deadline, "Independent Journal recovery did not advance while the observer was held");
+        await delay(25);
+      }
+    };
+    const terminal = async operation_id => (await service.getOperation({ operation_id })).terminal;
+    await waitFor(() => heldStarted);
+    await waitFor(() => terminal(independent));
+    assert.equal(await terminal(blocked), false);
+
+    const late = await runWorker(fixture.storageRoot, "start-only-scoped", { path: "late.txt" });
+    const write = await service.begin({ operation_type: "fixture", tool_name: "dev_unrelated" });
+    await service.complete(write.operation_id);
+    await waitFor(() => terminal(late));
+    const pending = await service.status();
+    assert.equal(pending.writes_available, true);
+    assert.equal(pending.isolated_operations.find(item => item.operation_id === blocked)?.recovery.state, "recovering");
+    releaseHeld();
+    await waitFor(async () => {
+      const status = await service.status();
+      return status.health === "healthy" && status.active_operation_count === 0;
+    });
+    const verified = await service.verify();
+    for (const operationId of [independent, blocked, late]) {
+      assert.equal(verified.events.filter(event => event.operation_id === operationId && event.stage === "operation_recovered").length, 1);
+    }
+  } finally {
+    releaseHeld();
+    await clean(fixture);
+  }
+}
+
 // A fresh instance observes the same exhausted budget and does not retry a
 // failed resource indefinitely or make up a terminal result for its effect.
 {

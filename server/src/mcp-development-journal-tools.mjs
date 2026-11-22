@@ -129,7 +129,7 @@ const stageSet = new Set(DEV_JOURNAL_STAGES);
 const linkTypeSet = new Set(DEV_JOURNAL_LINK_TYPES);
 const terminalStageSet = new Set(["operation_completed", "operation_failed", "operation_recovered"]);
 const recoveryAttemptLimit = 3;
-const recoveryBatchLimit = 8;
+const recoveryConcurrency = 4;
 const recoveryObservationType = "journal_recovery_observation";
 const recoveryObservationTool = "nexa.journal.observe_recovery";
 const manualRecoveryTypes = new Set(["pi_terminal_resolution", "integration_validation", "test_evidence"]);
@@ -743,6 +743,7 @@ export function createDevOperationJournalService({
   const workspaceMutationState = new Map();
   const recoveringOperations = new Map();
   let recoveryTimer = null;
+  let recoveryWakeAt = Infinity;
   let recoveryRunning = false;
 
   function mutationStateFor(workspaceId) {
@@ -1656,6 +1657,11 @@ export function createDevOperationJournalService({
     return attempts;
   }
 
+  function activeRecoveryScopes(starts, attempts, active) {
+    return starts.filter(started => active.has(attempts.get(started.operation_id)?.id))
+      .map(journalOperationScope);
+  }
+
   async function observeScheduledRecovery(started, resolveContext, prior) {
     const operationId = started.operation_id;
     if (started.operation_type === recoveryObservationType) {
@@ -1680,9 +1686,12 @@ export function createDevOperationJournalService({
       links: [{ relation: "related_to", operation_id: operationId }],
       result: { logical_operation_id: operationId, recovery_attempt: count, retry_after_ms: Date.now() + 500 * 2 ** (count - 1) },
     }, { beforeAppend: current => {
-      const latest = recoveryAttemptsFrom(current).get(operationId);
+      const attempts = recoveryAttemptsFrom(current);
+      const latest = attempts.get(operationId);
       if (!current.dangling_operations.includes(operationId) || latest?.id !== prior?.id
-        || current.active_operations.includes(latest?.id)) {
+        || current.active_operations.includes(latest?.id)
+        || activeRecoveryScopes(recoveryGraph(current).starts, attempts, new Set(current.active_operations))
+          .some(scope => journalIsolationOverlaps(scope, journalOperationScope(started)))) {
         throw Object.assign(new Error("The operation already has a current observer."), { code: "JOURNAL_RECOVERY_OBSERVER_CHANGED" });
       }
     } });
@@ -1698,27 +1707,26 @@ export function createDevOperationJournalService({
       observed_outcome: observed.result.outcome } });
   }
 
-  async function recoverDanglingSnapshot(verification, resolveContext = resolveRecoveryContext, scheduled = false) {
+  function trackRecovery(started, observe) {
+    const id = started.operation_id;
+    let entry = recoveringOperations.get(id);
+    if (!entry) {
+      entry = { scope: journalOperationScope(started),
+        promise: observe().finally(() => recoveringOperations.delete(id)) };
+      recoveringOperations.set(id, entry);
+    }
+    return entry.promise;
+  }
+
+  async function recoverDanglingSnapshot(verification, resolveContext = resolveRecoveryContext) {
     if (explicitDegraded) return;
     const { starts, unsettled, children } = recoveryGraph(verification);
-    const attempts = scheduled ? recoveryAttemptsFrom(verification) : null;
-    let scheduledAttempts = 0;
     // Recover inner operations before their boundary admission.
     for (const started of starts.reverse()) {
       const operationId = started.operation_id;
       if (!canObserveRecovery(started) || children.get(operationId)?.some(id => unsettled.has(id))) continue;
-      const prior = attempts?.get(operationId);
-      if (scheduled && prior && (prior.count >= recoveryAttemptLimit || prior.due > Date.now() || unsettled.has(prior.id))) continue;
-      if (scheduled && scheduledAttempts >= recoveryBatchLimit) break;
-      let recovery = recoveringOperations.get(operationId);
-      if (!recovery) {
-        if (scheduled) scheduledAttempts += 1;
-        recovery = (scheduled ? observeScheduledRecovery(started, resolveContext, prior) : recoverDanglingOperation(started, resolveContext))
-          .finally(() => recoveringOperations.delete(operationId));
-        recoveringOperations.set(operationId, recovery);
-      }
       try {
-        await recovery;
+        await trackRecovery(started, () => recoverDanglingOperation(started, resolveContext));
       } catch (error) {
         if (runtimeHealth === "corrupt") throw error;
         if (error?.code !== "JOURNAL_OPERATION_ALREADY_TERMINAL") continue;
@@ -1744,37 +1752,76 @@ export function createDevOperationJournalService({
     return !interruptedGc && !manualRecoveryTypes.has(started.operation_type) && isLocalOrphan(started);
   }
 
-  function scheduleRecovery(verification) {
-    if (!backgroundRecovery || recoveryRunning || recoveryTimer || explicitDegraded) return;
-    if (verification.dangling_operations.length === 0) return;
-    let nextDue = Infinity;
+  function recoveryPlan(verification) {
+    const ready = [];
+    let due = Infinity;
+    const capacity = recoveryConcurrency - recoveringOperations.size;
+    if (capacity <= 0 || verification.dangling_operations.length === 0) return { ready, due };
     const { starts, children, unsettled } = recoveryGraph(verification);
     const attempts = recoveryAttemptsFrom(verification);
-    for (const event of starts) {
-      if (!canObserveRecovery(event) || children.has(event.operation_id)) continue;
-      const attempt = attempts.get(event.operation_id);
-      if ((attempt?.count ?? 0) < recoveryAttemptLimit && !unsettled.has(attempt?.id)) {
-        nextDue = Math.min(nextDue, attempt?.due ?? 0);
-      } else if (attempt && verification.active_operations.includes(attempt.id)) {
-        nextDue = Math.min(nextDue, Date.now() + 30_000);
+    const occupied = [...recoveringOperations.values()].map(entry => entry.scope);
+    const active = new Set(verification.active_operations);
+    const remoteScopes = activeRecoveryScopes(starts, attempts, active);
+    const now = Date.now();
+    for (const started of starts.reverse()) {
+      const id = started.operation_id;
+      if (recoveringOperations.has(id) || children.has(id) || !canObserveRecovery(started)) continue;
+      const prior = attempts.get(id);
+      if (active.has(prior?.id)) {
+        due = Math.min(due, now + 30_000);
+        continue;
       }
+      if ((prior?.count ?? 0) >= recoveryAttemptLimit || unsettled.has(prior?.id)) continue;
+      const scope = journalOperationScope(started);
+      if (occupied.some(other => journalIsolationOverlaps(other, scope))) continue;
+      if (remoteScopes.some(other => journalIsolationOverlaps(other, scope))) {
+        due = Math.min(due, now + 30_000);
+        continue;
+      }
+      if ((prior?.due ?? 0) > now) {
+        due = Math.min(due, prior.due);
+        continue;
+      }
+      ready.push({ started, prior });
+      occupied.push(scope);
+      due = now;
+      if (ready.length >= capacity) break;
     }
-    if (!Number.isFinite(nextDue)) return;
+    return { ready, due };
+  }
+
+  function revisitRecovery() {
+    void verify().then(scheduleRecovery).catch(() => {
+      // A verified admission or restart can recheck the queue if storage is unavailable.
+    });
+  }
+
+  function scheduleRecovery(verification) {
+    if (!backgroundRecovery || recoveryRunning || explicitDegraded) return;
+    const { due } = recoveryPlan(verification);
+    if (due >= recoveryWakeAt) return;
+    clearTimeout(recoveryTimer);
+    recoveryWakeAt = due;
     recoveryTimer = setTimeout(async () => {
       recoveryTimer = null;
+      recoveryWakeAt = Infinity;
       recoveryRunning = true;
-      let next;
+      let latest;
       try {
-        await recoverDanglingSnapshot(await verify(), resolutionContextResolver, true);
-        next = await verify();
+        latest = await verify();
+        if (explicitDegraded) return;
+        for (const { started, prior } of recoveryPlan(latest).ready) {
+          const recovery = trackRecovery(started, () =>
+            observeScheduledRecovery(started, resolutionContextResolver ?? resolveRecoveryContext, prior));
+          void recovery.then(revisitRecovery, revisitRecovery);
+        }
       } catch {
-        // Storage/integrity failures keep the existing shared write gate. A
-        // later verified admission or process restart can recheck the queue.
+        // Storage/integrity failures keep the existing shared write gate.
       } finally {
         recoveryRunning = false;
       }
-      if (next) scheduleRecovery(next);
-    }, Math.max(25, nextDue - Date.now()));
+      if (latest) scheduleRecovery(latest);
+    }, Math.max(25, due - Date.now()));
     recoveryTimer.unref();
   }
 
