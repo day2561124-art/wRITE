@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {traceSpan} from "./mcp-request-tracing.mjs";
 import { hostname } from "node:os";
-import { reliableTerminal, reliableFailure, stableJson, reduceReliableProjection } from "./pi-reliable-execution-state.mjs";
+import { executionPhaseForStep, observedVerificationFailure, reliableTerminal, reliableFailure, stableJson, reduceReliableProjection } from "./pi-reliable-execution-state.mjs";
 import { reliableErrorCode } from "./pi-mcp-reliable-adapter.mjs";
 const phases=["EXECUTING","VERIFYING","COMMITTING"];
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -36,6 +36,10 @@ export function createPiReliableExecutionEngine({store,adapter,retryPolicy={max_
       await own({type:"retry_scheduled",call_id:call.call_id,code,not_started_receipt:proof});
       await executionHook?.("retry_scheduled",record);return record;
     }
+    async function scheduleVerificationRecovery(callId, receipt) {
+      await own({ type: "verification_recovery_scheduled", call_id: callId, receipt });
+      await executionHook?.("verification_recovery_scheduled", record);
+    }
     async function reconcile() {
       const call=record.runtime.active_call;
       if(record.runtime.retry_at!==null) {
@@ -63,6 +67,7 @@ export function createPiReliableExecutionEngine({store,adapter,retryPolicy={max_
         await own({type:"reconciliation_completed",call_id:call.call_id,receipt:observed.receipt});
         return;
       }
+      if (observed.verdict === "verification_failed") return scheduleVerificationRecovery(call.call_id, observed.receipt);
       if(observed.verdict==="not_started")return scheduleRetry("WORKER_INTERRUPTED",observed.receipt);
       if(observed.verdict==="active") {
         if(record.runtime.active_call.reconciliation_attempt>=record.runtime.retry_policy.max_attempts)
@@ -93,8 +98,7 @@ export function createPiReliableExecutionEngine({store,adapter,retryPolicy={max_
         await own({type:"phase_changed",status:next});continue;
       }
       const stepId=state.pending_steps[0],step=adapter.describe(record.intent,stepId,binding());
-      const required=step.capability.startsWith("git.")&&step.effect?"COMMITTING"
-        :step.capability.startsWith("verification.")?"VERIFYING":"EXECUTING";
+      const required=executionPhaseForStep(record.intent,state,step);
       const currentIndex=phases.indexOf(state.status),requiredIndex=phases.indexOf(required);
       if(currentIndex<0||(step.effect&&currentIndex>requiredIndex)) {
         await stop("PHASE_ORDER_CONFLICT");continue;
@@ -128,7 +132,12 @@ export function createPiReliableExecutionEngine({store,adapter,retryPolicy={max_
         else await stop(code);
         continue;
       }
-      if(response.failed){await stop(response.error_code,"DECISION_REQUIRED",response.receipt);continue;}
+      if (response.failed) {
+        const action = record.intent.requested_actions.find(value => value.step_id === stepId);
+        if (observedVerificationFailure(action, response.receipt)) await scheduleVerificationRecovery(callId, response.receipt);
+        else await stop(response.error_code, "DECISION_REQUIRED", response.receipt);
+        continue;
+      }
       await own({type:"tool_call_completed",call_id:callId,receipt:response.receipt});
       await executionHook?.("after_receipt",record);
     }

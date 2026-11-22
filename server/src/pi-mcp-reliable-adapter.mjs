@@ -1,6 +1,6 @@
 import { createExecutionIntent, hashExecutionInput, classifyExecutionFailure } from "./pi-execution-contract.mjs";
 import { createMcpCapabilityAdapter } from "./pi-mcp-adapter.mjs";
-import { reliableFailure, reliableJson, receiptOf } from "./pi-reliable-execution-state.mjs";
+import { observedVerificationFailure, reliableFailure, reliableJson, receiptOf } from "./pi-reliable-execution-state.mjs";
 const known=new Set(["TRANSPORT_ERROR","TEMPORARY_UNAVAILABLE","TIMEOUT","PERMISSION_DENIED","CORRUPT_STATE",
   "VALIDATION_FAILURE","TEST_FAILURE","GIT_SEMANTIC_CONFLICT","ARCHITECTURE_CONFLICT","IMPLEMENTATION_FAILURE",
   "CAPABILITY_STATUS_UNCERTAIN","CAPABILITY_EXPECTATION_REQUIRED","CAPABILITY_VERSION_DRIFT","CAPABILITY_SCHEMA_DRIFT",
@@ -101,9 +101,12 @@ export function createPiReliableMcpAdapter({callTool,queryOperation,resolveWorks
       return {verdict:"active",receipt:receiptOf(intent.requested_actions.find(x=>x.step_id===stepId),raw,"reconciled_facts")};
     if(raw.reconciliation_state==="completed"&&raw.request_fingerprint_sha256===params.request_fingerprint_sha256
       &&/^dev_operation_[a-f0-9]{32}$/u.test(raw.operation_id)) {
+      const action = intent.requested_actions.find(x => x.step_id === stepId);
+      const receipt = receiptOf(action, raw, "reconciled_facts");
+      if (observedVerificationFailure(action, receipt)) return { verdict: "verification_failed", receipt };
       if(step.capability.startsWith("verification.")&&raw.original_result?.passed!==true)
         return {verdict:"unknown",code:"VALIDATION_EVIDENCE_REQUIRED"};
-      return {verdict:"completed",receipt:receiptOf(intent.requested_actions.find(x=>x.step_id===stepId),raw,"reconciled_facts")};
+      return {verdict:"completed",receipt};
     }
     if(raw.reconciliation_state==='no_effect'&&raw.safe_to_reinitiate===true&&raw.reinitiate_requires_new_key===true
       &&raw.terminal===true&&raw.original_result?.outcome==='no_effect_observed'&&raw.original_result?.reconciliation_required===false

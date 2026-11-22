@@ -99,7 +99,7 @@ export async function adaptAuthorizedPiRequest(source, { resolveWorkspace } = {}
     || source.requested_actions.length > 100) fail("INVALID_ACTIONS");
   const actions = source.requested_actions.map(action => {
     exact(action, ["step_id", "capability", "input"], ["depends_on", "idempotency_key",
-      "expected_capability_version", "expected_schema_hash"]);
+      "expected_capability_version", "expected_schema_hash", "on_failure"]);
     if (!ordinaryCapabilities.has(action.capability)) fail("STRICT_EXECUTION_INTENT_REQUIRED");
     const definition = capabilityDefinition(action.capability);
     if (permissions[definition.permission] !== true) fail("PERMISSION_DENIED");

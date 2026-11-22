@@ -211,6 +211,31 @@ function validateInput(action, context, bootstrap = false) {
     if (!allowed.includes(input.suite)) fail("VERIFICATION_CAPABILITY_MISMATCH");
   }
 }
+const repairCapabilities = new Set(["filesystem.read", "filesystem.list", "filesystem.write", "filesystem.patch", "workspace.powershell_isolated"]);
+
+function validateFailureRecovery(intent) {
+  const actions = intent.requested_actions;
+  const owners = new Map();
+  for (const [index, action] of actions.entries()) {
+    if (action.on_failure === undefined) continue;
+    if (!intent.task_authorization_id || intent.context.workspace_id === "dev_workspace_shared_repository_v1"
+      || !["verification.focused", "verification.affected"].includes(action.capability)
+      || !Array.isArray(action.on_failure) || action.on_failure.length < 2 || action.on_failure.length > 5) fail("INVALID_FAILURE_RECOVERY");
+    const branch = actions.slice(index + 1, index + 1 + action.on_failure.length);
+    if (branch.length !== action.on_failure.length || branch.some((step, i) =>
+      step.step_id !== action.on_failure[i] || step.on_failure !== undefined || owners.has(step.step_id))) fail("INVALID_FAILURE_RECOVERY");
+    const retry = branch.at(-1);
+    if (retry.capability !== action.capability || hashExecutionInput(retry.input) !== hashExecutionInput(action.input)
+      || branch.slice(0, -1).some(step => !repairCapabilities.has(step.capability))) fail("INVALID_FAILURE_RECOVERY");
+    for (const step of branch) owners.set(step.step_id, action.step_id);
+  }
+  for (const action of actions) {
+    if (action.depends_on.some(id => owners.has(id) && owners.get(id) !== owners.get(action.step_id))) {
+      fail("INVALID_FAILURE_RECOVERY_DEPENDENCY");
+    }
+  }
+}
+
 export function createExecutionIntent(input) {
   const intent = jsonCopy(input).value;
   fields(intent, ["schema_version", "intent_id", "goal", "context", "constraints", "requested_actions",
@@ -240,7 +265,7 @@ export function createExecutionIntent(input) {
   }
   const steps = new Map(); const keys = new Set();
   for (const action of intent.requested_actions) {
-    fields(action, ["step_id", "capability", "input"], ["depends_on", "idempotency_key", "expected_capability_version", "expected_schema_hash"]);
+    fields(action, ["step_id", "capability", "input"], ["depends_on", "idempotency_key", "expected_capability_version", "expected_schema_hash", "on_failure"]);
     string(action.step_id, 128);
     if (action.expected_capability_version !== undefined && (typeof action.expected_capability_version !== "string" || !/^[1-9][0-9]{0,2}(?:\.[0-9]{1,3}){0,2}$/u.test(action.expected_capability_version))) fail("INVALID_CAPABILITY_VERSION");
     if (action.expected_schema_hash !== undefined && !sha256Pattern.test(action.expected_schema_hash)) fail("INVALID_CAPABILITY_SCHEMA_HASH");
@@ -293,6 +318,7 @@ export function createExecutionIntent(input) {
   for (const action of steps.values()) {
     if (action.capability.startsWith("verification.") && !verificationIds.has(action.step_id)) fail("UNDECLARED_VERIFICATION");
   }
+  validateFailureRecovery(intent);
   return freeze(intent);
 }
 
@@ -317,6 +343,8 @@ export function createOperationState(input, options = {}) {
     schema_version: 1, operation_id: operationId, intent_id: intent.intent_id, intent_hash: hashExecutionInput(intent),
     parent_operation_id: parent, ...intent.context, ...(intent.bootstrap?{bootstrap:true}:{}), status: "CREATED", current_phase: "CREATED", current_step: null,
     completed_steps: [], pending_steps: intent.requested_actions.map(x => x.step_id), tool_calls: [], tool_results: [],
+    ...(intent.requested_actions.some(action => action.on_failure !== undefined)
+      ? { recovery: { active_step: null, recovered_steps: [], skipped_steps: [] } } : {}),
     retry_count: 0, last_error: null, checkpoint: null, resume_point: null,
     idempotency_keys: Object.fromEntries(intent.requested_actions.filter(x => x.idempotency_key).map(x => [x.step_id, x.idempotency_key])),
     verification_state: { focused: "pending", affected: "pending", full: "pending" },
@@ -328,7 +356,7 @@ export function validateOperationState(input) {
   fields(state, ["schema_version", "operation_id", "intent_id", "intent_hash", "parent_operation_id",
     "project_id", "workstream_id", "workspace_id", "status", "current_phase", "current_step",
     "completed_steps", "pending_steps", "tool_calls", "tool_results", "retry_count", "last_error",
-    "checkpoint", "resume_point", "idempotency_keys", "verification_state", "created_at", "updated_at", "completed_at"], ["bootstrap"]);
+    "checkpoint", "resume_point", "idempotency_keys", "verification_state", "created_at", "updated_at", "completed_at"], ["bootstrap", "recovery"]);
   if (state.schema_version !== 1 || !/^pi_operation_[a-f0-9]{32}$/u.test(state.operation_id)
     || !sha256Pattern.test(state.intent_hash) || state.project_id !== "writer_workbench"
     || (state.bootstrap!==true && !workstreamPattern.test(state.workstream_id)) || !workspacePattern.test(state.workspace_id)
@@ -338,6 +366,16 @@ export function validateOperationState(input) {
   if (state.parent_operation_id !== null && !/^(?:pi|dev)_operation_[a-f0-9]{32}$/u.test(state.parent_operation_id)) fail("CORRUPT_STATE");
   strings(state.completed_steps); strings(state.pending_steps);
   const steps = [...state.completed_steps, ...state.pending_steps];
+  if (state.recovery !== undefined) {
+    fields(state.recovery, ["active_step", "recovered_steps", "skipped_steps"]);
+    strings(state.recovery.recovered_steps); strings(state.recovery.skipped_steps);
+    if (state.recovery.active_step !== null) {
+      string(state.recovery.active_step, 128);
+      if (state.status === "COMPLETED") fail("CORRUPT_STATE");
+      steps.push(state.recovery.active_step);
+    }
+    steps.push(...state.recovery.recovered_steps, ...state.recovery.skipped_steps);
+  }
   if (new Set(steps).size !== steps.length || (state.current_step !== null && !state.pending_steps.includes(state.current_step))) fail("CORRUPT_STATE");
   if (!Array.isArray(state.tool_calls) || !Array.isArray(state.tool_results)
     || state.tool_calls.length > 1000 || state.tool_results.length > 1000) fail("CORRUPT_STATE");

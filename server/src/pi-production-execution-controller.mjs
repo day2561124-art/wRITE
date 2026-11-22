@@ -172,6 +172,7 @@ export function createPiProductionExecutionController({journal=defaultJournal,ro
     started_sequence,operation_id:record.state.operation_id,intent_id:record.intent.intent_id,
     task_authorization_id:record.intent.task_authorization_id??null, goal:record.intent.goal,
     status:record.state.status,completed_steps:record.state.completed_steps,
+    ...(record.state.recovery ? { recovery: record.state.recovery } : {}),
     next_step:record.state.pending_steps[0]??null,last_error:record.state.last_error,
    })),
    next_before_sequence:operations.size>limit?page.at(-1).started_sequence:null,

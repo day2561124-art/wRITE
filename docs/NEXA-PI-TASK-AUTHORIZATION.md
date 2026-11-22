@@ -41,7 +41,9 @@
 }
 ```
 
-若測試失敗，取得持久收據後可用同一份授權提交修正和重測。最新批次的 `pending_steps`、`last_error` 和各步驟收據提供接續依據。`node scripts/manage-pi-task-authorization.mjs revoke <task-authorization-id>` 會寫入撤銷記錄。Pi 會在新派送前重新檢查其有效性。已獲准派送的操作和事後唯讀對帳維持原本的生命週期。
+若 GPT 已確定修復方案，可在 `verification.focused` 或 `verification.affected` 步驟加上 `"on_failure": ["repair", "retest"]`。隨後緊接列出的修復步驟，最後以新的步驟識別碼和相同的測試能力及參數重驗。修復可使用授權範圍內的讀取、寫入、修補與隔離 PowerShell。後續提交等步驟可依賴原始驗證步驟。Pi 會在第一次驗證通過時略過修復。收到可核對的失敗收據時，Pi 記錄失敗並執行修復及重驗。逾時或效果無法確認時，Pi 保留接續點。
+
+最新批次的 `recovery`、`pending_steps`、`last_error` 和各步驟收據提供接續依據。遇到需要新決策的結果，可用同一份授權提交後續工作。`node scripts/manage-pi-task-authorization.mjs revoke <task-authorization-id>` 會寫入撤銷記錄。Pi 會在新派送前重新檢查其有效性。已獲准派送的操作和事後唯讀對帳維持原本的生命週期。
 
 ## 查詢與對帳
 
