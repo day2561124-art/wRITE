@@ -647,7 +647,9 @@ async function run(scenario, {controlledClaimProbe = false, nativeClaimChoice = 
       assert.equal(ownMind.boundaries.native_goal_decision_explicit_intent_only, true);
       assert.equal(ownMind.boundaries.native_goal_decision_world_write_authority, false);
       assert.equal(ownMind.boundaries.native_goal_decision_action_authority, false);
-      assert.equal(ownMind.boundaries.native_goal_decision_intent_submission_supported, false);
+      assert.equal(ownMind.boundaries.native_goal_decision_intent_submission_supported, true);
+      // The capability flag permits explicitly authored intents; this Brain
+      // returned no goal_intents, so the dispatch remains strictly read-only.
       assert.deepEqual(goalView.motivation_basis.map(entry => entry.evidence),
         directGoalView.motivation_basis.map(entry => entry.evidence));
       assert.equal(thought.durable_cognitive_write_performed, false,
