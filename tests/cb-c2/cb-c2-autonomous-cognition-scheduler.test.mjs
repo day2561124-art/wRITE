@@ -9,7 +9,7 @@ import {
 } from "../../server/src/world-simulation-loop-service.mjs";
 import { projectRoot } from "../../server/src/project-paths.mjs";
 import { beginWorldSimulationSession } from "../../server/src/world-simulation-session-service.mjs";
-import { getWorldSimulationHistory, getWorldSimulationState } from "../../server/src/world-simulation-state-service.mjs";
+import { commitWorldSimulationTurn, getWorldSimulationHistory, getWorldSimulationState } from "../../server/src/world-simulation-state-service.mjs";
 import { hashAgentRunValue } from "../../server/src/agent-run-service.mjs";
 import { buildWorldSimulationSubjectiveClaims } from "../../server/src/world-simulation-subjective-claim-projection-service.mjs";
 import { resolveWorldSimulationSubjectiveBeliefs } from "../../server/src/world-simulation-subjective-belief-resolution-service.mjs";
@@ -693,6 +693,64 @@ try {
       state_revision:post.revision,history_turns:historyPost.turns.length,
     }));
   }
+
+  // Simulate an unrelated, legitimate World CAS winner after the C2 Brain
+  // receives a valid source token but before the C2 goal writer executes.
+  // The competing transaction is harness-owned and writes no event/goal.
+  // The old C2 snapshot must fail closed, retaining only the winner.
+  const racing = await beginWorldSimulationSession({
+    source_text:"CB-C2 goal writer CAS interleaving",
+    characters:Object.keys(baseWorldState.characters),
+    initial_world_state:state,
+  },{fixtureRoot:goalFixtureRoot});
+  const racingSid=racing.world_simulation_session_id;
+  let competingCommitCount=0;
+  await assert.rejects(
+    dispatchWorldSimulationAutonomousCognitionOpportunities({
+      world_simulation_session_id:racingSid,
+      runtime_context_by_character:{[character]:{idle:true}},
+    },{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+      const oldView=packet.native_goal_decision;
+      assert.equal(oldView.motivation_basis.length,1);
+      const atIngress=await getWorldSimulationState(racingSid,{fixtureRoot:goalFixtureRoot});
+      await commitWorldSimulationTurn(racingSid,{
+        expected_revision:atIngress.revision,
+        expected_state_hash:atIngress.state_hash,
+        turn_id:"harness_competing_cas_winner",
+        next_world_state:atIngress.state,
+        event:null,
+        selected_action_intents:[],
+        action_outcomes:[],
+        state_transitions:[],
+      },{fixtureRoot:goalFixtureRoot});
+      competingCommitCount++;
+      return {
+        goal_context_token:oldView.context_token,
+        goal_intents:[{
+          operation:"propose",goal_kind:"achieve_state",domain:"inquiry",
+          target_descriptor:{label:"查證計時器實際上限"},
+          motivation_basis_tokens:[oldView.motivation_basis[0].source_token],
+          motivation_relations:["supports"],
+        }],
+      };
+    }}),
+    error=>error?.code==="WORLD_SIMULATION_AUTONOMOUS_GOAL_COMMIT_STALE",
+    "The C2 goal writer must reject an interleaving revision winner, never retry an old intent."
+  );
+  const raceAfter=await getWorldSimulationState(racingSid,{fixtureRoot:goalFixtureRoot});
+  const raceHistory=await getWorldSimulationHistory(racingSid,{fixtureRoot:goalFixtureRoot});
+  assert.equal(competingCommitCount,1);
+  assert.equal(raceAfter.revision,1);
+  assert.equal((raceAfter.state.motivational_goal_history??[]).length,0);
+  assert.equal(raceHistory.turns.length,1);
+  assert.equal(raceHistory.turns[0].turn_id,"harness_competing_cas_winner");
+  assert.deepEqual(raceAfter.state.event_queue,[]);
+  console.log(JSON.stringify({
+    scenario:"c2_eventless_goal_stale_cas",
+    competing_world_commit_count:competingCommitCount,
+    final_revision:raceAfter.revision,goal_events:0,
+    c2_stale_write_rejected:true,
+  }));
 } finally {
   await rm(goalFixtureRoot,{recursive:true,force:true});
 }
