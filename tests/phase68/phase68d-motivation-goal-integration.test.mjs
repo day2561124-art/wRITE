@@ -557,6 +557,32 @@ assert.deepEqual(resolveWorldSimulationNativeGoalDecisionIntents({
   world_state: semanticWorld, character: rio, turn_id: semanticTurn,
 }).goal_decisions, [], "Readable evidence alone must not select a new goal.");
 
+// Select by actual subjective meaning instead of a fixture token index.
+const semanticResolver = buildWorldSimulationMotivationalGoalResolverView({
+  world_state: semanticWorld, turn_id: semanticTurn,
+});
+for (const proposition of semanticPropositions) {
+  const entry = semanticView.motivation_basis.find(item => item.evidence.proposition === proposition);
+  const source = semanticResolver.available_motivation_basis_refs.find(item =>
+    item.character === rio && item.character_view.proposition === proposition);
+  assert.ok(entry && source);
+  const decision = resolveWorldSimulationNativeGoalDecisionIntents({
+    world_state: semanticWorld, character: rio, turn_id: semanticTurn,
+    context_token: semanticView.context_token,
+    goal_intents: [{
+      operation: "propose", goal_kind: "achieve_state", domain: "relationships",
+      target_descriptor: { label: "inspect_situation" },
+      motivation_basis_tokens: [entry.source_token],
+      motivation_relations: ["self_concordant_with"],
+    }],
+  });
+  assert.equal(decision.goal_decisions.length, 1);
+  assert.deepEqual(decision.goal_decisions[0].motivation_basis_refs, [{
+    source_kind: source.source_kind, source_event_id: source.source_event_id,
+    source_event_hash: source.source_event_hash,
+  }], "Selecting the proposition must bind exactly its own authoritative revision.");
+}
+
 const tamperedBeliefWorld = clone(beliefOnlyWorld);
 const tamperedBeliefEventId = tamperedBeliefWorld.subjective_belief_revision_history[0]
   .belief_revision_event_id;
