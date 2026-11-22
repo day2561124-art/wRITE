@@ -25,8 +25,14 @@ export function createPiDurableWorkerSupervisor({spawnProcess=spawn,root=project
   // Child errors contain no commands or caller-selected data in this channel.
   worker.stderr?.on('data',()=>{});
   worker.on('message',message=>{
-   if(message?.protocol!==PI_DURABLE_WORKER_PROTOCOL||message.pid!==worker.pid
-    ||!['ready','executing','idle','drained','failed'].includes(message.kind))return;
+   if(message?.protocol!==PI_DURABLE_WORKER_PROTOCOL||message.pid!==worker.pid)return;
+   if(message.kind==='operation_deferred'){
+    if(/^pi_operation_[a-f0-9]{32}$/u.test(message.operation_id??'')&&/^[A-Z][A-Z0-9_]{0,63}$/u.test(message.code??'')
+      &&Number.isSafeInteger(message.attempt)&&message.attempt>=1&&message.attempt<=3)
+      publish({last_deferred:{operation_id:message.operation_id,code:message.code,attempt:message.attempt}});
+    return;
+   }
+   if(!['ready','executing','idle','drained','failed'].includes(message.kind))return;
    publish({state:message.kind,pid:worker.pid,operation_id:/^pi_operation_[a-f0-9]{32}$/.test(message.operation_id??'')?message.operation_id:null});
   });
   worker.once('error',()=>publish({state:'spawn_failed'}));

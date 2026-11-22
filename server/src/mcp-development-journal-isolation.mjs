@@ -36,7 +36,7 @@ function pathKey(value) {
 export function journalOperationScope(operation) {
   const { operation_type, tool_name, workstream_id, result } = operation;
   const workspace_id = operation.workspace_id ?? sharedWorkspace;
-  if (operation_type === "pi_execution_projection" || operation_type === "pi_production_route") {
+  if (["pi_execution_projection", "pi_production_route", "pi_worker_deferral"].includes(operation_type)) {
     return { level: "operation", resource: result?.logical_operation_id ?? tool_name };
   }
   if (powerShellTools.has(tool_name)) {

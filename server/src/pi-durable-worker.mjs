@@ -28,7 +28,15 @@ export async function runPiDurableWorker({controller,signal,ready,intervalMs=500
     if(lifetime.signal.aborted)break;
     if(record.runtime.owner&&localOwnerAlive(record.runtime.owner)!==false)continue;
     notify('executing',{operation_id:record.state.operation_id});
-    await controller.execute(record.intent);ran=true;
+    try {await controller.execute(record.intent);}
+    catch(error) {
+     if(typeof controller.deferExecutionFailure!=='function')throw error;
+     const fault=await controller.deferExecutionFailure({operation_id:record.state.operation_id,context:record.intent.context},error);
+     if(fault)notify('operation_deferred',{operation_id:record.state.operation_id,code:fault.code,attempt:fault.attempt});
+     notify('idle');
+     continue;
+    }
+    ran=true;
     notify('idle');
     // One operation per scan ensures a fresh authoritative snapshot between jobs.
     break;

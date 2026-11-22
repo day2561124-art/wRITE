@@ -91,6 +91,65 @@ test('worker failure propagates rather than leaving a live abandoned owner loop'
  await assert.rejects(runPiDurableWorker({controller:{discover:async()=>{throw failure;},execute:async()=>{}},observe:e=>events.push(e.kind)}),failure);
  assert.equal(events.at(-1),'failed');
 });
+
+test("a worker defers an unclaimed failing task and an independent task completes through the same process", async t => {
+  const f = await fixture(t);
+  let now = 10_000;
+  let writes = 0;
+  const h = host(f, async () => { writes++; return { ok: true }; }, { workerClock: () => now });
+  const blocked = await h.submit(intent("fixture-deferred"));
+  const independent = await h.submit(intent("fixture-independent", true));
+  const failure = Object.assign(new Error("temporary fixture capability failure"), { code: "TEMPORARY_UNAVAILABLE" });
+  const seen = [];
+  const abort = new AbortController();
+  const source = { ...h, async execute(value) {
+    seen.push(value.intent_id);
+    if (value.intent_id === "fixture-deferred") throw failure;
+    return h.execute(value);
+  } };
+  await runPiDurableWorker({ controller: source, signal: abort.signal, intervalMs: 10, observe: event => {
+    if (event.kind === "idle" && seen.at(-1) === "fixture-independent") abort.abort();
+  } });
+  assert.deepEqual(seen, ["fixture-deferred", "fixture-independent"]);
+  assert.equal(writes, 1);
+  assert.equal((await h.inspect({ operation_id: independent.state.operation_id, context })).state.status, "COMPLETED");
+  const reopened = host({ ...f, journal: createDevOperationJournalService({ storageRoot: f.storageRoot }) },
+    undefined, { workerClock: () => now, pendingLimit: 1 });
+  const args = { operation_id: blocked.state.operation_id, context };
+  const first = (await reopened.inspect(args)).worker_deferral;
+  assert.equal(first.code, "TEMPORARY_UNAVAILABLE");
+  assert.equal(first.attempt, 1);
+  assert.deepEqual(await reopened.discover(), []);
+  now = first.retry_after_ms;
+  assert.equal((await reopened.discover())[0].state.operation_id, blocked.state.operation_id);
+  const second = await reopened.deferExecutionFailure(args, failure);
+  assert.equal(second.attempt, 2);
+  now = second.retry_after_ms;
+  const exhausted = await reopened.deferExecutionFailure(args, failure);
+  assert.equal(exhausted.attempt, 3);
+  assert.equal(exhausted.retry_after_ms, null);
+  now += 60_000;
+  assert.deepEqual(await reopened.discover(), []);
+  const afterExhaustion = await reopened.submit(intent("fixture-after-exhaustion"));
+  assert.equal((await reopened.discover())[0].state.operation_id, afterExhaustion.state.operation_id);
+  assert.equal((await f.journal.listOperations({ operation_type: "pi_worker_deferral" })).total, 3);
+  assert.equal((await f.journal.status()).chain_verified, true);
+});
+
+test("an abandoned active claim exits the owner instead of counting a retry", async t => {
+  const f = await fixture(t);
+  const failure = new Error("fixture interruption after durable claim");
+  const h = host(f, async () => assert.fail("the interrupted call never dispatched"), {
+    executionHook: async point => { if (point === "after_claim") throw failure; },
+  });
+  const queued = await h.submit(intent("worker-abandoned-active-claim", true));
+  await assert.rejects(runPiDurableWorker({ controller: h, intervalMs: 10, observe: () => {} }), failure);
+  const state = await h.inspect({ operation_id: queued.state.operation_id, context });
+  assert.equal(state.runtime.active_call.step_id, "action");
+  assert.equal(state.worker_deferral, undefined);
+  assert.equal((await f.journal.listOperations({ operation_type: "pi_worker_deferral" })).total, 0);
+});
+
 test('a pre-aborted worker performs no discovery or dispatch',async()=>{
  const abort=new AbortController();abort.abort();let calls=0;
  await runPiDurableWorker({controller:{discover:async()=>{calls++;return [];},execute:async()=>{calls++;}},signal:abort.signal,observe:()=>{}});
