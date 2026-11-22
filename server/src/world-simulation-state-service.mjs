@@ -281,6 +281,39 @@ export async function commitWorldSimulationTurn(
       throw error;
     }
   }
+  if (input.autonomous_actor_initiated_action != null) {
+    const meta = requireObject(input.autonomous_actor_initiated_action,
+      "autonomous_actor_initiated_action");
+    const selections = input.selected_action_intents ?? [];
+    const outcomes = input.action_outcomes ?? [];
+    if (meta.version !== "cb-c4-world-owned-eventless-actor-speech-v1"
+      || input.event != null
+      || input.autonomous_cognition_goal_commitment != null
+      || input.autonomous_cognition_plan_commitment != null
+      || typeof meta.character !== "string" || !meta.character.trim()
+      || typeof meta.scene_id !== "string" || !meta.scene_id.trim()
+      || typeof meta.action_id !== "string" || !meta.action_id.trim()
+      || typeof meta.causal_resolution_id !== "string"
+      || !meta.causal_resolution_id.trim()
+      || !Array.isArray(meta.consumed_opportunity_ids)
+      || meta.consumed_opportunity_ids.length !== 1
+      || !/^autonomous_cognition_opportunity_[a-f0-9]{32}$/.test(meta.consumed_opportunity_ids[0])
+      || !Array.isArray(selections) || selections.length !== 1
+      || selections[0]?.character !== meta.character
+      || selections[0]?.selection !== "candidate_action_intent"
+      || selections[0]?.action_id !== meta.action_id
+      || selections[0]?.candidate?.action_id !== meta.action_id
+      || selections[0]?.candidate?.communication?.channel !== "speech"
+      || selections[0]?.candidate?.communication?.addressee === meta.character
+      || !Array.isArray(outcomes)
+      || !outcomes.some(outcome =>
+        outcome?.actor === meta.character && outcome?.action_id === meta.action_id)
+      || input.causal_resolution_id !== meta.causal_resolution_id) {
+      const error = new Error("Actor-initiated eventless speech needs exact World causal evidence.");
+      error.code = "CB_C4_WORLD_SPEECH_COMMIT_METADATA_INVALID";
+      throw error;
+    }
+  }
   const nextWorldState = requireObject(input.next_world_state, "next_world_state");
   const paths = worldSimulationStatePaths(sessionId, options);
   let committedEnvelope = null;
