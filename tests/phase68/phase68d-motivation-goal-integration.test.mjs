@@ -498,6 +498,65 @@ assert.throws(() => resolveWorldSimulationNativeGoalDecisionIntents({
   world_state: beliefOnlyWorld, character: rio, turn_id: nativeTurn,
   goal_intents: { operation: "propose" },
 }), (error) => error?.code === "WORLD_SIMULATION_NATIVE_GOAL_INTENT_INVALID");
+// Distinct committed beliefs must be distinguishable through the opaque
+// Native goal-source handles. The Character Brain must not choose a source
+// just because a token exists; it needs the source's own subjective meaning.
+// This is a controlled writer/projection test, not autonomous interpretation.
+const semanticPropositions = ["同伴可能正在等我。", "門口可能有人。"];
+let semanticWorld = { memories: { [rio]: [beliefMemory] } };
+const semanticClaims = buildWorldSimulationSubjectiveClaims({
+  world_state: semanticWorld, turn_id: beliefTurn,
+  source_memory_records: [{ character: rio, memory_record: beliefMemory }],
+  claim_proposals: semanticPropositions.map((proposition, index) => ({
+    proposal_ref: `cbc3-semantic-source-${index}`, character: rio, proposition,
+    evidence: [{ source_memory_ref: beliefMemory.memory_id, relation: "supports" }],
+  })),
+});
+semanticWorld = executeBuilt(semanticWorld, beliefTurn, "subjective_claim", semanticClaims);
+const semanticResolution = resolveWorldSimulationSubjectiveBeliefs({
+  world_state: semanticWorld, turn_id: beliefTurn,
+});
+const semanticRevisions = buildWorldSimulationSubjectiveBeliefRevisions({
+  world_state: semanticWorld, turn_id: beliefTurn,
+  resolution: semanticResolution.result,
+});
+semanticWorld = executeBuilt(semanticWorld, beliefTurn, "subjective_belief_revision", semanticRevisions);
+const semanticTurn = "world_turn_cbc3_semantic_token";
+const semanticView = buildWorldSimulationNativeGoalDecisionView({
+  world_state: semanticWorld, character: rio, turn_id: semanticTurn,
+});
+const semanticOther = buildWorldSimulationNativeGoalDecisionView({
+  world_state: semanticWorld, character: elias, turn_id: semanticTurn,
+});
+assert.equal(semanticView.motivation_basis.length, 2);
+assert.equal(new Set(semanticView.motivation_basis.map(item => item.source_token)).size, 2);
+assert.equal(semanticOther.motivation_basis.length, 0);
+console.log(JSON.stringify({
+  scenario: "c3_belief_token_semantic_grounding",
+  own_basis_count: semanticView.motivation_basis.length,
+  distinct_source_tokens: new Set(semanticView.motivation_basis.map(item => item.source_token)).size,
+  distinct_evidence_views: new Set(semanticView.motivation_basis.map(item => JSON.stringify(item.evidence))).size,
+  proposition_count: semanticView.motivation_basis.filter(item => typeof item.evidence?.proposition === "string").length,
+  other_basis_count: semanticOther.motivation_basis.length,
+}));
+assert.deepEqual(
+  semanticView.motivation_basis.map(item => item.evidence.proposition).sort(),
+  [...semanticPropositions].sort(),
+  "Native C3 semantic gap: each opaque motivation token must retain its own committed subjective proposition.",
+);
+for (const item of semanticView.motivation_basis) {
+  assert.equal(item.evidence.subjective_not_world_truth, true);
+}
+assert.equal(semanticView.world_truth_exposed, false);
+assert.equal(semanticView.source_event_ids_exposed, false);
+assert.equal(JSON.stringify(semanticView).includes(beliefMemory.memory_id), false);
+for (const ref of semanticWorld.subjective_belief_revision_history ?? []) {
+  assert.equal(JSON.stringify(semanticView).includes(ref.belief_revision_event_id), false);
+}
+assert.deepEqual(resolveWorldSimulationNativeGoalDecisionIntents({
+  world_state: semanticWorld, character: rio, turn_id: semanticTurn,
+}).goal_decisions, [], "Readable evidence alone must not select a new goal.");
+
 const tamperedBeliefWorld = clone(beliefOnlyWorld);
 const tamperedBeliefEventId = tamperedBeliefWorld.subjective_belief_revision_history[0]
   .belief_revision_event_id;
