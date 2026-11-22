@@ -260,6 +260,27 @@ export async function commitWorldSimulationTurn(
       throw error;
     }
   }
+  if (input.autonomous_cognition_plan_commitment != null) {
+    const marker = requireObject(input.autonomous_cognition_plan_commitment,
+      "autonomous_cognition_plan_commitment");
+    if (marker.version !== "cb-c2-eventless-plan-commitment-v1"
+        || input.autonomous_cognition_goal_commitment != null
+        || input.event != null
+        || (input.selected_action_intents ?? []).length > 0
+        || (input.action_outcomes ?? []).length > 0
+        || !Array.isArray(marker.consumed_opportunity_ids)
+        || marker.consumed_opportunity_ids.length < 1
+        || marker.consumed_opportunity_ids.length > 64
+        || marker.consumed_opportunity_ids.some(id =>
+          typeof id !== "string" || !/^autonomous_cognition_opportunity_[a-f0-9]{32}$/.test(id))
+        || new Set(marker.consumed_opportunity_ids).size !== marker.consumed_opportunity_ids.length
+        || !Number.isSafeInteger(marker.plan_event_count)
+        || marker.plan_event_count < 1 || marker.plan_event_count > 64) {
+      const error = new Error("Eventless plan metadata requires bounded, prior-committed goal evidence and no selected action.");
+      error.code = "WORLD_SIMULATION_AUTONOMOUS_PLAN_COMMIT_METADATA_INVALID";
+      throw error;
+    }
+  }
   const nextWorldState = requireObject(input.next_world_state, "next_world_state");
   const paths = worldSimulationStatePaths(sessionId, options);
   let committedEnvelope = null;
@@ -337,6 +358,9 @@ export async function commitWorldSimulationTurn(
             ...(input.autonomous_cognition_goal_commitment != null
               ? { autonomous_cognition_goal_commitment:
                   input.autonomous_cognition_goal_commitment } : {}),
+            ...(input.autonomous_cognition_plan_commitment != null
+              ? { autonomous_cognition_plan_commitment:
+                  input.autonomous_cognition_plan_commitment } : {}),
             selected_action_intents: input.selected_action_intents ?? [],
             subjective_choice_commitment_receipts:
               input.subjective_choice_commitment_receipts ?? null,

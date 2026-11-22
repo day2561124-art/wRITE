@@ -587,6 +587,155 @@ try {
     selected_actions:0,
   }));
 
+  // After Phase68D commit, a NEW independent C2 internal cue should let
+  // the same Native Brain formulate a Phase69A plan without an unrelated
+  // external World event. The engine must retain its normal goal token,
+  // source validation and World-CAS authority. This is a controlled intent
+  // supplied by the test Brain, not an unprompted general AI policy.
+  const planCue={ [character]: {
+    pending_internal_cues: [{
+      kind:"memory_reactivation",
+      source_ref:"runtime-form-implementation-intention-from-committed-goal",
+    }],
+  }};
+  const planBefore=await getWorldSimulationState(sid,{fixtureRoot:goalFixtureRoot});
+  const planHistoryBefore=await getWorldSimulationHistory(sid,{fixtureRoot:goalFixtureRoot});
+  let observedPlanView=null;
+  const planned=await dispatchWorldSimulationAutonomousCognitionOpportunities({
+    world_simulation_session_id:sid,
+    runtime_context_by_character:planCue,
+  },{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+    assert.equal(packet.character,character);
+    observedPlanView=packet.native_plan_decision;
+    assert.ok(observedPlanView,
+      "C2→C3 plan gap: a conscious eventless cognition opportunity must receive the same bounded Native plan view already used by eventful turns.");
+    assert.equal(observedPlanView.prior_turn_committed_goal_only,true);
+    assert.equal(observedPlanView.world_truth_exposed,false);
+    assert.equal(observedPlanView.source_event_ids_exposed,false);
+    assert.equal(observedPlanView.goal_ids_exposed,false);
+    assert.equal(observedPlanView.action_selection_requested,false);
+    assert.equal(observedPlanView.committed_goals.length,1);
+    assert.equal(observedPlanView.committed_goals[0].target_descriptor.label,"查證計時器實際上限");
+    assert.equal(packet.boundaries.native_plan_decision_world_write_authority,false);
+    return {
+      plan_context_token:observedPlanView.context_token,
+      plan_intents:[{
+        goal_token:observedPlanView.committed_goals[0].goal_token,
+        cue_descriptor:{cue_kind:"opportunity",label:"timer_doubt_requires_verification"},
+        response_descriptor:{response_kind:"seek_support",label:"ask_trusted_ally"},
+      }],
+    };
+  }});
+  const planAfter=await getWorldSimulationState(sid,{fixtureRoot:goalFixtureRoot});
+  const planHistoryAfter=await getWorldSimulationHistory(sid,{fixtureRoot:goalFixtureRoot});
+  console.log(JSON.stringify({
+    scenario:"c2_eventless_goal_to_native_plan",
+    plan_view_received:observedPlanView!==null,
+    plan_entries:(planAfter.state.goal_implementation_intention_history??[]).length,
+    world_revision_before:planBefore.revision,
+    world_revision_after:planAfter.revision,
+    goal_entries:(planAfter.state.motivational_goal_history??[]).length,
+    selected_action_performed:planned.action_selection_performed,
+  }));
+  assert.equal(planned.dispatch_count,1);
+  assert.equal(planned.action_selection_performed,false);
+  assert.equal(planned.durable_cognitive_write_performed,true);
+  assert.equal(planAfter.revision,planBefore.revision+1,
+    "An explicit Phase69A plan intent from the actual C2 Brain must commit through the authoritative eventless World writer.");
+  assert.equal((planAfter.state.goal_implementation_intention_history??[]).length,1);
+  assert.equal((planAfter.state.motivational_goal_history??[]).length,2);
+  assert.equal(planHistoryAfter.turns.length,planHistoryBefore.turns.length+1);
+  assert.equal(planHistoryAfter.turns.at(-1).event,null);
+  assert.deepEqual(planHistoryAfter.turns.at(-1).selected_action_intents,[]);
+  assert.deepEqual(planHistoryAfter.turns.at(-1).action_outcomes,[]);
+  assert.deepEqual(planAfter.state.event_queue,planBefore.state.event_queue);
+  assert.equal(planAfter.state.simulation_time,planBefore.state.simulation_time);
+  const planReplay=await scheduleWorldSimulationAutonomousCognitionOpportunities({
+    world_simulation_session_id:sid,
+    runtime_context_by_character:planCue,
+  },{fixtureRoot:goalFixtureRoot});
+  assert.equal(planReplay.scheduler_projection.opportunity_count,0,
+    "Successfully authored plan opportunity must be durably suppressed on replay.");
+
+  // A committed goal does not automatically demand a plan. Without an
+  // explicit plan_intents reply, a C2 thought must remain read-only.
+  const planNoIntentSession=await beginWorldSimulationSession({
+    source_text:"C2 committed goal without plan selection",
+    characters:Object.keys(baseWorldState.characters),
+    initial_world_state:committedState.state,
+  },{fixtureRoot:goalFixtureRoot});
+  const noPlanSid=planNoIntentSession.world_simulation_session_id;
+  const noPlan=await dispatchWorldSimulationAutonomousCognitionOpportunities({
+    world_simulation_session_id:noPlanSid,
+    runtime_context_by_character:planCue,
+  },{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+    assert.equal(packet.native_plan_decision.committed_goals.length,1);
+    return {disposition:"considered_plan_but_declined"};
+  }});
+  const noPlanState=await getWorldSimulationState(noPlanSid,{fixtureRoot:goalFixtureRoot});
+  assert.equal(noPlan.dispatch_count,1);
+  assert.equal(noPlan.world_mutation_performed,false);
+  assert.equal(noPlan.action_selection_performed,false);
+  assert.equal(noPlanState.revision,0);
+  assert.equal((noPlanState.state.goal_implementation_intention_history??[]).length,0);
+
+  for(const [fault,code] of [
+    ["forged_goal_token","WORLD_SIMULATION_NATIVE_PLAN_GOAL_TOKEN_INVALID"],
+    ["stale_context","WORLD_SIMULATION_NATIVE_PLAN_CONTEXT_MISMATCH"],
+    ["invalid_plan_intents","WORLD_SIMULATION_NATIVE_PLAN_INTENT_INVALID"],
+    ["mixed_goal_plan","WORLD_SIMULATION_AUTONOMOUS_GOAL_PLAN_MIXED_BATCH_UNSUPPORTED"],
+  ]) {
+    const invalid=await beginWorldSimulationSession({
+      source_text:`C2 eventless invalid plan ${fault}`,
+      characters:Object.keys(baseWorldState.characters),
+      initial_world_state:committedState.state,
+    },{fixtureRoot:goalFixtureRoot});
+    const invalidSid=invalid.world_simulation_session_id;
+    const pre=await getWorldSimulationState(invalidSid,{fixtureRoot:goalFixtureRoot});
+    const preHistory=await getWorldSimulationHistory(invalidSid,{fixtureRoot:goalFixtureRoot});
+    await assert.rejects(dispatchWorldSimulationAutonomousCognitionOpportunities({
+      world_simulation_session_id:invalidSid,
+      runtime_context_by_character:planCue,
+    },{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+      const view=packet.native_plan_decision;
+      assert.equal(view.committed_goals.length,1);
+      const intent={
+        goal_token:fault==="forged_goal_token"?"forged_goal_ref":view.committed_goals[0].goal_token,
+        cue_descriptor:{cue_kind:"opportunity",label:"timer_doubt_requires_verification"},
+        response_descriptor:{response_kind:"seek_support",label:"ask_trusted_ally"},
+      };
+      const response={
+        plan_context_token:fault==="stale_context"?"outdated_plan_context":view.context_token,
+        plan_intents:fault==="invalid_plan_intents"?{}:[intent],
+      };
+      if(fault==="mixed_goal_plan"){
+        const goalView=packet.native_goal_decision;
+        assert.equal(goalView.motivation_basis.length,1);
+        response.goal_context_token=goalView.context_token;
+        response.goal_intents=[{
+          operation:"propose",goal_kind:"achieve_state",domain:"inquiry",
+          target_descriptor:{label:"查證第二件物品"},
+          motivation_basis_tokens:[goalView.motivation_basis[0].source_token],
+          motivation_relations:["supports"],
+        }];
+      }
+      return response;
+    }}),error=>error?.code===code,
+      `C2 plan validator must reject ${fault} without a partial World write`);
+    const post=await getWorldSimulationState(invalidSid,{fixtureRoot:goalFixtureRoot});
+    const postHistory=await getWorldSimulationHistory(invalidSid,{fixtureRoot:goalFixtureRoot});
+    assert.equal(post.revision,pre.revision);
+    assert.equal(post.state_hash,pre.state_hash);
+    assert.deepEqual(postHistory.turns,preHistory.turns);
+    assert.deepEqual(post.state.event_queue,pre.state.event_queue);
+    assert.equal((post.state.goal_implementation_intention_history??[]).length,0);
+    assert.equal((post.state.motivational_goal_history??[]).length,2);
+    console.log(JSON.stringify({
+      scenario:"c2_eventless_plan_negative",fault,
+      expected_error:code,world_revision_unchanged:true,history_unchanged:true,
+    }));
+  }
+
   // Each invalid decision starts from the same genuine Phase65/66 evidence
   // but in a new isolated Native session. A bad source or context must abort
   // before any state/history mutation, without contaminating the next case.
@@ -754,6 +903,66 @@ try {
       state_revision:post.revision,history_turns:historyPost.turns.length,
     }));
   }
+
+  // A real Phase69A plan intent is also revision-bound. If another World
+  // transaction wins after the Brain saw its committed goal token, the old
+  // plan must never be reinterpreted or committed against the new snapshot.
+  const planRacing=await beginWorldSimulationSession({
+    source_text:"CB-C2 Phase69A plan writer CAS interleaving",
+    characters:Object.keys(baseWorldState.characters),
+    initial_world_state:committedState.state,
+  },{fixtureRoot:goalFixtureRoot});
+  const planRacingSid=planRacing.world_simulation_session_id;
+  let planRaceWinnerCount=0;
+  await assert.rejects(
+    dispatchWorldSimulationAutonomousCognitionOpportunities({
+      world_simulation_session_id:planRacingSid,
+      runtime_context_by_character:planCue,
+    },{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+      const planView=packet.native_plan_decision;
+      assert.equal(planView.committed_goals.length,1);
+      const atIngress=await getWorldSimulationState(
+        planRacingSid,{fixtureRoot:goalFixtureRoot});
+      await commitWorldSimulationTurn(planRacingSid,{
+        expected_revision:atIngress.revision,
+        expected_state_hash:atIngress.state_hash,
+        turn_id:"harness_competing_plan_cas_winner",
+        next_world_state:atIngress.state,
+        event:null,
+        selected_action_intents:[],
+        action_outcomes:[],
+        state_transitions:[],
+      },{fixtureRoot:goalFixtureRoot});
+      planRaceWinnerCount++;
+      return {
+        plan_context_token:planView.context_token,
+        plan_intents:[{
+          goal_token:planView.committed_goals[0].goal_token,
+          cue_descriptor:{cue_kind:"opportunity",label:"timer_doubt_requires_verification"},
+          response_descriptor:{response_kind:"seek_support",label:"ask_trusted_ally"},
+        }],
+      };
+    }}),
+    error=>error?.code==="WORLD_SIMULATION_AUTONOMOUS_GOAL_COMMIT_STALE",
+    "A late competing World revision must reject the old Phase69A plan without partial writes."
+  );
+  const planRaceAfter=await getWorldSimulationState(
+    planRacingSid,{fixtureRoot:goalFixtureRoot});
+  const planRaceHistory=await getWorldSimulationHistory(
+    planRacingSid,{fixtureRoot:goalFixtureRoot});
+  assert.equal(planRaceWinnerCount,1);
+  assert.equal(planRaceAfter.revision,1);
+  assert.equal((planRaceAfter.state.goal_implementation_intention_history??[]).length,0);
+  assert.equal((planRaceAfter.state.motivational_goal_history??[]).length,2);
+  assert.equal(planRaceHistory.turns.length,1);
+  assert.equal(planRaceHistory.turns[0].turn_id,"harness_competing_plan_cas_winner");
+  assert.deepEqual(planRaceAfter.state.event_queue,committedState.state.event_queue);
+  console.log(JSON.stringify({
+    scenario:"c2_eventless_plan_stale_cas",
+    competing_world_commit_count:planRaceWinnerCount,
+    final_revision:planRaceAfter.revision,
+    plan_events:0,c2_stale_plan_rejected:true,
+  }));
 
   // Simulate an unrelated, legitimate World CAS winner after the C2 Brain
   // receives a valid source token but before the C2 goal writer executes.
