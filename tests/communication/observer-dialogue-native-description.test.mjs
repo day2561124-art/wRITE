@@ -214,6 +214,55 @@ async function run(scenario, {controlledClaimProbe = false} = {}) {
         "The unobserving bystander must not inherit the actor's motives.");
       assert.equal(actorView.existing_goals.length, 0,
         "Evidence admission alone must not create any durable goal.");
+
+      // Separate controlled admission: both actors have fixture legacy goals,
+      // so an explicit idle cue lets us compare their same-snapshot C2 views.
+      // This is NOT the independent World-triggered autonomy test below.
+      const beforeDispatch = await getWorldSimulationState(sid, options);
+      const capturedViews = new Map();
+      const controlledDispatch = await dispatchWorldSimulationAutonomousCognitionOpportunities({
+        world_simulation_session_id: sid,
+        runtime_context_by_character: {[actor]: {idle: true}, [other]: {idle: true}},
+      }, {...options, characterBrain: async packet => {
+        capturedViews.set(packet.character, structuredClone(packet));
+        return {disposition: "inspect_without_goal_intent"};
+      }});
+      assert.equal(controlledDispatch.dispatch_count, 2);
+      assert.equal(capturedViews.size, 2);
+      for (const character of [actor, other]) {
+        const input = capturedViews.get(character);
+        const view = input?.native_goal_decision;
+        assert.equal(view?.version, nativeGoalDecisionViewVersion);
+        assert.equal(view.character, character);
+        assert.equal(view.bounded_view_only, true);
+        assert.equal(view.world_truth_exposed, false);
+        assert.equal(view.source_event_ids_exposed, false);
+        assert.equal(view.goal_ids_exposed, false);
+        assert.equal(view.existing_goals.length, 0);
+        assert.equal(input.boundaries.native_goal_decision_world_write_authority, false);
+        assert.equal(input.boundaries.native_goal_decision_intent_submission_supported, false);
+        assert.equal(JSON.stringify(input).includes(
+          controlledDispatch.dispatches.find(row => row.character === character).opportunity_id), false,
+          "C2 goal view must not expose its engine-private scheduler opportunity identity.");
+      }
+      assert.deepEqual(capturedViews.get(actor).native_goal_decision.motivation_basis.map(entry => entry.evidence),
+        actorView.motivation_basis.map(entry => entry.evidence),
+        "C2 must carry the actor's existing real committed Phase68D evidence.");
+      assert.equal(capturedViews.get(other).native_goal_decision.motivation_basis.length, 0,
+        "C2 must not transfer the actor's evidence to an unobserving character.");
+      assert.equal(controlledDispatch.world_mutation_performed, false);
+      assert.equal(controlledDispatch.action_selection_performed, false);
+      assert.equal(controlledDispatch.durable_cognitive_write_performed, false);
+      const afterDispatch = await getWorldSimulationState(sid, options);
+      assert.equal(afterDispatch.revision, beforeDispatch.revision);
+      assert.equal(afterDispatch.state_hash, beforeDispatch.state_hash);
+      console.log(JSON.stringify({
+        scenario: "controlled_c2_goal_view_readonly",
+        actor_basis_count: capturedViews.get(actor).native_goal_decision.motivation_basis.length,
+        bystander_basis_count: capturedViews.get(other).native_goal_decision.motivation_basis.length,
+        world_revision_unchanged: true,
+        autonomous_goal_formation_tested: false,
+      }));
       return;
     }
     async function runExchange(suffix) {
@@ -427,9 +476,10 @@ async function run(scenario, {controlledClaimProbe = false} = {}) {
           .filter(ref => ref.character === actor).length,
       }));
 
-      // RED C2→C3 bridge: the same real-world evidence must reach the
-      // character's bounded motivational decision interface. Do not invent a
-      // pending cue, inject a current_goal, or choose a ready-made action.
+      // Independently triggered C2→C3 view: no new goal, idle cue, or
+      // caller-supplied investigation action. This does not require the
+      // unassisted actor to have a nonempty Phase68D evidence catalog.
+      const beforeThought = await getWorldSimulationState(sid, options);
       const cognitivePackets = [];
       const thought = await dispatchWorldSimulationAutonomousCognitionOpportunities({
         world_simulation_session_id: sid,
@@ -466,8 +516,14 @@ async function run(scenario, {controlledClaimProbe = false} = {}) {
       assert.equal(ownMind.boundaries.native_goal_decision_explicit_intent_only, true);
       assert.equal(ownMind.boundaries.native_goal_decision_world_write_authority, false);
       assert.equal(ownMind.boundaries.native_goal_decision_action_authority, false);
+      assert.equal(ownMind.boundaries.native_goal_decision_intent_submission_supported, false);
+      assert.deepEqual(goalView.motivation_basis.map(entry => entry.evidence),
+        directGoalView.motivation_basis.map(entry => entry.evidence));
       assert.equal(thought.durable_cognitive_write_performed, false,
         "Providing a C3 decision view alone must not silently commit any goal.");
+      const afterThought = await getWorldSimulationState(sid, options);
+      assert.equal(afterThought.revision, beforeThought.revision);
+      assert.equal(afterThought.state_hash, beforeThought.state_hash);
     }
     assert.equal(learned(final).length, conflict || encodedPanel ? 3 : 2);
     assert.ok(!final.memories[other].some(memory => memory.internal_provenance?.dialogue_learning_version === observerDialogueLearningVersion));
@@ -479,8 +535,8 @@ async function run(scenario, {controlledClaimProbe = false} = {}) {
 }
 
 const selectedScenario = process.argv[2] ?? process.env.DIALOGUE_CLARIFICATION_CASE;
-// Run this isolated controlled pathway before the independent known C2 RED,
-// so the first failure has an unambiguous boundary.
+// Run the isolated controlled conversion and readonly view test before
+// the independent World-triggered C2→C3 acceptance test.
 if (!selectedScenario || selectedScenario === "controlled_claim_probe") {
   await run("conflict_speech", {controlledClaimProbe: true});
 }
