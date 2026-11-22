@@ -369,7 +369,9 @@ async function run(scenario, {controlledClaimProbe = false, nativeClaimChoice = 
         assert.equal(view.goal_ids_exposed, false);
         assert.equal(view.existing_goals.length, 0);
         assert.equal(input.boundaries.native_goal_decision_world_write_authority, false);
-        assert.equal(input.boundaries.native_goal_decision_intent_submission_supported, false);
+        assert.equal(input.boundaries.native_goal_decision_intent_submission_supported, true);
+        // Explicit intent submission now uses Phase68D/CAS, but this read-only
+        // inspection returns none and must still make zero durable writes.
         assert.equal(JSON.stringify(input).includes(
           controlledDispatch.dispatches.find(row => row.character === character).opportunity_id), false,
           "C2 goal view must not expose its engine-private scheduler opportunity identity.");
