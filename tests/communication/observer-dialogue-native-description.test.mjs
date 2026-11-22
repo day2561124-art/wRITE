@@ -24,7 +24,7 @@ const secondFact = "它最多能倒數四十分鐘。";
 const question = "白色計時器能倒數多久？";
 const prompt = "你指的是哪一件？";
 const shortReply = "架上那台。";
-async function run(scenario, {controlledClaimProbe = false} = {}) {
+async function run(scenario, {controlledClaimProbe = false, nativeClaimChoice = false} = {}) {
   const temp = path.join(projectRoot, "tests", ".tmp");
   await mkdir(temp, {recursive: true});
   const fixtureRoot = await mkdtemp(path.join(temp, "native-description-clarification-"));
@@ -142,11 +142,54 @@ async function run(scenario, {controlledClaimProbe = false} = {}) {
         proposition: "我聽見架上白色計時器最多倒數六十分鐘的說法。"},
     ];
     const capturedClaimSources = [];
+    const nativeInterpretationVisits = [];
+    let selectedNativeClaimCount = 0;
     for (const id of ["observe1", "observe2", ...(conflict ? ["conflict"] : [])]) {
       const probe = controlledClaimProbe ? claimProbe.find(entry => entry.event === id) : null;
       assert.ok((await runWorldSimulationTurn(input(id), {
         ...options,
-        characterBrain: async () => "reject_all",
+        characterBrain: async packet => {
+          if (!nativeClaimChoice) return "reject_all";
+          const view = packet.native_subjective_claim_decision;
+          if (!view) {
+            // An ordinary action reply can request post-encoding interpretation
+            // without selecting a physical action. The first experience is
+            // deliberately left uninterpreted; asking is not compulsory.
+            return packet.character === actor && id !== "observe1"
+              ? {action_id: "reject_all", request_subjective_claim_interpretation: true}
+              : "reject_all";
+          }
+          assert.equal(packet.character, actor, "Only the requesting character receives the interpretation input.");
+          assert.equal(view.character, actor);
+          assert.equal(view.bounded_view_only, true);
+          assert.equal(view.world_truth_exposed, false);
+          assert.equal(view.durable_write_authority, false);
+          assert.equal(view.action_selection_requested, false);
+          assert.equal(view.source_memory_ids_exposed, false);
+          assert.equal(typeof view.context_token, "string");
+          assert.equal(id === "observe1", false, "A turn declining interpretation must not be forced into it.");
+          assert.equal(JSON.stringify(view).includes("internal_provenance"), false);
+          assert.equal(JSON.stringify(view).includes("source_memory_ref"), false);
+          const observation = claimProbe.find(entry => entry.event === id);
+          const matches = view.memory_sources.filter(memory =>
+            memory.source?.sense === observation.sense
+              && memory.subjective_memory_not_world_truth === true
+              && JSON.stringify(memory.content).includes(observation.fragment));
+          assert.ok(matches.length, "Only actual current-turn same-character encoded evidence may support an interpretation.");
+          nativeInterpretationVisits.push({event: id, character: packet.character});
+          // The actor is free to notice the visual evidence without adopting
+          // a proposition. It explicitly forms a source-scoped claim only
+          // about the later heard statement.
+          if (id === "observe2") return {claim_context_token: view.context_token, claim_intents: []};
+          selectedNativeClaimCount += 1;
+          return {
+            claim_context_token: view.context_token,
+            claim_intents: [{
+              proposition: observation.proposition,
+              evidence: [{source_token: matches[0].source_token, relation: "supports"}],
+            }],
+          };
+        },
         ...(probe ? {subjectiveClaimResolver: async view => {
           assert.equal(view.boundaries.current_turn_new_subjective_memories_only, true);
           assert.equal(view.boundaries.world_state_exposed, false);
@@ -179,6 +222,37 @@ async function run(scenario, {controlledClaimProbe = false} = {}) {
     assert.equal(before.length, conflict ? 3 : 2);
     assert.equal(before[1].source.sense, scenario === "heard_speech" ? "auditory" : "visual");
     assert.notEqual(before[0].content.referent_id, before[1].content.referent_id);
+    if (nativeClaimChoice) {
+      const ownClaims = (beforeState.subjective_claim_history ?? []).filter(ref => ref.character === actor);
+      const ownRevisions = (beforeState.subjective_belief_revision_history ?? []).filter(ref => ref.character === actor);
+      const actorView = buildWorldSimulationNativeGoalDecisionView({
+        world_state: beforeState, character: actor, turn_id: "native_claim_choice_followup",
+      });
+      const otherView = buildWorldSimulationNativeGoalDecisionView({
+        world_state: beforeState, character: other, turn_id: "native_claim_choice_followup",
+      });
+      console.log(JSON.stringify({
+        scenario: "native_subjective_claim_handoff",
+        learned_dialogue_memories: before.length,
+        requested_interpretation_turns: 2,
+        actual_interpretation_callbacks: nativeInterpretationVisits.length,
+        explicitly_selected_claims: selectedNativeClaimCount,
+        committed_claims: ownClaims.length,
+        committed_belief_revisions: ownRevisions.length,
+        own_goal_basis_count: actorView.motivation_basis.length,
+        other_goal_basis_count: otherView.motivation_basis.length,
+      }));
+      assert.deepEqual(nativeInterpretationVisits.map(visit => visit.event), ["observe2", "conflict"],
+        "Native Phase65 gap: requested interpretation of real newly encoded evidence must reach the same Character Brain without a caller-supplied subjectiveClaimResolver.");
+      assert.equal(selectedNativeClaimCount, 1);
+      assert.equal(ownClaims.length, 1, "Only the explicitly authored claim may be committed.");
+      assert.equal(ownRevisions.length, 1);
+      assert.equal(actorView.motivation_basis.length, 1);
+      assert.equal(otherView.motivation_basis.length, 0);
+      assert.equal(actorView.existing_goals.length, 0);
+      assert.equal((beforeState.subjective_claim_history ?? []).some(ref => ref.character !== actor), false);
+      return;
+    }
     if (controlledClaimProbe) {
       assert.equal(conflict, true);
       assert.equal(before[1].content.referent_id, before[2].content.referent_id,
@@ -540,7 +614,10 @@ const selectedScenario = process.argv[2] ?? process.env.DIALOGUE_CLARIFICATION_C
 if (!selectedScenario || selectedScenario === "controlled_claim_probe") {
   await run("conflict_speech", {controlledClaimProbe: true});
 }
-if (selectedScenario !== "controlled_claim_probe") {
+if (!selectedScenario || selectedScenario === "native_claim_choice") {
+  await run("conflict_speech", {nativeClaimChoice: true});
+}
+if (!["controlled_claim_probe", "native_claim_choice"].includes(selectedScenario)) {
   await Promise.all((selectedScenario ? [selectedScenario] : ["recalled_speech", "historical_panel_speech", "conflict_speech"])
     .map(scenario => run(scenario)));
 }
