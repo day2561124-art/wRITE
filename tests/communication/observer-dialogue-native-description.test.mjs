@@ -24,7 +24,7 @@ const secondFact = "它最多能倒數四十分鐘。";
 const question = "白色計時器能倒數多久？";
 const prompt = "你指的是哪一件？";
 const shortReply = "架上那台。";
-async function run(scenario) {
+async function run(scenario, {controlledClaimProbe = false} = {}) {
   const temp = path.join(projectRoot, "tests", ".tmp");
   await mkdir(temp, {recursive: true});
   const fixtureRoot = await mkdtemp(path.join(temp, "native-description-clarification-"));
@@ -130,13 +130,92 @@ async function run(scenario) {
     const input = event_id => ({world_simulation_session_id: sid, event_id});
     const learned = state => state.memories[actor]
       .filter(memory => memory.internal_provenance?.dialogue_learning_version === observerDialogueLearningVersion);
+    // Explicitly *controlled* Phase65/66 pathway test, not autonomy evidence.
+    // No memory, claim, belief, or goal is inserted into initial_world_state.
+    // The resolver may cite only the engine's actual current-turn same-actor
+    // subjective evidence. Preserve source modality: two statements about
+    // what was seen/heard are NOT two verified timer specifications.
+    const claimProbe = [
+      {event: "observe2", fragment: "四十分鐘", sense: "visual",
+        proposition: "我看見架上白色計時器有最多倒數四十分鐘的資訊。"},
+      {event: "conflict", fragment: "六十分鐘", sense: "auditory",
+        proposition: "我聽見架上白色計時器最多倒數六十分鐘的說法。"},
+    ];
+    const capturedClaimSources = [];
     for (const id of ["observe1", "observe2", ...(conflict ? ["conflict"] : [])]) {
-      assert.ok((await runWorldSimulationTurn(input(id), {...options, characterBrain: async () => "reject_all"})).committed);
+      const probe = controlledClaimProbe ? claimProbe.find(entry => entry.event === id) : null;
+      assert.ok((await runWorldSimulationTurn(input(id), {
+        ...options,
+        characterBrain: async () => "reject_all",
+        ...(probe ? {subjectiveClaimResolver: async view => {
+          assert.equal(view.boundaries.current_turn_new_subjective_memories_only, true);
+          assert.equal(view.boundaries.world_state_exposed, false);
+          const evidence = view.character_evidence.find(entry => entry.character === actor);
+          const matches = (evidence?.memories ?? []).filter(memory =>
+            memory.source?.sense === probe.sense
+              && memory.subjective_memory_not_world_truth === true
+              && JSON.stringify(memory.content).includes(probe.fragment));
+          console.log(JSON.stringify({
+            scenario: "controlled_phase65_source_probe",
+            event: id, actor_memory_count: evidence?.memories?.length ?? 0,
+            matching_source_count: matches.length,
+            seen_source_senses: (evidence?.memories ?? []).map(memory => memory.source?.sense),
+          }));
+          // Returning [] remains legal if the engine did not expose the
+          // evidence. The post-commit assertions will locate that gap.
+          if (!matches.length) return [];
+          const source = matches[0];
+          capturedClaimSources.push({event: id, source_memory_ref: source.source_memory_ref});
+          return [{
+            proposal_ref: "test_control_" + id, character: actor,
+            proposition: probe.proposition,
+            evidence: [{source_memory_ref: source.source_memory_ref, relation: "supports"}],
+          }];
+        }} : {}),
+      })).committed);
     }
-    const before = learned((await getWorldSimulationState(sid, options)).state);
+    const beforeState = (await getWorldSimulationState(sid, options)).state;
+    const before = learned(beforeState);
     assert.equal(before.length, conflict ? 3 : 2);
     assert.equal(before[1].source.sense, scenario === "heard_speech" ? "auditory" : "visual");
     assert.notEqual(before[0].content.referent_id, before[1].content.referent_id);
+    if (controlledClaimProbe) {
+      assert.equal(conflict, true);
+      assert.equal(before[1].content.referent_id, before[2].content.referent_id,
+        "The conflicting observations concern the same shelf timer.");
+      const ownClaims = (beforeState.subjective_claim_history ?? [])
+        .filter(ref => ref.character === actor);
+      const ownRevisions = (beforeState.subjective_belief_revision_history ?? [])
+        .filter(ref => ref.character === actor);
+      const actorView = buildWorldSimulationNativeGoalDecisionView({
+        world_state: beforeState, character: actor, turn_id: "controlled_future_goal_view",
+      });
+      const bystanderView = buildWorldSimulationNativeGoalDecisionView({
+        world_state: beforeState, character: other, turn_id: "controlled_future_goal_view",
+      });
+      console.log(JSON.stringify({
+        scenario: "controlled_phase65_66_68d_bridge",
+        learned_dialogue_memories: before.length,
+        resolver_evidence_selected: capturedClaimSources.length,
+        actor_claim_refs: ownClaims.length,
+        actor_belief_revision_refs: ownRevisions.length,
+        actor_goal_basis_count: actorView.motivation_basis.length,
+        bystander_goal_basis_count: bystanderView.motivation_basis.length,
+        actor_existing_goals_count: actorView.existing_goals.length,
+        autonomous_interpretation_tested: false,
+      }));
+      assert.equal(capturedClaimSources.length, 2,
+        "Phase65 resolver must see both actual same-character timer observations, each on its own source turn.");
+      assert.ok(ownClaims.length >= 2, "Phase65 authoritative claim writer must persist selected claims.");
+      assert.ok(ownRevisions.length >= 2, "Phase66 must retain actual belief revision lineage for these source-scoped claims.");
+      assert.ok(actorView.motivation_basis.length >= 2,
+        "Existing Phase68D must provide the actor legal committed belief-based evidence.");
+      assert.equal(bystanderView.motivation_basis.length, 0,
+        "The unobserving bystander must not inherit the actor's motives.");
+      assert.equal(actorView.existing_goals.length, 0,
+        "Evidence admission alone must not create any durable goal.");
+      return;
+    }
     async function runExchange(suffix) {
       const previousReading = historical && Boolean(suffix);
       const wantedSpeech = previousReading
@@ -400,4 +479,12 @@ async function run(scenario) {
 }
 
 const selectedScenario = process.argv[2] ?? process.env.DIALOGUE_CLARIFICATION_CASE;
-await Promise.all((selectedScenario ? [selectedScenario] : ["recalled_speech", "historical_panel_speech", "conflict_speech"]).map(run));
+// Run this isolated controlled pathway before the independent known C2 RED,
+// so the first failure has an unambiguous boundary.
+if (!selectedScenario || selectedScenario === "controlled_claim_probe") {
+  await run("conflict_speech", {controlledClaimProbe: true});
+}
+if (selectedScenario !== "controlled_claim_probe") {
+  await Promise.all((selectedScenario ? [selectedScenario] : ["recalled_speech", "historical_panel_speech", "conflict_speech"])
+    .map(scenario => run(scenario)));
+}
