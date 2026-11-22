@@ -278,8 +278,10 @@ function buildOpportunity({
     character: characterKey(character),
     trigger_kinds: triggerKinds,
     evidence_refs: evidenceRefs,
-    goal_refs: goalRefs,
-    plan_refs: planRefs,
+    // Relevant goal/plan identity is already encoded by the trigger's
+    // evidence_ref (idle goals, challenged plans, applicable plans). Do not
+    // let unrelated newly written plans mint a fresh opportunity for an
+    // unchanged memory or temporal cue after its prior one was consumed.
   }).slice(0, 32)}`;
   return {
     version: worldSimulationAutonomousCognitionOpportunityVersion,
