@@ -837,6 +837,100 @@ try {
     assert.deepEqual(postHistory.turns,preHistory.turns);
   }
 
+  // Actor-originated action must lose a CAS race instead of replaying an
+  // old choice, even if its cognition and chosen candidate were valid.
+  const autonomousRace=await beginWorldSimulationSession({
+    source_text:"CB-C4 actor speech competing World commit",
+    characters:Object.keys(spontaneousWorld.characters),
+    initial_world_state:spontaneousWorld,
+  },{fixtureRoot:goalFixtureRoot});
+  const autonomousRaceSid=autonomousRace.world_simulation_session_id;
+  let actorRaceWinnerCount=0;
+  await assert.rejects(runWorldSimulationActorInitiatedSpeech({
+    world_simulation_session_id:autonomousRaceSid,character,
+    runtime_context_by_character:planCue,
+  },{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+    if(packet.cognition.implementation_intention_activation){
+      const activation=packet.cognition.implementation_intention_activation;
+      return {
+        plan_activation_context_token:activation.context_token,
+        activated_plan_tokens:[activation.plans[0].plan_token],
+      };
+    }
+    const atIngress=await getWorldSimulationState(
+      autonomousRaceSid,{fixtureRoot:goalFixtureRoot});
+    await commitWorldSimulationTurn(autonomousRaceSid,{
+      expected_revision:atIngress.revision,
+      expected_state_hash:atIngress.state_hash,
+      turn_id:"harness_cb_c4_competing_world_winner",
+      next_world_state:atIngress.state,event:null,
+      selected_action_intents:[],action_outcomes:[],state_transitions:[],
+    },{fixtureRoot:goalFixtureRoot});
+    actorRaceWinnerCount++;
+    return {action_id:speechCandidate.action_id};
+  }}),error=>error?.code==="CB_C4_WORLD_STATE_STALE");
+  const autonomousRaceAfter=await getWorldSimulationState(
+    autonomousRaceSid,{fixtureRoot:goalFixtureRoot});
+  const autonomousRaceHistory=await getWorldSimulationHistory(
+    autonomousRaceSid,{fixtureRoot:goalFixtureRoot});
+  assert.equal(actorRaceWinnerCount,1);
+  assert.equal(autonomousRaceAfter.revision,1);
+  assert.equal(autonomousRaceHistory.turns.length,1);
+  assert.equal(autonomousRaceHistory.turns[0].turn_id,
+    "harness_cb_c4_competing_world_winner");
+  assert.equal((autonomousRaceHistory.turns[0].action_outcomes??[]).length,0);
+  console.log(JSON.stringify({
+    scenario:"c2_eventless_actor_stale_cas",
+    competing_world_commit_count:actorRaceWinnerCount,
+    causal_speech_outcomes:0,old_actor_action_rejected:true,
+  }));
+
+  // The action must not bypass an existing queued event or address someone
+  // absent from its one committed scene. Neither failure creates a World turn.
+  for (const fault of ["external_event_pending","recipient_not_colocated"]) {
+    const guardedWorld=structuredClone(spontaneousWorld);
+    if(fault==="external_event_pending") {
+      guardedWorld.event_queue=[{
+        event_id:"cb_c4_prior_queued_world_event",type:"observation",
+        scene_id:actionScene,participants:[character],
+      }];
+    } else {
+      delete guardedWorld.scenes[actionScene].entity_positions[inquiryAlly];
+    }
+    const guarded=await beginWorldSimulationSession({
+      source_text:"CB-C4 guarded scenario "+fault,
+      characters:Object.keys(guardedWorld.characters),
+      initial_world_state:guardedWorld,
+    },{fixtureRoot:goalFixtureRoot});
+    const guardedSid=guarded.world_simulation_session_id;
+    const guardedBefore=await getWorldSimulationState(
+      guardedSid,{fixtureRoot:goalFixtureRoot});
+    const guardedHistoryBefore=await getWorldSimulationHistory(
+      guardedSid,{fixtureRoot:goalFixtureRoot});
+    let called=0;
+    const runGuard=()=>runWorldSimulationActorInitiatedSpeech({
+      world_simulation_session_id:guardedSid,character,
+      runtime_context_by_character:planCue,
+    },{fixtureRoot:goalFixtureRoot,characterBrain:async ()=>{
+      called++;return {action_id:speechCandidate.action_id};
+    }});
+    if(fault==="external_event_pending"){
+      await assert.rejects(runGuard(),error=>error?.code==="CB_C4_EXTERNAL_EVENT_PENDING");
+    }else{
+      const blocked=await runGuard();
+      assert.equal(blocked.status,"no_grounded_speech_candidate");
+      assert.equal(blocked.committed,false);
+    }
+    const guardedAfter=await getWorldSimulationState(
+      guardedSid,{fixtureRoot:goalFixtureRoot});
+    const guardedHistoryAfter=await getWorldSimulationHistory(
+      guardedSid,{fixtureRoot:goalFixtureRoot});
+    assert.equal(called,0);
+    assert.equal(guardedAfter.revision,guardedBefore.revision);
+    assert.equal(guardedAfter.state_hash,guardedBefore.state_hash);
+    assert.deepEqual(guardedHistoryAfter.turns,guardedHistoryBefore.turns);
+  }
+
   const actionSession=await beginWorldSimulationSession({
     source_text:"C2 eventless plan followed by source-declared World observation fixture",
     characters:Object.keys(actionWorld.characters),
