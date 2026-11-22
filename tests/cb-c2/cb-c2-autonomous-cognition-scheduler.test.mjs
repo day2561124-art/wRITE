@@ -617,7 +617,7 @@ try {
   const multiRevision=buildWorldSimulationSubjectiveBeliefRevisions({
     world_state:multiState,turn_id:sourceTurn,resolution:multiResolution.result,
   });
-  multiState=executeFixture(multiState,"multi_subjective_belief_revision",multiRevision);
+  multiState=executeFixture(multiState,"subjective_belief_revision",multiRevision);
   assert.equal(multiState.subjective_belief_revision_history.length,2);
   const multiRuntime={
     [character]:{idle:true},
