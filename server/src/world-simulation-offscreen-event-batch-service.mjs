@@ -1,8 +1,9 @@
-import { getWorldSimulationState } from "./world-simulation-state-service.mjs";
+import { getWorldSimulationState, getWorldSimulationHistory } from "./world-simulation-state-service.mjs";
 import { runWorldSimulationTurn } from "./world-simulation-loop-service.mjs";
 import { runWorldSimulationOffscreenPhysicalStep } from "./world-simulation-offscreen-physical-step-service.mjs";
 import { runWorldSimulationOffscreenMultiSceneFieldStep, runWorldSimulationOffscreenMultiSceneFieldDamageStep } from "./world-simulation-offscreen-multiscene-field-step-service.mjs";
 import { runWorldSimulationOffscreenDualProjectileContact } from "./world-simulation-offscreen-dual-projectile-contact-service.mjs";
+import { runWorldSimulationOffscreenStaggeredProjectileStep } from "./world-simulation-offscreen-staggered-projectile-step-service.mjs";
 import {
   projectWorldSimulationOffscreenBreakpoint,
 } from "./world-simulation-offscreen-breakpoint-service.mjs";
@@ -128,6 +129,17 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
       : report(emptyStatus);
   };
 
+  const hasVerifiedStaggeredContinuationShape = state => {
+    const projectiles = Object.values(state.projectiles ?? {});
+    const scenes = Object.entries(state.scenes ?? {});
+    return scenes.length === 2 && projectiles.length === 2
+      && projectiles.filter(item => item?.active === true).length === 1
+      && projectiles.filter(item => item?.active !== true
+        && item?.termination_reason === "character_contact").length === 1
+      && scenes.every(([id, scene]) => scene?.scene_id === id
+        && scene?.simulation_time === state.simulation_time);
+  };
+
   const isCurrentProjectileEffect = discovery => discovery.earliest_breakpoint_confirmed
     && discovery.breakpoint?.delta_ms === 0
     && ["projectile_lifetime", "projectile_bounds", "projectile_character"].includes(discovery.breakpoint.kind);
@@ -173,14 +185,33 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
           expected_revision: snapshot.revision, expected_state_hash: snapshot.state_hash,
           ...(target === null ? {} : { target_horizon: target }),
         };
-        result = await runWorldSimulationOffscreenPhysicalStep(physicalInput, options);
+        const physicalOnlyOptions = { ...options };
+        delete physicalOnlyOptions.characterBrain;
+        // A staggered continuation has a concrete history receipt from the
+        // previous physical frontier; keep both scene clocks synchronized on
+        // the second hit rather than using the generic one-active-scene writer.
+        if (hasVerifiedStaggeredContinuationShape(snapshot.state)) {
+          const history = await getWorldSimulationHistory(sessionId, options);
+          const latest = history.turns?.at(-1);
+          const ended = Object.values(snapshot.state.projectiles)
+            .find(item => item?.active !== true);
+          const proof = latest?.event?.type === "offscreen_multiscene_projectile_staggered_step"
+            && latest.next_state_hash === snapshot.state_hash
+            && latest.action_outcomes?.some(item =>
+              item.result === "projectile_hit_character"
+              && item.projectile_id === ended?.projectile_id);
+          if (proof) {
+            const continuation = await runWorldSimulationOffscreenStaggeredProjectileStep(
+              physicalInput, physicalOnlyOptions);
+            if (continuation.committed === true) result = continuation;
+          }
+        }
+        if (!result) result = await runWorldSimulationOffscreenPhysicalStep(physicalInput, options);
         // Only an explicit scene-scope refusal may enter the strictly bounded
         // two-harmless-field-scene owner. Keep all existing noncommitted
         // reasons unchanged when that owner also refuses admission.
         if (result.committed !== true
             && result.blocked_reason === "physical_step_scene_scope_unresolved") {
-          const physicalOnlyOptions = { ...options };
-          delete physicalOnlyOptions.characterBrain;
           const scoped = await runWorldSimulationOffscreenMultiSceneFieldStep(
             physicalInput, physicalOnlyOptions);
           if (scoped.committed === true) {
@@ -198,7 +229,16 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
             // Every other projectile pattern retains the canonical refusal.
             const dualContact = await runWorldSimulationOffscreenDualProjectileContact(
               physicalInput, physicalOnlyOptions);
-            if (dualContact.committed === true) result = dualContact;
+            if (dualContact.committed === true) {
+              result = dualContact;
+            } else if (dualContact.blocked_reason === "simultaneous_independent_contacts_required") {
+              // Different-time contacts require one World frontier per hit:
+              // first contact + later in-flight state, then a verified
+              // history-backed continuation at the next physical breakpoint.
+              const staggered = await runWorldSimulationOffscreenStaggeredProjectileStep(
+                physicalInput, physicalOnlyOptions);
+              if (staggered.committed === true) result = staggered;
+            }
           }
         }
         eventId = result.turn_id ?? null;
