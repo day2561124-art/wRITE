@@ -830,7 +830,22 @@ try {
   });
   assert.equal(acousticCandidate.communication.surface_realization_complete,true);
   const acousticWorld=structuredClone(spontaneousWorld);
-  acousticWorld.available_actions[character]=[acousticCandidate];
+  const followupContent="你需要我再說一次計時器的上限嗎";
+  const followupCandidate=buildCharacterCommunicationActionCandidate({
+    character,cognition:{communication_goal:{
+      character,purpose:"request_information",mode:"direct",
+      addressee:inquiryAlly,public_content:followupContent,
+      surface_realization:{
+        schema_version:"cc5-mandarin-clause-request-v1",
+        semantic_anchor:followupContent,
+        clause:{subject:"你",predicate:"需要我再說一次",
+          object:"計時器的上限",sentence_final_particle:"嗎"},
+      },
+    }},
+  });
+  assert.equal(followupCandidate.communication.surface_realization_complete,true);
+  assert.notEqual(followupCandidate.action_id,acousticCandidate.action_id);
+  acousticWorld.available_actions[character]=[acousticCandidate,followupCandidate];
   // The listener has a pre-existing World-trusted clarification action.
   // It is not generated from the unheard transcript or selected by World.
   const clarificationWords="你能再說一次剛剛那句話嗎";
@@ -1793,6 +1808,99 @@ try {
     world_beliefs_unchanged:true,source_history_preserved:true,
     world_truth_claimed:false,
   }));
+
+  // Next actor-owned, eventless World speech must expose only prior-turn
+  // Phase66C beliefs. Compare two independent authentic A→B→A histories:
+  // one Brain adopted its uncertain guess, the other chose do_not_propose.
+  // The same two grounded World action candidates remain available in both.
+  const followupCue={
+    [character]:{pending_internal_cues:[{
+      kind:"memory_reactivation",
+      source_ref:"next_turn_private_reply_interpretation_reconsideration",
+    }]},
+  };
+  const followupChoices=[
+    {sid:acousticSid,expectedAction:followupCandidate.action_id,
+      beliefExpected:true,label:"adopted_uncertain_belief"},
+    {sid:noClaimSid,expectedAction:acousticCandidate.action_id,
+      beliefExpected:false,label:"explicit_claim_decline"},
+  ];
+  for(const policy of followupChoices){
+    const beforeAction=await getWorldSimulationState(
+      policy.sid,{fixtureRoot:goalFixtureRoot});
+    const historyBeforeAction=await getWorldSimulationHistory(
+      policy.sid,{fixtureRoot:goalFixtureRoot});
+    let planViews=0,choiceViews=0;
+    const followup=await runWorldSimulationActorInitiatedSpeech({
+      world_simulation_session_id:policy.sid,character,
+      runtime_context_by_character:followupCue,
+    },{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+      assert.equal(packet.character,character);
+      const beliefs=packet.cognition.subjective_cognition;
+      assert.ok(beliefs);
+      assert.equal(beliefs.belief_source,
+        "committed_prior_turn_effective_subjective_belief_projection");
+      assert.equal(beliefs.beliefs_truncated,false);
+      assert.equal(Array.isArray(beliefs.beliefs),true);
+      assert.equal(beliefs.beliefs.some(item=>
+        item.proposition===subjectiveProposition
+        && item.commitment==="active"
+        && item.subjective_not_world_truth===true),policy.beliefExpected);
+      assert.equal(packet.boundaries.world_truth_exposed,false);
+      assert.equal(packet.boundaries.belief_is_not_world_truth,true);
+      assert.equal(packet.boundaries.same_turn_belief_feedback_allowed,false);
+      if(packet.cognition?.implementation_intention_activation){
+        planViews++;
+        const v=packet.cognition.implementation_intention_activation;
+        assert.ok(v.plans.length>0);
+        return {
+          plan_activation_context_token:v.context_token,
+          activated_plan_tokens:[v.plans[0].plan_token],
+        };
+      }
+      choiceViews++;
+      assert.equal(packet.boundaries.belief_can_expand_action_catalog,false);
+      assert.ok(packet.candidate_action_intents.some(item=>
+        item.action_id===acousticCandidate.action_id));
+      assert.ok(packet.candidate_action_intents.some(item=>
+        item.action_id===followupCandidate.action_id));
+      return {action_id:policy.expectedAction};
+    }});
+    assert.equal(planViews,1,policy.label+" requires a genuine plan activation");
+    assert.equal(choiceViews,1,policy.label+" requires a Brain-owned action choice");
+    assert.equal(followup.committed,true,
+      policy.label+" must make a real World action rather than a projected choice");
+    const afterAction=await getWorldSimulationState(
+      policy.sid,{fixtureRoot:goalFixtureRoot});
+    const historyAfterAction=await getWorldSimulationHistory(
+      policy.sid,{fixtureRoot:goalFixtureRoot});
+    assert.equal(afterAction.revision,beforeAction.revision+1);
+    assert.deepEqual(historyAfterAction.turns.slice(0,-1),historyBeforeAction.turns);
+    const performed=historyAfterAction.turns.at(-1);
+    assert.equal(performed.selected_action_intents.length,1);
+    assert.equal(performed.selected_action_intents[0].action_id,
+      policy.expectedAction);
+    assert.equal(performed.action_outcomes.some(item=>
+      item.actor===character
+      && item.action_id===policy.expectedAction
+      && item.result==="communication_emitted"),true);
+    assert.equal(performed.event,null);
+    assert.deepEqual(afterAction.state.subjective_belief_revision_events??null,
+      beforeAction.state.subjective_belief_revision_events??null);
+    assert.deepEqual(afterAction.state.subjective_claim_events??null,
+      beforeAction.state.subjective_claim_events??null);
+    assert.deepEqual(afterAction.state.memories??null,
+      beforeAction.state.memories??null);
+    console.log(JSON.stringify({
+      scenario:"world_reply_subjective_belief_conditioned_actor_speech",
+      policy:policy.label,belief_exposed:policy.beliefExpected,
+      plan_brain_invoked:true,action_brain_invoked:true,
+      action_selected:policy.expectedAction,
+      causal_world_speech_committed:true,
+      belief_is_not_world_truth:true,
+      cross_turn_source_unchanged:true,
+    }));
+  }
 
   // Negative control: a genuine source hearing opportunity is insufficient
   // to force a public reply. A Brain decline, forged action and Runtime
