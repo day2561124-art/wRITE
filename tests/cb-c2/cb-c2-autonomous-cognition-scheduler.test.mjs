@@ -26,6 +26,8 @@ import { nativeImplementationIntentionActivationCapability } from "../../server/
 import { buildWorldSimulationSubjectiveClaims } from "../../server/src/world-simulation-subjective-claim-projection-service.mjs";
 import { resolveWorldSimulationSubjectiveBeliefs } from "../../server/src/world-simulation-subjective-belief-resolution-service.mjs";
 import { buildWorldSimulationSubjectiveBeliefRevisions } from "../../server/src/world-simulation-subjective-belief-revision-service.mjs";
+import { projectWorldSimulationSubjectiveBeliefsForCharacter }
+  from "../../server/src/world-simulation-subjective-belief-character-projection-service.mjs";
 import {
   buildWorldSimulationChronologicalMutationQueue,
   executeWorldSimulationChronologicalMutationQueue,
@@ -1296,6 +1298,8 @@ try {
   // only if the same original speaker's Brain independently chooses encoding.
   // Refusal cannot create a token memory or World revision.
   const interpretedPhrase="我認為對方只是想讓我重新說一次，還不知道原因";
+  const subjectiveProposition="我猜剛剛的回應是希望我再次說明，而不是已經認同我。";
+  let claimOpportunities=0;
   let encodingChoices=0;
   const memoryBrainFor=decision=>async packet=>{
     if(packet.cognition?.committed_acoustic_observation)
@@ -1313,6 +1317,17 @@ try {
         interpreted_interaction_function:"request_repeat",
         understanding_attested:true,
       };
+    if(packet.cognition?.subjective_reply_claim_opportunity){
+      claimOpportunities++;
+      assert.equal(packet.character,character);
+      assert.equal(packet.cognition.subjective_reply_claim_opportunity.own_interpretation,
+        interpretedPhrase);
+      assert.equal(packet.cognition.subjective_reply_claim_opportunity.possibly_incorrect,true);
+      assert.equal(packet.boundaries.world_state_exposed,false);
+      assert.equal(packet.boundaries.direct_belief_write_authority,false);
+      return {decision:"propose_and_adopt_if_unopposed",
+        proposition:subjectiveProposition};
+    }
     if(packet.cognition?.subjective_reply_memory_candidate){
       encodingChoices++;
       const view=packet.cognition.subjective_reply_memory_candidate;
@@ -1340,14 +1355,17 @@ try {
   assert.deepEqual(beforeMemoryHistory.turns,replyHistory.turns);
 
   const encodedReply=await runWorldSimulationCommittedReplySubjectiveMemory(
-    speakerIngressInput,{fixtureRoot:goalFixtureRoot,
+    {...speakerIngressInput,enable_subjective_reply_claim:true},{fixtureRoot:goalFixtureRoot,
       characterBrain:memoryBrainFor("encode")});
   assert.equal(encodingChoices,2);
+  assert.equal(claimOpportunities,1);
   assert.equal(encodedReply.committed,true);
   assert.equal(encodedReply.memory_encoded,true);
   assert.equal(encodedReply.possibly_incorrect,true);
   assert.equal(encodedReply.fully_consolidated,false);
-  assert.equal(encodedReply.belief_revised,false);
+  assert.equal(encodedReply.belief_revised,true);
+  assert.equal(encodedReply.subjective_claim_adopted,true);
+  assert.ok(encodedReply.belief_revision_event_id);
   assert.equal(encodedReply.world_truth_claimed,false);
   const afterMemorySnapshot=await getWorldSimulationState(
     acousticSid,{fixtureRoot:goalFixtureRoot});
@@ -1383,6 +1401,42 @@ try {
   assert.equal(memoryTurn.selected_action_intents.length,0);
   assert.equal(memoryTurn.action_outcomes.length,0);
   assert.equal(afterMemorySnapshot.state.event_queue.length,0);
+  const beliefMeta=memoryTurn.autonomous_reply_subjective_memory_encoding.claim_adoption;
+  assert.equal(beliefMeta.decision,"propose_and_adopt_if_unopposed");
+  const claimRecord=afterMemorySnapshot.state.subjective_claim_events[
+    beliefMeta.claim_event_id];
+  const revisionRecord=afterMemorySnapshot.state.subjective_belief_revision_events[
+    beliefMeta.revision_event_id];
+  assert.equal(claimRecord.character,character);
+  assert.equal(claimRecord.source_turn_id,memoryTurn.turn_id);
+  assert.equal(claimRecord.proposition,subjectiveProposition);
+  assert.equal(claimRecord.semantic_state.world_truth_verified,false);
+  assert.equal(claimRecord.evidence.length,1);
+  assert.equal(claimRecord.evidence[0].source_memory_ref,newestMemory.memory_id);
+  assert.equal(claimRecord.evidence[0].source_memory_hash,
+    hashAgentRunValue(newestMemory));
+  assert.equal(revisionRecord.character,character);
+  assert.equal(revisionRecord.source_turn_id,memoryTurn.turn_id);
+  assert.equal(revisionRecord.resolution_action,"adopt");
+  assert.equal(memoryTurn.subjective_claim_projection.result.claim_events_created.length,1);
+  assert.equal(memoryTurn.subjective_belief_resolution.result.decisions[0].action,
+    "adopt");
+  assert.equal(memoryTurn.subjective_belief_revision_projection.result
+    .revision_events_created.length,1);
+  assert.equal(memoryTurn.state_transitions.length,5);
+  assert.equal(memoryTurn.chronological_mutation_queue,null);
+  assert.equal(memoryTurn.chronological_mutation_execution,null);
+  assert.ok(memoryTurn.subjective_memory_mutation_queue?.queue_hash);
+  assert.ok(memoryTurn.subjective_claim_mutation_queue?.queue_hash);
+  assert.ok(memoryTurn.subjective_belief_revision_mutation_queue?.queue_hash);
+  assert.equal(memoryTurn.subjective_belief_revision_mutation_queue.turn_id,
+    memoryTurn.turn_id+":subjective_belief_revision");
+  await assert.rejects(async ()=>projectWorldSimulationSubjectiveBeliefsForCharacter({
+    world_state:afterMemorySnapshot.state,
+    character,current_turn_id:memoryTurn.turn_id,
+  }),error=>error?.code===
+    "WORLD_SIMULATION_SUBJECTIVE_BELIEF_CHARACTER_PROJECTION_SAME_TURN_REVISION_PRESENT");
+  assert.deepEqual(afterMemorySnapshot.state.characters,replySnapshot.state.characters);
   await assert.rejects(
     runWorldSimulationCommittedReplySubjectiveMemory(
       speakerIngressInput,{fixtureRoot:goalFixtureRoot,
@@ -1499,6 +1553,39 @@ try {
     history_unchanged:true,belief_adopted:false,public_action_performed:false,
   }));
 
+
+  // A subsequent REAL World turn may expose the belief through Phase66C.
+  // No result is spliced back into the memory-encoding turn or World truth.
+  const realNextTurn="cb_c4_reply_belief_real_subsequent_turn";
+  const nextWorldTurn=await commitWorldSimulationTurn(acousticSid,{
+    expected_revision:afterMemorySnapshot.revision,
+    expected_state_hash:afterMemorySnapshot.state_hash,
+    turn_id:realNextTurn,
+    next_world_state:afterMemorySnapshot.state,event:null,
+    selected_action_intents:[],action_outcomes:[],state_transitions:[],
+  },{fixtureRoot:goalFixtureRoot});
+  assert.equal(nextWorldTurn.state.revision,afterMemorySnapshot.revision+1);
+  const effectiveForSpeaker=projectWorldSimulationSubjectiveBeliefsForCharacter({
+    world_state:nextWorldTurn.state.state,character,current_turn_id:realNextTurn,
+  });
+  assert.equal(effectiveForSpeaker.character_view.beliefs.some(item=>
+    item.proposition===subjectiveProposition
+    && item.commitment==="active"
+    && item.subjective_not_world_truth===true),true);
+  const effectiveForOther=projectWorldSimulationSubjectiveBeliefsForCharacter({
+    world_state:nextWorldTurn.state.state,character:inquiryAlly,
+    current_turn_id:realNextTurn,
+  });
+  assert.equal(effectiveForOther.character_view.beliefs.some(item=>
+    item.proposition===subjectiveProposition),false);
+  assert.deepEqual(nextWorldTurn.state.state.characters,replySnapshot.state.characters);
+  console.log(JSON.stringify({
+    scenario:"world_subjective_dialogue_same_turn_claim_subsequent_turn_belief",
+    original_speaker_claim_owned:true,phase65a_memory_lineage_verified:true,
+    phase65d_adopted:true,phase66a_revision_committed:true,
+    same_turn_feedback_rejected:true,real_subsequent_turn_exposes_belief:true,
+    other_character_private_belief_hidden:true,world_truth_claimed:false,
+  }));
   // Negative control: a genuine source hearing opportunity is insufficient
   // to force a public reply. A Brain decline, forged action and Runtime
   // attempt to replace the Brain decision must all leave World unchanged.
