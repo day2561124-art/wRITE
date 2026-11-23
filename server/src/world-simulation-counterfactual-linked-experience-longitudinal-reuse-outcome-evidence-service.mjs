@@ -297,21 +297,33 @@ export function buildWorldSimulationCounterfactualLinkedExperienceLongitudinalRe
     );
   }
 
-  // The World History boundary is JSON. Normalize and isolate it once,
-  // including removal of any non-JSON-only optional values, before Phase81Q
-  // provenance rechecks. A different build call always gets a fresh snapshot
-  // so even callers that later alter their input cannot reuse stale evidence.
-  const isolatedHistory = cloneJson(isObject(input.world_history)
-    ? input.world_history
-    : { turns: turns(input.world_history) });
+  // Every current Phase81Q is independently revalidated against the
+  // original World History above. If no prior committed turn even carries
+  // Phase81Q, canonicalPriorQ has no work and its isolated copy would never
+  // be consumed. In particular, long-lived non-reuse worlds must not clone
+  // their entire unrelated history once for each nested Phase82B/C/D check.
+  //
+  // Any historical Phase81Q (including zero-record evidence) takes the
+  // original fail-closed path: one full JSON-normalized isolated snapshot,
+  // exact per-turn lineage verification and no cross-call cache.
+  const sourceTurns = turns(input.world_history);
+  const priorQPresent = sourceTurns.some((turn) => isObject(turn)
+    && isObject(turn.counterfactual_linked_experience_reuse_outcome_selected_action_outcome_evidence));
+  const isolatedHistory = priorQPresent
+    ? cloneJson(isObject(input.world_history)
+      ? input.world_history
+      : { turns: sourceTurns })
+    : null;
   const canonicalPrior = [];
-  const historyTurns = turns(isolatedHistory);
-  for (let index = 0; index < historyTurns.length; index += 1) {
-    const turn = historyTurns[index];
-    if (!isObject(turn)) continue;
-    const priorQ = canonicalPriorQ(isolatedHistory, turn, index, worldSimulationSessionId);
-    if (!priorQ) continue;
-    canonicalPrior.push({ turn_index: index, projection: priorQ });
+  if (isolatedHistory) {
+    const historyTurns = turns(isolatedHistory);
+    for (let index = 0; index < historyTurns.length; index += 1) {
+      const turn = historyTurns[index];
+      if (!isObject(turn)) continue;
+      const priorQ = canonicalPriorQ(isolatedHistory, turn, index, worldSimulationSessionId);
+      if (!priorQ) continue;
+      canonicalPrior.push({ turn_index: index, projection: priorQ });
+    }
   }
 
   const contexts = [];
