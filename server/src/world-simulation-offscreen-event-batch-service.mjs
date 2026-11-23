@@ -2,6 +2,7 @@ import { getWorldSimulationState } from "./world-simulation-state-service.mjs";
 import { runWorldSimulationTurn } from "./world-simulation-loop-service.mjs";
 import { runWorldSimulationOffscreenPhysicalStep } from "./world-simulation-offscreen-physical-step-service.mjs";
 import { runWorldSimulationOffscreenMultiSceneFieldStep, runWorldSimulationOffscreenMultiSceneFieldDamageStep } from "./world-simulation-offscreen-multiscene-field-step-service.mjs";
+import { runWorldSimulationOffscreenDualProjectileContact } from "./world-simulation-offscreen-dual-projectile-contact-service.mjs";
 import {
   projectWorldSimulationOffscreenBreakpoint,
 } from "./world-simulation-offscreen-breakpoint-service.mjs";
@@ -191,6 +192,13 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
             const independentDamage = await runWorldSimulationOffscreenMultiSceneFieldDamageStep(
               physicalInput, physicalOnlyOptions);
             if (independentDamage.committed === true) result = independentDamage;
+          } else if (scoped.blocked_reason === "active_projectile_not_yet_supported") {
+            // The separate C6-F contact owner may accept only two independent
+            // positive whole-ms contacts at exactly one shared World frontier.
+            // Every other projectile pattern retains the canonical refusal.
+            const dualContact = await runWorldSimulationOffscreenDualProjectileContact(
+              physicalInput, physicalOnlyOptions);
+            if (dualContact.committed === true) result = dualContact;
           }
         }
         eventId = result.turn_id ?? null;
