@@ -290,6 +290,7 @@ export async function commitWorldSimulationTurn(
       || input.event != null
       || input.autonomous_cognition_goal_commitment != null
       || input.autonomous_cognition_plan_commitment != null
+      || input.autonomous_listener_clarification_reply != null
       || typeof meta.character !== "string" || !meta.character.trim()
       || typeof meta.scene_id !== "string" || !meta.scene_id.trim()
       || typeof meta.action_id !== "string" || !meta.action_id.trim()
@@ -311,6 +312,46 @@ export async function commitWorldSimulationTurn(
       || input.causal_resolution_id !== meta.causal_resolution_id) {
       const error = new Error("Actor-initiated eventless speech needs exact World causal evidence.");
       error.code = "WORLD_ACTOR_SPEECH_WORLD_SPEECH_COMMIT_METADATA_INVALID";
+      throw error;
+    }
+  }
+  if (input.autonomous_listener_clarification_reply != null) {
+    const meta = requireObject(input.autonomous_listener_clarification_reply,
+      "autonomous_listener_clarification_reply");
+    const selections = input.selected_action_intents ?? [];
+    const outcomes = input.action_outcomes ?? [];
+    if (meta.version !== "world-listener-clarification-causal-reply-v1"
+      || input.event != null
+      || input.autonomous_actor_initiated_action != null
+      || input.autonomous_cognition_goal_commitment != null
+      || input.autonomous_cognition_plan_commitment != null
+      || typeof meta.character !== "string" || !meta.character.trim()
+      || typeof meta.scene_id !== "string" || !meta.scene_id.trim()
+      || typeof meta.action_id !== "string" || !meta.action_id.trim()
+      || typeof meta.source_turn_id !== "string" || !meta.source_turn_id.trim()
+      || typeof meta.source_turn_hash !== "string" || !meta.source_turn_hash.trim()
+      || typeof meta.source_character !== "string" || !meta.source_character.trim()
+      || typeof meta.source_action_id !== "string" || !meta.source_action_id.trim()
+      || meta.source_character === meta.character
+      || typeof meta.observer_increment_ref !== "string" || !meta.observer_increment_ref.trim()
+      || !Number.isSafeInteger(meta.source_revision_to)
+      || meta.source_revision_to !== input.expected_revision
+      || meta.causal_resolution_id !== input.causal_resolution_id
+      || !Array.isArray(selections) || selections.length !== 1
+      || selections[0]?.character !== meta.character
+      || selections[0]?.selection !== "candidate_action_intent"
+      || selections[0]?.action_id !== meta.action_id
+      || selections[0]?.candidate?.action_id !== meta.action_id
+      || selections[0]?.candidate?.communication?.channel !== "speech"
+      || selections[0]?.candidate?.communication?.addressee !== meta.source_character
+      || !Array.isArray(outcomes)
+      || !outcomes.some(item => item?.actor === meta.character
+        && item?.action_id === meta.action_id
+        && item?.result === "communication_emitted"
+        && item?.communication_event?.channel === "speech")) {
+      const error = new Error(
+        "Listener clarification reply requires a separate exact World speech selection and causal outcome.");
+      error.code = "WORLD_LISTENER_REPLY_COMMIT_METADATA_INVALID";
       throw error;
     }
   }
@@ -379,6 +420,33 @@ export async function commitWorldSimulationTurn(
             duplicate.code = "WORLD_SIMULATION_DUPLICATE_TURN";
             throw duplicate;
           }
+          if (input.autonomous_listener_clarification_reply != null) {
+            const meta = input.autonomous_listener_clarification_reply;
+            const prior = arrayTurns(history).at(-1);
+            const sourceMeta = prior?.autonomous_actor_initiated_action;
+            const admitted = arrayTurns(history).length === meta.source_revision_to
+              && Array.isArray(prior?.communication_observer_increment_admissions)
+              && prior.communication_observer_increment_admissions.filter(item =>
+                item?.observer === meta.character
+                && item?.admission_status === "heard_acoustic_cues_only"
+                && item?.observer_increment?.increment_ref === meta.observer_increment_ref
+                && item?.audit?.source_action_id === meta.source_action_id
+                && item?.audit?.source_speaker === meta.source_character).length === 1;
+            if (!prior || prior.turn_id !== meta.source_turn_id
+              || hashAgentRunValue(prior) !== meta.source_turn_hash
+              || prior.revision_to !== meta.source_revision_to
+              || prior.event !== null
+              || sourceMeta?.version !== "world-actor-initiated-speech-v1"
+              || sourceMeta.character !== meta.source_character
+              || sourceMeta.action_id !== meta.source_action_id
+              || sourceMeta.scene_id !== meta.scene_id
+              || !admitted) {
+              const error = new Error(
+                "Listener clarification requires the exact immediately prior committed acoustic source.");
+              error.code = "WORLD_LISTENER_REPLY_SOURCE_COMMIT_INVALID";
+              throw error;
+            }
+          }
           const now = committedEnvelope?.updated_at ?? new Date().toISOString();
           committedHistoryEntry = cloneJson({
             turn_id: turnId,
@@ -397,6 +465,9 @@ export async function commitWorldSimulationTurn(
             ...(input.autonomous_actor_initiated_action != null
               ? { autonomous_actor_initiated_action:
                   input.autonomous_actor_initiated_action } : {}),
+            ...(input.autonomous_listener_clarification_reply != null
+              ? { autonomous_listener_clarification_reply:
+                  input.autonomous_listener_clarification_reply } : {}),
             selected_action_intents: input.selected_action_intents ?? [],
             subjective_choice_commitment_receipts:
               input.subjective_choice_commitment_receipts ?? null,
