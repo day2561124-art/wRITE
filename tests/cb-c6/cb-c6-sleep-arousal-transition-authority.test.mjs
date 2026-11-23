@@ -7772,3 +7772,173 @@ for (const startingHp of [12, 4, 1]) {
 }
 console.log("CB-C6-F same-scene lethal field/projectile tie, injury provenance, CAS replay guard passed.");
 
+
+
+// C6-F: two persistent damaging fields overlap one resident at staggered
+// horizons. Check the exact body chain across separate Native commits, versus
+// the existing World adjudicator, including zero-HP overflow and replays.
+// The field map is deliberately inserted in both orders: causal injury
+// provenance must depend on stable source identity, never JavaScript key order.
+function c6fOverlappingPersistentFields(reverse = false, startingHp = 12) {
+  const state = e4FieldWorld();
+  state.projectiles = {};
+  const fieldA = d1Clone(state.ability_fields.field_e3);
+  fieldA.center = d1Clone(state.scenes.room.entity_positions.aria);
+  fieldA.radius_m = 1;
+  fieldA.remaining_ms = 150;
+  fieldA.tick_ms = 50;
+  fieldA.effect = { damage_per_second: 40 };
+  const fieldB = d1Clone(fieldA);
+  fieldB.field_id = "field_aux";
+  fieldB.ability_id = "c6f_overlap_secondary";
+  fieldB.remaining_ms = 200;
+  fieldB.tick_ms = 100;
+  fieldB.effect = { damage_per_second: 20 };
+  state.ability_fields = reverse
+    ? { field_e3: fieldA, field_aux: fieldB }
+    : { field_aux: fieldB, field_e3: fieldA };
+  const physical = state.characters.aria.physical_state;
+  physical.health_current = startingHp;
+  physical.health_max = 100;
+  physical.injuries = [];
+  physical.incapacitated = false;
+  physical.immobilized = false;
+  physical.movement_multiplier = 1;
+  physical.combat_multiplier = 1;
+  return state;
+}
+
+for (const startingHp of [12, 7, 1]) {
+  for (const reverse of [false, true]) {
+    const root = path.join(projectRoot, "tests", ".tmp",
+      "c6-f-overlap-fields-" + startingHp + "-" + reverse + "-" + process.pid + "-" + Date.now());
+    const options = { fixtureRoot: root,
+      characterBrain: async () => assert.fail("persistent field physics cannot invoke Brain") };
+    try {
+      const initial = c6fOverlappingPersistentFields(reverse, startingHp);
+      const untouched = d1Clone(initial);
+      const session = await beginWorldSimulationSession({
+        simulation_label: "C6-F overlapping persistent field injury-chain",
+        seed: "overlap-" + startingHp + "-" + reverse,
+        initial_world_state: initial,
+      }, options);
+      const sid = session.world_simulation_session_id;
+      const initialSnapshot = await getWorldSimulationState(sid, options);
+      const at = ms => new Date(Date.parse(initial.simulation_time) + ms).toISOString();
+      const paths = worldSimulationStatePaths(sid, options);
+      const bytes = () => Promise.all([
+        readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+      ]);
+      const startingBytes = await bytes();
+      const tooEarly = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid, max_turns: 32, target_horizon: at(49),
+      }, options);
+      assert.equal(tooEarly.committed_turn_count, 0);
+      assert.deepEqual(await bytes(), startingBytes);
+
+      let previous = initialSnapshot;
+      let directState = d1Clone(initial);
+      const expectedLoss = [3, 6, 9, 10];
+      const expectedInjuries = [2, 4, 6, 7];
+      for (let step = 0; step < 4; step++) {
+        const batch = await runWorldSimulationOffscreenEventBatch({
+          world_simulation_session_id: sid,
+          max_turns: 1,
+          target_horizon: at(200),
+        }, options);
+        assert.equal(batch.committed_turn_count, 1);
+        assert.equal(batch.committed_physical_step_count, 1);
+        assert.equal(batch.automatic_replay_allowed, false);
+        assert.equal(batch.state_reconciliation_required, false);
+        assert.equal(batch.reached_simulation_time, at((step + 1) * 50));
+        const current = await getWorldSimulationState(sid, options);
+        assert.equal(current.revision, previous.revision + 1);
+        assert.equal(current.state.simulation_time, at((step + 1) * 50));
+        const body = current.state.characters.aria.physical_state;
+        assert.equal(body.health_current, Math.max(0, startingHp - expectedLoss[step]));
+        assert.equal(body.injuries.length, expectedInjuries[step],
+          "all separate field exposures must remain independently recorded");
+        assert.equal(new Set(body.injuries.map(item => item.injury_id)).size,
+          expectedInjuries[step]);
+        assert.deepEqual(body.injuries.map(item => item.source),
+          [...Array(step < 3 ? step + 1 : 3)].flatMap(() =>
+            ["field_aux", "field_e3"]).concat(step === 3 ? ["field_aux"] : []),
+          "injury provenance ordering must be independent of field insertion order");
+        assert.equal(current.state.ability_fields.field_e3.remaining_ms,
+          Math.max(0, 150 - (step + 1) * 50));
+        assert.equal(current.state.ability_fields.field_aux.remaining_ms,
+          200 - (step + 1) * 50);
+        assert.equal(current.state.ability_fields.field_e3.active, step < 2);
+        assert.equal(current.state.ability_fields.field_aux.active, step < 3);
+        if (startingHp <= expectedLoss[step]) {
+          assert.equal(body.incapacitated, true);
+          assert.equal(body.immobilized, true);
+        }
+        const history = await getWorldSimulationHistory(sid, options);
+        assert.equal(history.turns.length, step + 1);
+        const turn = history.turns.at(-1);
+        assert.equal(turn.previous_state_hash, previous.state_hash);
+        assert.equal(turn.next_state_hash, current.state_hash);
+        assert.ok(turn.chronological_mutation_queue.queue_hash);
+        assert.ok(turn.chronological_mutation_execution.execution_hash);
+        assert.deepEqual(turn.selected_action_intents, []);
+        assert.deepEqual(turn.knowledge_transitions, []);
+        const hits = turn.action_outcomes.filter(item =>
+          item.result === "ability_field_tick" && item.target === "aria");
+        assert.deepEqual(hits.map(item => item.ability_field_id),
+          step < 3 ? ["field_aux", "field_e3"] : ["field_aux"]);
+        assert.deepEqual(hits.map(item => item.damage_applied),
+          step < 3 ? [1, 2] : [1]);
+        assert.ok(turn.immutable_causal_evaluators.audit_count >= hits.length);
+        const injuryChain = turn.state_transitions.filter(item =>
+          item.entity === "aria" && item.field === "physical_state.injuries");
+        assert.equal(injuryChain.length, hits.length);
+        assert.deepEqual(injuryChain[0].from,
+          previous.state.characters.aria.physical_state.injuries);
+        for (let j = 1; j < injuryChain.length; j++)
+          assert.deepEqual(injuryChain[j].from, injuryChain[j - 1].to);
+        assert.deepEqual(injuryChain.at(-1).to, body.injuries);
+        const hpChain = turn.state_transitions.filter(item =>
+          item.entity === "aria" && item.field === "physical_state.health_current");
+        if (hpChain.length) {
+          assert.equal(hpChain[0].from,
+            previous.state.characters.aria.physical_state.health_current);
+          for (let j = 1; j < hpChain.length; j++)
+            assert.equal(hpChain[j].from, hpChain[j - 1].to);
+          assert.equal(hpChain.at(-1).to, body.health_current);
+        } else {
+          assert.equal(previous.state.characters.aria.physical_state.health_current, 0);
+        }
+        const direct = await e4Resolve(directState, at((step + 1) * 50));
+        directState = direct.next_world_state;
+        assert.deepEqual(body, directState.characters.aria.physical_state,
+          "Native persistent Body must equal immutable canonical World resolution");
+        assert.deepEqual(current.state.ability_fields, directState.ability_fields);
+        assert.deepEqual(current.state.memories, untouched.memories);
+        assert.deepEqual(current.state.motivational_goal_history,
+          untouched.motivational_goal_history);
+        assert.deepEqual(current.state.event_queue, []);
+        previous = current;
+      }
+      const durable = await bytes();
+      await assert.rejects(runWorldSimulationOffscreenPhysicalStep({
+        world_simulation_session_id: sid,
+        expected_revision: initialSnapshot.revision,
+        expected_state_hash: initialSnapshot.state_hash,
+        target_horizon: at(200),
+      }, options), { code: "C6E_PHYSICAL_STEP_STALE" });
+      const idle = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid,
+        max_turns: 32, target_horizon: at(300),
+      }, options);
+      assert.equal(idle.committed_turn_count, 0);
+      assert.deepEqual(await bytes(), durable,
+        "expired fields may neither reapply injury nor advance time");
+      assert.equal((await getWorldSimulationHistory(sid, options)).turns.length, 4);
+      assert.deepEqual(initial, untouched, "World source fixture must stay immutable");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+}
+console.log("CB-C6-F overlapping persistent field fronts, stable injury order, HP clamp and replay passed.");
