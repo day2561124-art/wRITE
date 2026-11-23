@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -32,6 +32,7 @@ import {
   commitWorldSimulationTurn,
   getWorldSimulationHistory,
   getWorldSimulationState,
+  worldSimulationStatePaths,
 } from "../../server/src/world-simulation-state-service.mjs";
 
 const fixtureRoot = path.join(
@@ -2484,6 +2485,22 @@ try {
   assert.equal(history.turns[0].causal_resolution_id, "resolve-evt-001");
   assert.equal(history.turns[0].previous_state_hash, initialStateHash);
   assert.equal(history.turns[0].next_state_hash, stateAfterFirstTurn.state_hash);
+  // Compact World History must preserve the exact JSON value and hash.
+  const persistedBytes = await readFile(
+    worldSimulationStatePaths(session.world_simulation_session_id, options).history,
+    "utf8",
+  );
+  assert.equal(persistedBytes.endsWith("\n"), true);
+  assert.equal(persistedBytes.trimEnd(), JSON.stringify(history));
+  assert.ok(
+    Buffer.byteLength(persistedBytes, "utf8")
+      < Buffer.byteLength(JSON.stringify(history, null, 2), "utf8"),
+    "compact World History must have less formatting overhead",
+  );
+  assert.equal(
+    hashAgentRunValue(JSON.parse(persistedBytes)),
+    hashAgentRunValue(history),
+  );
   // Disk JSON parsing gives each reader a detached snapshot; caller mutation
   // cannot corrupt the authoritative World state/history or a later read.
   const detachedState = await getWorldSimulationState(session.world_simulation_session_id, options);
