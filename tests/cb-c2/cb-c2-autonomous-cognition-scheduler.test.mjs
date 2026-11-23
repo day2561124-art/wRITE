@@ -1664,6 +1664,136 @@ try {
     same_turn_feedback_rejected:true,real_subsequent_turn_exposes_belief:true,
     other_character_private_belief_hidden:true,world_truth_claimed:false,
   }));
+  // Distinct REAL A→B→A acoustic chain under a different Brain policy:
+  // original speaker chooses to encode a possibly mistaken memory but explicitly
+  // declines to propose a belief. The engine must never silently auto-adopt.
+  const noClaimSession=await beginWorldSimulationSession({
+    source_text:"Independent source-grounded dialogue claim decline",
+    characters:Object.keys(acousticWorld.characters),
+    initial_world_state:structuredClone(acousticWorld),
+  },{fixtureRoot:goalFixtureRoot});
+  const noClaimSid=noClaimSession.world_simulation_session_id;
+  const noClaimSpeech=await runWorldSimulationActorInitiatedSpeech({
+    world_simulation_session_id:noClaimSid,character,
+    runtime_context_by_character:planCue,
+  },{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+    if(packet.cognition?.implementation_intention_activation){
+      const plans=packet.cognition.implementation_intention_activation;
+      return {
+        plan_activation_context_token:plans.context_token,
+        activated_plan_tokens:[plans.plans[0].plan_token],
+      };
+    }
+    assert.ok(packet.candidate_action_intents.some(item=>
+      item.action_id===acousticCandidate.action_id));
+    return {action_id:acousticCandidate.action_id};
+  }});
+  assert.equal(noClaimSpeech.committed,true);
+  const noClaimSpeechState=await getWorldSimulationState(
+    noClaimSid,{fixtureRoot:goalFixtureRoot});
+  const noClaimSpeechHistory=await getWorldSimulationHistory(
+    noClaimSid,{fixtureRoot:goalFixtureRoot});
+  const noClaimSourceTurn=noClaimSpeechHistory.turns.at(-1);
+  assert.equal(noClaimSourceTurn.action_outcomes.some(item=>
+    item.action_id===acousticCandidate.action_id
+    && item.result==="communication_emitted"),true);
+  const noClaimReply=await runWorldSimulationCommittedActorSpeechListenerClarification({
+    world_simulation_session_id:noClaimSid,observer:inquiryAlly,
+    source_turn_id:noClaimSourceTurn.turn_id,
+    expected_revision:noClaimSpeechState.revision,
+    expected_state_hash:noClaimSpeechState.state_hash,
+  },{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+    assert.equal(packet.character,inquiryAlly);
+    if(packet.cognition?.clarification_opportunity){
+      assert.equal(packet.boundaries.source_transcript_exposed,false);
+      assert.ok(packet.candidate_action_intents.some(item=>
+        item.action_id===clarificationCandidate.action_id));
+      return {action_id:clarificationCandidate.action_id};
+    }
+    assert.equal(packet.cognition.committed_acoustic_observation.kind,
+      "speech_sound_detected");
+    return {private_reaction:"I only know that a voice was heard"};
+  }});
+  assert.equal(noClaimReply.committed,true);
+  const noClaimReplyState=await getWorldSimulationState(
+    noClaimSid,{fixtureRoot:goalFixtureRoot});
+  const noClaimReplyHistory=await getWorldSimulationHistory(
+    noClaimSid,{fixtureRoot:goalFixtureRoot});
+  const noClaimReplyTurn=noClaimReplyHistory.turns.at(-1);
+  assert.equal(noClaimReplyTurn.action_outcomes.some(item=>
+    item.action_id===clarificationCandidate.action_id
+    && item.result==="communication_emitted"),true);
+  let noClaimPolicyOpportunities=0,noClaimEncodings=0;
+  const declinedClaim=await runWorldSimulationCommittedReplySubjectiveMemory({
+    world_simulation_session_id:noClaimSid,observer:character,
+    source_turn_id:noClaimReplyTurn.turn_id,
+    expected_revision:noClaimReplyState.revision,
+    expected_state_hash:noClaimReplyState.state_hash,
+    enable_subjective_reply_claim:true,
+  },{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+    assert.equal(packet.character,character);
+    if(packet.cognition?.committed_acoustic_observation)
+      return {private_reaction:"I heard an answer, not necessarily its intent"};
+    if(packet.cognition?.observer_lexical_recognition)
+      return {recognition_status:"recognized",
+        heard_surface_fragment:
+          packet.cognition.observer_lexical_recognition.emitted_surface_fragment};
+    if(packet.cognition?.observer_meaning_interpretation)
+      return {interpretation_status:"interpreted",
+        interpreted_content:interpretedPhrase,
+        interpreted_interaction_function:"request_repeat",
+        understanding_attested:true};
+    if(packet.cognition?.subjective_reply_memory_candidate){
+      noClaimEncodings++;
+      return {decision:"encode"};
+    }
+    if(packet.cognition?.subjective_reply_claim_opportunity){
+      noClaimPolicyOpportunities++;
+      assert.equal(packet.cognition.subjective_reply_claim_opportunity
+        .own_interpretation,interpretedPhrase);
+      assert.equal(packet.boundaries.factual_truth_authority,false);
+      assert.equal(packet.boundaries.direct_belief_write_authority,false);
+      return {decision:"do_not_propose"};
+    }
+    throw new Error("Unknown Brain stage in independent claim-decline test");
+  }});
+  assert.equal(noClaimEncodings,1);
+  assert.equal(noClaimPolicyOpportunities,1);
+  assert.equal(declinedClaim.committed,true);
+  assert.equal(declinedClaim.memory_encoded,true);
+  assert.equal(declinedClaim.belief_revised,false);
+  assert.equal(declinedClaim.subjective_claim_adopted,false);
+  assert.equal(declinedClaim.belief_revision_event_id,null);
+  assert.equal(declinedClaim.world_truth_claimed,false);
+  const noClaimResultState=await getWorldSimulationState(
+    noClaimSid,{fixtureRoot:goalFixtureRoot});
+  const noClaimResultHistory=await getWorldSimulationHistory(
+    noClaimSid,{fixtureRoot:goalFixtureRoot});
+  const noClaimMemoryTurn=noClaimResultHistory.turns.at(-1);
+  assert.equal(noClaimResultState.revision,noClaimReplyState.revision+1);
+  assert.equal(noClaimMemoryTurn.state_transitions.length,1);
+  assert.equal(noClaimMemoryTurn.autonomous_reply_subjective_memory_encoding
+    .claim_adoption,undefined);
+  assert.equal((noClaimResultState.state.memories?.[character]??[]).length,
+    (noClaimReplyState.state.memories?.[character]??[]).length+1);
+  assert.deepEqual(noClaimResultState.state.subjective_claim_events??null,
+    noClaimReplyState.state.subjective_claim_events??null);
+  assert.deepEqual(noClaimResultState.state.subjective_claim_history??null,
+    noClaimReplyState.state.subjective_claim_history??null);
+  assert.deepEqual(noClaimResultState.state.subjective_belief_revision_events??null,
+    noClaimReplyState.state.subjective_belief_revision_events??null);
+  assert.deepEqual(noClaimResultState.state.subjective_belief_revision_history??null,
+    noClaimReplyState.state.subjective_belief_revision_history??null);
+  assert.deepEqual(noClaimResultState.state.characters,noClaimReplyState.state.characters);
+  assert.deepEqual(noClaimResultHistory.turns.slice(0,-1),noClaimReplyHistory.turns);
+  console.log(JSON.stringify({
+    scenario:"world_original_speaker_source_pinned_claim_decline",
+    independent_acoustic_chain_committed:true,private_memory_encoded:true,
+    brain_explicitly_declined_claim:true,world_claims_unchanged:true,
+    world_beliefs_unchanged:true,source_history_preserved:true,
+    world_truth_claimed:false,
+  }));
+
   // Negative control: a genuine source hearing opportunity is insufficient
   // to force a public reply. A Brain decline, forged action and Runtime
   // attempt to replace the Brain decision must all leave World unchanged.
