@@ -326,10 +326,6 @@ export async function runWorldSimulationCommittedActorSpeechListenerClarificatio
       status:"world_consistency_conflict",
       committed:false,public_reply_emitted:false,
     });
-  const opportunityId="autonomous_cognition_opportunity_"+hashAgentRunValue({
-    source_turn_id:source.turn_id,source_turn_hash:sourceHash,
-    listener,increment_ref:heard.increment_ref,
-  }).slice(0,32);
   const result=await commitWorldSimulationTurn(sessionId,{
     expected_revision:before.revision,expected_state_hash:before.state_hash,
     turn_id:turnId,next_world_state:causal.next_world_state,event:null,
@@ -345,17 +341,14 @@ export async function runWorldSimulationCommittedActorSpeechListenerClarificatio
     chronological_mutation_queue:causal.chronological_mutation_queue,
     chronological_mutation_execution:causal.chronological_mutation_execution,
     causal_resolution_id:causal.causal_resolution_id,
-    autonomous_actor_initiated_action:{
-      version:"world-actor-initiated-speech-v1",
+    autonomous_listener_clarification_reply:{
+      version:worldSimulationListenerClarificationVersion,
       character:listener,scene_id:sceneId,action_id:actionId,
-      consumed_opportunity_ids:[opportunityId],
       causal_resolution_id:causal.causal_resolution_id,
-      listener_clarification_source:{
-        version:worldSimulationListenerClarificationVersion,
-        source_turn_id:source.turn_id,source_turn_hash:sourceHash,
-        observer:listener,observer_increment_ref:heard.increment_ref,
-        source_revision_to:source.revision_to,
-      },
+      source_turn_id:source.turn_id,source_turn_hash:sourceHash,
+      source_revision_to:source.revision_to,
+      source_character:speaker,source_action_id:sourceMeta.action_id,
+      observer_increment_ref:heard.increment_ref,
     },
   },options);
   return Object.freeze({
