@@ -5977,4 +5977,227 @@ for (const mode of ["harmful", "projectile", "acoustic", "mismatched-scene"]) {
   }
 }
 console.log("CB-C6-F canonical bounded batch atomically advances two safe field scenes and keeps unsupported mixes blocked.");
+import {
+  runWorldSimulationOffscreenMultiSceneFieldDamageStep,
+  worldSimulationOffscreenMultiSceneFieldDamageStepVersion,
+} from "../../server/src/world-simulation-offscreen-multiscene-field-step-service.mjs";
+
+function c6fIndependentDamagingFields() {
+  const state = e7MixedWorld("tie");
+  state.projectiles = {};
+  const roomField = state.ability_fields.field_e3;
+  roomField.remaining_ms = 100;
+  roomField.tick_ms = 50;
+  roomField.effect = { damage_per_second: 20 };
+  state.scenes.annex = {
+    scene_id: "annex", simulation_time: state.simulation_time,
+    dimensions: { width_m: 8, depth_m: 8 },
+    entity_positions: { remote: { x: 4, y: 4 } },
+    observable_by: { remote: { visual: [], audible: [] } },
+    obstacles: [],
+  };
+  state.characters.remote = {
+    known: ["remote-private-existing-knowledge"],
+    current_goal: "return home",
+    physical_state: {
+      health_current: 100, health_max: 100, injuries: [],
+    },
+  };
+  state.memories.remote = [{
+    memory_id: "c6f-remote-existing-memory",
+    content: "a previous ordinary memory",
+    source: { kind: "original_fixture" },
+  }];
+  state.ability_fields.annex_field = {
+    ...d1Clone(roomField),
+    field_id: "annex_field", scene_id: "annex", owner: "keeper",
+    center: { x: 4, y: 4 },
+  };
+  return state;
+}
+
+for (const reverse of [false, true]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-two-scene-damage-" + reverse + "-" + process.pid + "-" + Date.now());
+  const jointOptions = { fixtureRoot: path.join(root, "joint") };
+  const roomOptions = { fixtureRoot: path.join(root, "room"),
+    characterBrain: async () => assert.fail("solo room field must not run Brain") };
+  const annexOptions = { fixtureRoot: path.join(root, "annex"),
+    characterBrain: async () => assert.fail("solo annex field must not run Brain") };
+  try {
+    const initial = c6fIndependentDamagingFields();
+    if (reverse) {
+      initial.scenes = {
+        annex: initial.scenes.annex,
+        room: initial.scenes.room,
+      };
+      initial.ability_fields = {
+        annex_field: initial.ability_fields.annex_field,
+        field_e3: initial.ability_fields.field_e3,
+      };
+    }
+    const untouched = d1Clone(initial);
+    const roomInitial = d1Clone(initial);
+    roomInitial.ability_fields.annex_field.active = false;
+    const annexInitial = d1Clone(initial);
+    annexInitial.ability_fields.field_e3.active = false;
+    const [jointSession, roomSession, annexSession] = await Promise.all([
+      beginWorldSimulationSession({
+        simulation_label: "C6-F joint independent damaging fields",
+        seed: "two-scene-damage", initial_world_state: initial,
+      }, jointOptions),
+      beginWorldSimulationSession({
+        simulation_label: "C6-F foreground room field physical reference",
+        seed: "room-damage-reference", initial_world_state: roomInitial,
+      }, roomOptions),
+      beginWorldSimulationSession({
+        simulation_label: "C6-F foreground annex field physical reference",
+        seed: "annex-damage-reference", initial_world_state: annexInitial,
+      }, annexOptions),
+    ]);
+    const jointSid = jointSession.world_simulation_session_id;
+    const refs = [
+      { sid: roomSession.world_simulation_session_id, options: roomOptions,
+        scene: "room", target: "aria", field: "field_e3" },
+      { sid: annexSession.world_simulation_session_id, options: annexOptions,
+        scene: "annex", target: "remote", field: "annex_field" },
+    ];
+    const jointPaths = worldSimulationStatePaths(jointSid, jointOptions);
+    const bytes = () => Promise.all([
+      readFile(jointPaths.state, "utf8"), readFile(jointPaths.history, "utf8"),
+    ]);
+    let previous = await getWorldSimulationState(jointSid, jointOptions);
+    const at = ms => new Date(Date.parse(initial.simulation_time) + ms).toISOString();
+    const neverAuto = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: jointSid, max_turns: 1,
+    }, jointOptions);
+    assert.equal(neverAuto.committed_turn_count, 0,
+      "new damage authority must NOT implicitly widen old canonical batch");
+    assert.equal(neverAuto.physical_step_blocked_reason,
+      "physical_step_scene_scope_unresolved");
+    for (const [index, elapsed] of [50, 100].entries()) {
+      const jointly = await runWorldSimulationOffscreenMultiSceneFieldDamageStep({
+        world_simulation_session_id: jointSid,
+        expected_revision: previous.revision,
+        expected_state_hash: previous.state_hash,
+        target_horizon: at(100),
+      }, jointOptions);
+      assert.equal(jointly.version, worldSimulationOffscreenMultiSceneFieldDamageStepVersion);
+      assert.equal(jointly.committed, true);
+      assert.equal(jointly.reached_simulation_time, at(elapsed));
+      assert.deepEqual(jointly.scene_ids, ["annex", "room"]);
+      const after = await getWorldSimulationState(jointSid, jointOptions);
+      const jointHistory = await getWorldSimulationHistory(jointSid, jointOptions);
+      assert.equal(after.revision, index + 1);
+      assert.equal(jointHistory.turns.length, index + 1);
+      assert.equal(after.state.simulation_time, at(elapsed));
+      assert.equal(after.state.scenes.room.simulation_time, at(elapsed));
+      assert.equal(after.state.scenes.annex.simulation_time, at(elapsed));
+      assert.equal(after.state.ability_fields.field_e3.remaining_ms, 100 - elapsed);
+      assert.equal(after.state.ability_fields.annex_field.remaining_ms, 100 - elapsed);
+      const turn = jointHistory.turns.at(-1);
+      assert.equal(turn.event.type, "offscreen_multiscene_ability_field_damage_step");
+      assert.equal(turn.previous_state_hash, previous.state_hash);
+      assert.equal(turn.next_state_hash, after.state_hash);
+      assert.deepEqual(turn.selected_action_intents, []);
+      assert.deepEqual(turn.knowledge_transitions, []);
+      assert.ok(turn.chronological_mutation_queue.queue_hash);
+      assert.ok(turn.chronological_mutation_execution.execution_hash);
+      const hits = turn.action_outcomes.filter(item =>
+        item.result === "ability_field_tick");
+      assert.equal(hits.length, 2);
+      assert.deepEqual(hits.map(h => h.scene_id), ["annex", "room"]);
+      assert.deepEqual(hits.map(h => h.target), ["remote", "aria"]);
+      assert.ok(hits.every(h => h.damage_applied > 0));
+      assert.equal(turn.causal_timeline.entries.filter(e =>
+        e.kind === "ability_field_tick").length, 2);
+      for (const ref of refs) {
+        const standalone = await runWorldSimulationOffscreenEventBatch({
+          world_simulation_session_id: ref.sid,
+          max_turns: 1, target_horizon: at(100),
+        }, ref.options);
+        assert.equal(standalone.committed_physical_step_count, 1);
+        const solo = await getWorldSimulationState(ref.sid, ref.options);
+        const soloHistory = await getWorldSimulationHistory(ref.sid, ref.options);
+        assert.equal(solo.state.simulation_time, at(elapsed));
+        assert.deepEqual(after.state.characters[ref.target].physical_state,
+          solo.state.characters[ref.target].physical_state,
+          "joint per-scene injury must equal a real standalone World physics step");
+        assert.deepEqual(after.state.ability_fields[ref.field],
+          solo.state.ability_fields[ref.field]);
+        const soloHits = soloHistory.turns.at(-1).action_outcomes.filter(item =>
+          item.result === "ability_field_tick" && item.target === ref.target);
+        assert.equal(soloHits.length, 1);
+        assert.equal(hits.find(item => item.target === ref.target).damage_applied,
+          soloHits[0].damage_applied);
+      }
+      assert.deepEqual(after.state.memories, initial.memories);
+      assert.deepEqual(after.state.motivational_goal_history,
+        initial.motivational_goal_history);
+      assert.deepEqual(after.state.event_queue, []);
+      const settled = await bytes();
+      await assert.rejects(runWorldSimulationOffscreenMultiSceneFieldDamageStep({
+        world_simulation_session_id: jointSid,
+        expected_revision: previous.revision,
+        expected_state_hash: previous.state_hash,
+      }, jointOptions), { code: "C6F_MULTI_SCENE_FIELD_STEP_STALE" });
+      assert.deepEqual(await bytes(), settled,
+        "stale damage retries may not duplicate combat injuries");
+      previous = after;
+    }
+    assert.equal(previous.state.characters.aria.physical_state.health_current, 98);
+    assert.equal(previous.state.characters.remote.physical_state.health_current, 98);
+    assert.deepEqual(initial, untouched);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+for (const mode of [
+  "overlapping-character", "unknown-effect", "excessive-dps", "missing-target",
+]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-damage-refusal-" + mode + "-" + process.pid + "-" + Date.now());
+  const options = { fixtureRoot: root };
+  try {
+    const initial = c6fIndependentDamagingFields();
+    if (mode === "overlapping-character")
+      initial.scenes.annex.entity_positions.aria = { x: 1, y: 1 };
+    if (mode === "unknown-effect")
+      initial.ability_fields.annex_field.effect.teleport = true;
+    if (mode === "excessive-dps")
+      initial.ability_fields.annex_field.effect.damage_per_second = 101;
+    if (mode === "missing-target")
+      delete initial.scenes.annex.entity_positions.remote;
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-F bounded independent damage refusal",
+      seed: mode, initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const prior = await getWorldSimulationState(sid, options);
+    const paths = worldSimulationStatePaths(sid, options);
+    const before = await Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]);
+    const denied = await runWorldSimulationOffscreenMultiSceneFieldDamageStep({
+      world_simulation_session_id: sid,
+      expected_revision: prior.revision,
+      expected_state_hash: prior.state_hash,
+    }, options);
+    assert.equal(denied.committed, false);
+    assert.equal(denied.automatic_replay_allowed, false);
+    assert.equal(denied.blocked_reason, {
+      "overlapping-character": "cross_scene_character_identity_overlap",
+      "unknown-effect": "nonharmful_field_lifecycle_authority_required",
+      "excessive-dps": "nonharmful_field_lifecycle_authority_required",
+      "missing-target": "two_scene_field_physics_proposal_outside_slice",
+    }[mode]);
+    assert.deepEqual(await getWorldSimulationState(sid, options), prior);
+    assert.deepEqual(await Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]), before);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+console.log("CB-C6-F independent damaging fields across two World scenes passed.");
 
