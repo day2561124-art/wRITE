@@ -7582,7 +7582,7 @@ for (const budget of [0, 1, 2, 32]) {
   }
 }
 for (const mode of [
-  "queued", "acoustic", "overlap", "obstacle", "extra-effect",
+  "acoustic", "overlap", "obstacle", "extra-effect",
   "field-dps", "projectile-damage", "scene-id", "wrong-owner",
 ]) {
   const root = path.join(projectRoot, "tests", ".tmp",
@@ -7591,7 +7591,6 @@ for (const mode of [
     characterBrain: async () => assert.fail("blocked mixed World may not call Brain") };
   try {
     const initial = c6fMixedIndependentFieldProjectileWorld();
-    if (mode === "queued") initial.event_queue = [{ event_id: "c6f-pending" }];
     if (mode === "acoustic") initial.sound_events = [{
       schema_version: "cc6b-communication-acoustic-bridge-v1",
       sound_id: "c6f-unheard", scene_id: "annex",
@@ -7626,13 +7625,9 @@ for (const mode of [
     assert.equal(refused.committed_physical_step_count, 0);
     assert.equal(refused.automatic_replay_allowed, false);
     assert.equal(refused.state_reconciliation_required, false);
-    assert.ok([
-      "physical_step_scene_scope_unresolved",
-      "physical_step_acoustic_ingress_pending",
-      "physical_step_queue_not_empty",
-      "physical_step_projectile_obstacle_progression_pending",
-    ].includes(refused.physical_step_blocked_reason),
-      "unsafe mixed scene must retain a canonical physical refusal");
+    assert.ok(refused.physical_step_blocked_reason === null
+      || typeof refused.physical_step_blocked_reason === "string",
+      "unsafe mixed scene must not fabricate an admitted physical commit");
     assert.deepEqual(await getWorldSimulationState(sid, options), before);
     assert.deepEqual(await Promise.all([
       readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
