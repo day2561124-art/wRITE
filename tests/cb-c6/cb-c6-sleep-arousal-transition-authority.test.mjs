@@ -8072,3 +8072,154 @@ for (const hp of [12, 7, 1]) {
   }
 }
 console.log("CB-C6-F stationary long-field frontier equivalence and one-batch/split replay passed.");
+
+// C6-F: three overlapping, stationary damaging fields at shared 50ms fronts.
+// The previously accepted two-field preview cannot provide a chronological
+// injury chain when a third field survives longer than the first two.
+for (const startingHp of [15, 8, 1]) {
+  for (const reverse of [false, true]) {
+    const state = c6fOverlappingPersistentFields(reverse, startingHp);
+    const first = d1Clone(state.ability_fields.field_e3);
+    const second = d1Clone(state.ability_fields.field_aux);
+    const third = d1Clone(first);
+    third.field_id = "field_third";
+    third.ability_id = "c6f_three_field_stationary_source";
+    third.remaining_ms = 200;
+    third.tick_ms = 200;
+    third.effect = { damage_per_second: 10 };
+    state.ability_fields = reverse
+      ? { field_third: third, field_e3: first, field_aux: second }
+      : { field_aux: second, field_e3: first, field_third: third };
+    const untouched = d1Clone(state);
+    const long = c6fFieldOnlyPreview(state, 200);
+    let segmented = d1Clone(state);
+    for (let step = 0; step < 4; step++)
+      segmented = c6fFieldOnlyPreview(segmented, 50).next_world_state;
+    const body = long.next_world_state.characters.aria.physical_state;
+    assert.deepEqual(body, segmented.characters.aria.physical_state,
+      "three-field long preview must equal four earliest-frontier private previews");
+    assert.deepEqual(long.next_world_state.ability_fields, segmented.ability_fields,
+      "three-field expiry must be independent of supplied interval width");
+    const hits = long.ability_resolutions.filter(item =>
+      item.result === "ability_field_tick" && item.target === "aria");
+    const order = ["field_aux", "field_e3", "field_third"];
+    const expectedSources = [...order, ...order, ...order, "field_aux", "field_third"];
+    const expectedDamage = [1, 2, .5, 1, 2, .5, 1, 2, .5, 1, .5];
+    const expectedTimes = [50, 50, 50, 100, 100, 100, 150, 150, 150, 200, 200];
+    assert.equal(hits.length, 11);
+    assert.deepEqual(hits.map(item => item.field_id), expectedSources,
+      "three-field causal order is time-first, with stable identity tie-breaks");
+    assert.deepEqual(hits.map(item => item.time_ms), expectedTimes);
+    assert.deepEqual(hits.map(item => item.damage_applied), expectedDamage);
+    assert.deepEqual(body.injuries.map(item => item.source), expectedSources);
+    assert.equal(new Set(body.injuries.map(item => item.injury_id)).size, 11);
+    assert.equal(body.health_current, Math.max(0, startingHp - 12));
+    if (startingHp <= 12) {
+      assert.equal(body.incapacitated, true);
+      assert.equal(body.immobilized, true);
+    }
+    assert.deepEqual(state, untouched, "three-field private preview cannot mutate its source");
+    assert.equal(long.next_world_state.ability_fields.field_e3.active, false);
+    assert.equal(long.next_world_state.ability_fields.field_aux.active, false);
+    assert.equal(long.next_world_state.ability_fields.field_third.active, false);
+
+    const root = path.join(projectRoot, "tests", ".tmp",
+      "c6-f-triple-field-" + startingHp + "-" + reverse + "-" + process.pid + "-" + Date.now());
+    const bigOptions = { fixtureRoot: path.join(root, "single-batch"),
+      characterBrain: async () => assert.fail("physical-only triple fields cannot invoke Brain") };
+    const smallOptions = { fixtureRoot: path.join(root, "step-batches"),
+      characterBrain: async () => assert.fail("canonical physical step cannot invoke Brain") };
+    try {
+      const [big, small] = await Promise.all([
+        beginWorldSimulationSession({
+          simulation_label: "C6-F three field one batch",
+          seed: "triple-batch-" + startingHp + "-" + reverse,
+          initial_world_state: d1Clone(state),
+        }, bigOptions),
+        beginWorldSimulationSession({
+          simulation_label: "C6-F three field four individual batches",
+          seed: "triple-split-" + startingHp + "-" + reverse,
+          initial_world_state: d1Clone(state),
+        }, smallOptions),
+      ]);
+      const sidBig = big.world_simulation_session_id;
+      const sidSmall = small.world_simulation_session_id;
+      const startBig = await getWorldSimulationState(sidBig, bigOptions);
+      const at = new Date(Date.parse(state.simulation_time) + 200).toISOString();
+      const batch = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sidBig, max_turns: 32, target_horizon: at,
+      }, bigOptions);
+      assert.equal(batch.committed_turn_count, 4);
+      assert.equal(batch.committed_physical_step_count, 4);
+      assert.equal(batch.state_reconciliation_required, false);
+      assert.equal(batch.target_horizon_claimed, true);
+      for (let i = 0; i < 4; i++) {
+        const step = await runWorldSimulationOffscreenEventBatch({
+          world_simulation_session_id: sidSmall, max_turns: 1,
+          target_horizon: at,
+        }, smallOptions);
+        assert.equal(step.committed_turn_count, 1);
+        assert.equal(step.committed_physical_step_count, 1);
+        assert.equal(step.automatic_replay_allowed, false);
+      }
+      const [bigState, smallState, bigHistory, smallHistory] = await Promise.all([
+        getWorldSimulationState(sidBig, bigOptions),
+        getWorldSimulationState(sidSmall, smallOptions),
+        getWorldSimulationHistory(sidBig, bigOptions),
+        getWorldSimulationHistory(sidSmall, smallOptions),
+      ]);
+      assert.equal(bigState.revision, 4);
+      assert.equal(smallState.revision, 4);
+      assert.equal(bigHistory.turns.length, 4);
+      assert.equal(smallHistory.turns.length, 4);
+      assert.equal(bigState.state.simulation_time, at);
+      assert.deepEqual(bigState.state.characters.aria.physical_state,
+        long.next_world_state.characters.aria.physical_state,
+        "long preview and committed triple-field injury provenance must agree");
+      assert.deepEqual(bigState.state.characters.aria.physical_state,
+        smallState.state.characters.aria.physical_state);
+      assert.deepEqual(bigState.state.ability_fields, smallState.state.ability_fields);
+      assert.deepEqual(bigState.state.ability_fields, long.next_world_state.ability_fields);
+      const fromHistory = history => history.turns.flatMap(turn =>
+        turn.action_outcomes.filter(item =>
+          item.result === "ability_field_tick" && item.target === "aria")
+          .map(item => [item.ability_field_id, item.damage_applied]));
+      assert.deepEqual(fromHistory(bigHistory), expectedSources.map((id, i) => [id, expectedDamage[i]]));
+      assert.deepEqual(fromHistory(bigHistory), fromHistory(smallHistory));
+      let prevHash = startBig.state_hash;
+      for (let i = 0; i < 4; i++) {
+        const turn = bigHistory.turns[i];
+        assert.equal(turn.previous_state_hash, prevHash);
+        assert.ok(turn.next_state_hash);
+        assert.ok(turn.chronological_mutation_queue.queue_hash);
+        assert.ok(turn.chronological_mutation_execution.execution_hash);
+        assert.deepEqual(turn.selected_action_intents, []);
+        assert.deepEqual(turn.knowledge_transitions, []);
+        prevHash = turn.next_state_hash;
+      }
+      assert.equal(prevHash, bigState.state_hash);
+      const paths = worldSimulationStatePaths(sidBig, bigOptions);
+      const durable = await Promise.all([
+        readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+      ]);
+      await assert.rejects(runWorldSimulationOffscreenPhysicalStep({
+        world_simulation_session_id: sidBig,
+        expected_revision: startBig.revision, expected_state_hash: startBig.state_hash,
+        target_horizon: at,
+      }, bigOptions), { code: "C6E_PHYSICAL_STEP_STALE" });
+      const idle = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sidBig, max_turns: 32,
+        target_horizon: new Date(Date.parse(at) + 100).toISOString(),
+      }, bigOptions);
+      assert.equal(idle.committed_turn_count, 0);
+      assert.deepEqual(await Promise.all([
+        readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+      ]), durable, "completed three-field step cannot be replayed or change durable bytes");
+      assert.deepEqual(await getWorldSimulationHistory(sidBig, bigOptions), bigHistory);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+}
+console.log("CB-C6-F three stationary damaging fields: exact shared-frontier injury order, Native batch parity and replay PASS.");
+

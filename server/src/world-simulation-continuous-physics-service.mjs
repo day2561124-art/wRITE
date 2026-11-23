@@ -1040,13 +1040,13 @@ function resolveAbilityFields(input, newFields, nextWorldState, snapshotScene, n
 
 
 /**
- * Two pre-existing damaging fields must share their earliest causal frontier.
- * This includes one bounded moving actor: later field hits must not be
- * applied before earlier hits when deriving incapacitation and the trajectory.
- * Native offscreen remains the sole World writer; this is a private physics
- * preview for either a stationary field-only turn or one isolated movement.
- * Any projectile, other action type, newly spawned field or complex scene
- * remains on its existing authority path, not a general-purpose time solver.
+ * Pre-existing damaging fields must resolve in shared earliest-frontier
+ * order rather than sorting all hits by source identity. Existing admissions:
+ * exactly two fields with no action, or with one isolated movement, and the
+ * separately verified three-field stationary no-action slice.
+ * Native offscreen remains the World writer; this is an immutable preview.
+ * Moving actors with three or more fields, projectiles, new fields and mixed
+ * action turns retain their established owners/unsupported boundaries.
  */
 function resolveSupportedDualFieldSharedFrontiers(
   input, newFields, nextWorldState, snapshotScene, nextScene,
@@ -1077,9 +1077,13 @@ function resolveSupportedDualFieldSharedFrontiers(
   const allActive = () => Object.values(object(nextWorldState.ability_fields))
     .filter(item => item?.active === true);
   const active = () => allActive().filter(item => item.scene_id === input.scene_id);
-  // This is the separately accepted C6-F two-damaging-field slice, not a
-  // replacement for general stationary, passive or multiscene field physics.
-  if (allActive().length !== 2 || active().length !== 2
+  // Bounded admissions only: an accepted pair may carry an isolated
+  // movement, but three fields are restricted to an unchanged stationary
+  // scene with no selections or outcomes. Everything else keeps its owner.
+  const fieldCount = active().length;
+  if (allActive().length !== fieldCount
+      || (fieldCount !== 2 && fieldCount !== 3)
+      || (fieldCount === 3 && !stationary)
       || !Number.isSafeInteger(elapsedMs) || elapsedMs <= 0)
     return false;
   const rules = object(input.world_state.world_rules ?? input.world_state.rules);
@@ -1104,7 +1108,7 @@ function resolveSupportedDualFieldSharedFrontiers(
     const delta = Math.min(elapsedMs - elapsed, ...ongoing.map(field =>
       Math.min(positiveNumber(field.remaining_ms, Infinity), tickFor(field))));
     if (!Number.isFinite(delta) || delta <= 0)
-      throw new Error("Stationary field frontier has no positive bounded interval.");
+      throw new Error("Shared field frontier has no positive bounded interval.");
     const frontierTransitions = [];
     const frontierOutcomes = [];
     const frontierResolutions = [];
