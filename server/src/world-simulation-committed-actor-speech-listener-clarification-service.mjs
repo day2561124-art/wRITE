@@ -86,34 +86,36 @@ function sceneFor(world, listener, sourceActor, sourceScene) {
   return scenes[0][0];
 }
 async function chooseWithBrain(packet, input, options) {
-  let calls=0, errorDuringCallback=null;
+  let calls=0, errorDuringCallback=null, actualBrainResult;
   const callback=async incoming=>{
     try{
-      if (++calls!==1 || incoming?.character!==input.observer)
+      if (++calls!==1 || incoming?.character!==input.observer
+        || hashAgentRunValue(incoming)!==hashAgentRunValue(packet))
         reject("WORLD_LISTENER_REPLY_BRAIN_IDENTITY_INVALID",
-          "The reply decision belongs only to the once-invoked admitted listener.");
+          "Runtime must preserve the exact listener, decision packet and single Brain invocation.");
       const current=await getWorldSimulationState(input.world_simulation_session_id,options);
       assertCas(input,current);
       if (!projectWorldSimulationConsciousCognitionAdmission(current.state,input.observer).admitted)
         reject("WORLD_LISTENER_REPLY_LISTENER_ASLEEP",
           "Sleeping listener cannot decide to reply.");
-      return await options.characterBrain(copy(incoming));
+      actualBrainResult=await options.characterBrain(copy(incoming));
+      return actualBrainResult;
     } catch(error) {errorDuringCallback=error;throw error;}
   };
-  let result;
   if(options.characterRuntimeManager?.runCharacterTurn) {
-    result=await options.characterRuntimeManager.runCharacterTurn({
+    await options.characterRuntimeManager.runCharacterTurn({
       world_simulation_session_id:input.world_simulation_session_id,
       character:input.observer,
       brain_input:copy(packet),
       characterBrain:callback,
     },options);
-  } else result=await callback(packet);
+  } else await callback(packet);
   if(errorDuringCallback) throw errorDuringCallback;
   if(calls!==1)
     reject("WORLD_LISTENER_REPLY_BRAIN_NOT_INVOKED",
       "Listener Brain must make its own explicit action decision.");
-  return result;
+  // A custom Runtime cannot replace the result returned by the actual Brain.
+  return actualBrainResult;
 }
 
 /**
