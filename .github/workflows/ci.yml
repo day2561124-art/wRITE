@@ -82,6 +82,32 @@ jobs:
       - run: node tests/verification-telemetry.test.mjs
       - run: node tests/cache-telemetry.test.mjs
 
+  pi-sidecar-integration:
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: npm ci
+      - name: Install pinned Pi sidecar dependencies
+        run: npm ci --prefix scripts/pi-runtime --ignore-scripts --no-audit --no-fund
+      - name: Verify real Pi sidecar readiness
+        run: node scripts/pi-runtime/runner.mjs status
+      - name: Verify Pi SDK and durable MCP integration
+        run: node --test tests/mcp/mcp-pi-agent-execution.test.mjs
+      - name: Verify real Pi Codemode bridge
+        run: node --test tests/mcp/mcp-pi-codemode-bridge.test.mjs
+
   main-regression:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
