@@ -202,6 +202,7 @@ function actionFor(eventId, character) {
     },
     "evt-field-injury-reentry": {
       [fieldMover]: "field-run-i",
+      [fieldOwner]: "field-owner-move-i",
     },
   };
   return map[eventId]?.[character] ?? null;
@@ -592,6 +593,55 @@ try {
       source.characters[fieldMover].physical_state);
     assert.deepEqual(disabled, source, "the initial fixture must not be mutated");
   }
+
+
+  // A physically disabled actor's desired destination is not a real claim.
+  // The spatial planner must reject that intent without falsely reserving
+  // the same endpoint against an independent, healthy moving actor.
+  const deniedClaimWorld = structuredClone(initialWorldState);
+  deniedClaimWorld.event_queue = [{
+    event_id: "evt-field-injury-reentry",
+    scene_id: fieldScene, participants: [fieldMover, fieldOwner],
+  }];
+  deniedClaimWorld.ability_fields = {};
+  deniedClaimWorld.projectiles = {};
+  deniedClaimWorld.characters[fieldMover].physical_state = {
+    health_current: 60, health_max: 100,
+    movement_multiplier: 1, incapacitated: true, immobilized: false,
+  };
+  deniedClaimWorld.available_actions[fieldOwner] = [{
+    action_id: "field-owner-move-i", intent: "向自由目的地移動",
+    duration_ms: 1000, movement: { to: { x: 4, y: 1 } },
+  }];
+  const deniedClaimBefore = structuredClone(deniedClaimWorld);
+  const deniedClaimSession = await beginWorldSimulationSession({
+    source_text: "C6-F disabled actor cannot reserve live mover destination",
+    characters: Object.keys(deniedClaimWorld.characters),
+    initial_world_state: deniedClaimWorld,
+  }, options);
+  const deniedClaimId = deniedClaimSession.world_simulation_session_id;
+  await runWorldSimulationTurn({
+    world_simulation_session_id: deniedClaimId,
+  }, { ...options, characterBrain });
+  const deniedClaimState = await getWorldSimulationState(deniedClaimId, { fixtureRoot });
+  const deniedClaimHistory = await getWorldSimulationHistory(deniedClaimId, { fixtureRoot });
+  assert.equal(deniedClaimState.revision, 1);
+  assert.equal(deniedClaimHistory.turns.length, 1);
+  assert.deepEqual(deniedClaimState.state.scenes[fieldScene].entity_positions[fieldMover],
+    { x: 0, y: 1 }, "an incapacitated actor cannot claim the target location");
+  assert.deepEqual(deniedClaimState.state.scenes[fieldScene].entity_positions[fieldOwner],
+    { x: 4, y: 1 }, "a healthy actor must reach a destination a disabled actor merely requested");
+  const claimOutcomes = deniedClaimHistory.turns[0].action_outcomes;
+  assert.equal(claimOutcomes.some(item => item.actor === fieldMover
+    && item.action_id === "field-run-i" && item.result === "movement_blocked"), true);
+  assert.equal(claimOutcomes.some(item => item.actor === fieldOwner
+    && item.action_id === "field-owner-move-i" && item.result === "movement_completed"), true);
+  assert.equal(claimOutcomes.some(item => item.actor === fieldOwner
+    && item.action_id === "field-owner-move-i" && item.result === "movement_blocked"), false);
+  assert.equal(deniedClaimHistory.turns[0].previous_state_hash !==
+    deniedClaimHistory.turns[0].next_state_hash, true);
+  assert.equal(deniedClaimHistory.turns[0].next_state_hash, deniedClaimState.state_hash);
+  assert.deepEqual(deniedClaimWorld, deniedClaimBefore);
 
   console.log(JSON.stringify({
     actor_state_scheduler_version: worldSimulationActorStateSchedulerVersion,
