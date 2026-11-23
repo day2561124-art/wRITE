@@ -30,13 +30,22 @@ assert.match(pr, /pull_request\.base\.sha/u);
 assert.match(pr, /pull_request\.head\.sha/u);
 assert.doesNotMatch(pr, /tests\/run-all\.mjs/u);
 
-const smoke = block("  cross-platform-smoke:\n", "  main-regression:\n");
+const smoke = block("  cross-platform-smoke:\n", "  pi-sidecar-integration:\n");
 assert.match(smoke, /ubuntu-latest/u);
 assert.match(smoke, /windows-latest/u);
 assert.match(smoke, /node: 18/u);
 assert.match(smoke, /ci-change-detection\.test\.mjs/u);
 assert.match(smoke, /affected-test-selector\.test\.mjs/u);
 assert.doesNotMatch(smoke, /tests\/run-all\.mjs/u);
+
+const sidecar = block("  pi-sidecar-integration:\n", "  main-regression:\n");
+assert.match(sidecar, /ubuntu-latest/u);
+assert.match(sidecar, /windows-latest/u);
+assert.match(sidecar, /node-version: 24/u);
+assert.match(sidecar, /npm ci --prefix scripts\\/pi-runtime --ignore-scripts/u);
+assert.match(sidecar, /node scripts\\/pi-runtime\\/runner\\.mjs status/u);
+assert.match(sidecar, /node --test tests\\/mcp\\/mcp-pi-agent-execution\\.test\\.mjs/u);
+assert.match(sidecar, /node --test tests\\/mcp\\/mcp-pi-codemode-bridge\\.test\\.mjs/u);
 
 const main = block("  main-regression:\n", "  scheduled-full:\n");
 assert.match(main, /github\.ref == 'refs\/heads\/main'/u);
