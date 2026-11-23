@@ -13,6 +13,7 @@ import {createPiExecutionHistoryValidator} from '../../server/src/pi-execution-s
 import {createPiReliableMcpAdapter} from '../../server/src/pi-mcp-reliable-adapter.mjs';
 import {runPiDurableWorker,PI_DURABLE_WORKER_PROTOCOL} from '../../server/src/pi-durable-worker.mjs';
 import {createPiDurableWorkerSupervisor} from '../../server/src/pi-durable-worker-supervisor.mjs';
+import {attachPiInspector,createPiInspectionClient} from '../../server/src/pi-durable-worker-protocol.mjs';
 import {fingerprintMcpMutationRequest} from '../../server/src/mcp-operation-reconciliation-context.mjs';
 import {hashExecutionInput,REQUIRED_DECISION_BOUNDARIES} from '../../server/src/pi-execution-contract.mjs';
 const exec=promisify(execFile);
@@ -189,6 +190,57 @@ test('the host supervisor restarts a failed worker and never restarts after drai
   supervisor.drain();assert.equal(messages.at(-1).kind,'drain');workers[1].emit('close',0,null);
   await new Promise(r=>setTimeout(r,30));assert.equal(workers.length,2);assert.equal(supervisor.getStatus().state,'stopped');
  }finally{supervisor.drain();}
+});
+test('concurrent session inspections use the ready worker and recheck a changed Journal', async t => {
+ const { journal, route, storageRoot } = await fixture(t);
+ function channelPair() {
+  const a = Object.assign(new EventEmitter(), { connected: true });
+  const b = Object.assign(new EventEmitter(), { connected: true });
+  a.send = (message, done) => { queueMicrotask(() => b.emit('message', message)); done(); };
+  b.send = (message, done) => { queueMicrotask(() => a.emit('message', message)); done(); };
+  return [a, b];
+ }
+ const [worker, workerProcess] = channelPair();
+ worker.pid = 70001;
+ worker.stderr = new EventEmitter();
+ const supervisor = createPiDurableWorkerSupervisor({ spawnProcess: () => worker });
+ t.after(() => supervisor.drain());
+ let journalCalls = 0;
+ let routeCalls = 0;
+ t.after(attachPiInspector(workerProcess, view => {
+  if (view === 'route') {
+   routeCalls += 1;
+   return route.inspect();
+  }
+  journalCalls += 1;
+  return journal.status();
+ }));
+ await assert.rejects(supervisor.inspect('journal'), /PI_INSPECTION_NOT_READY/);
+ worker.emit('message', { protocol: PI_DURABLE_WORKER_PROTOCOL, kind: 'ready', pid: worker.pid });
+ const sessions = Array.from({ length: 2 }, () => {
+  const [clientChannel, httpChannel] = channelPair();
+  const client = createPiInspectionClient(clientChannel, { timeoutMs: 1000 });
+  t.after(client.close);
+  t.after(attachPiInspector(httpChannel, supervisor.inspect));
+  return client;
+ });
+ const health = await Promise.all(sessions.map(client => client.inspect('journal')));
+ assert.deepEqual(health.map(value => value.latest_sequence), [2, 2]);
+ assert.equal(journalCalls, 1);
+ const started = await journal.begin({ operation_type: 'inspection_fixture', tool_name: 'fixture' });
+ await journal.complete(started.operation_id);
+ const [updated, routing] = await Promise.all([
+  sessions[0].inspect('journal'), sessions[1].inspect('route'),
+ ]);
+ assert.equal(updated.latest_sequence, 4);
+ assert.equal(routing.mode, 'pi_default');
+ assert.equal(routeCalls, 1);
+ await assert.rejects(sessions[0].inspect('dispatch'), /PI_INSPECTION_UNAVAILABLE/);
+ const events = path.join(storageRoot, 'events');
+ const [first] = (await readdir(events)).sort();
+ await appendFile(path.join(events, first), 'invalid JSON');
+ assert.equal((await sessions[0].inspect('journal')).chain_verified, false);
+ await assert.rejects(sessions[1].inspect('route'), /PI_INSPECTION_FAILED/);
 });
 test('semantic snapshot reuse rejects altered prior bytes despite unchanged event hashes',async t=>{
  const f=await fixture(t),h=host(f);await h.submit(intent('semantic-prefix'));

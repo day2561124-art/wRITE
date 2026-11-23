@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { once } from 'events';
 import { attachWorldSimulationPreparedTurnBrokerIpc } from './world-simulation-prepared-turn-broker-ipc.mjs';
 import { attachWorkspaceSnapshotAuthorityIpc } from './mcp-workspace-snapshot-authority-ipc.mjs';
+import { attachPiInspector } from './pi-durable-worker-protocol.mjs';
 import { createMcpRuntimeDiagnostics } from './mcp-runtime-diagnostics.mjs';
 import {performance} from 'node:perf_hooks';
 import {REQUEST_TRACE_PROTOCOL,REQUEST_TRACE_META_KEY,createTraceBuffer,publishTrace,requestTraceChannel,sanitizeTrace,traceId,withTraceId} from './mcp-request-tracing.mjs';
@@ -296,6 +297,9 @@ export function createStdioSession(options = {}) {
         },
       )
       : () => {};
+    const detachPiInspection = options.piInspection
+      ? attachPiInspector(nextChild, options.piInspection)
+      : () => {};
     const onRuntimeReadinessMessage = (message) => {
       if(message?.protocol===REQUEST_TRACE_PROTOCOL&&child===nextChild&&Array.isArray(message.records)) {
         for(const record of message.records.slice(0,64)) {
@@ -454,6 +458,7 @@ export function createStdioSession(options = {}) {
     nextChild.on('exit', (code, signal) => {
       detachPreparedTurnBrokerIpc();
       detachWorkspaceSnapshotAuthorityIpc();
+      detachPiInspection();
       nextChild.off('message', onRuntimeReadinessMessage);
       lastExit = {
         child_pid: nextChild.pid ?? null,
@@ -484,7 +489,10 @@ export function createStdioSession(options = {}) {
     stdoutBuffer = Buffer.alloc(0);
     const managed = process.env.NEXA_MANAGED_PROJECT_ROOT !== undefined;
     const entry = managed ? path.join(releaseRoot, 'server/src/mcp-server.mjs') : 'server/src/mcp-server.mjs';
-    const nextChild = spawnProcess(process.execPath, [entry,...(options.trustedLocalOwner===true?['--trusted-local-owner']:[])], {
+    const args = [entry];
+    if (options.trustedLocalOwner === true) args.push('--trusted-local-owner');
+    if (options.piInspection) args.push('--pi-parent-inspection');
+    const nextChild = spawnProcess(process.execPath, args, {
       // fd 3 is Node's internal IPC channel for the world-simulation prepared-turn
       // broker. stdout remains exclusively MCP JSON-RPC framing.
       // Session startup, reload and recovery are background operations on Windows.

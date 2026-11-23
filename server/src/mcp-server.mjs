@@ -5,6 +5,10 @@ import {performance} from "node:perf_hooks";
 import {REQUEST_TRACE_META_KEY,attachTraceIpc,publishTrace,runRequestTrace,traceId,traceSpan} from "./mcp-request-tracing.mjs";
 if(process.env.MCP_REQUEST_TRACING==='1')attachTraceIpc();
 import { createRuntimeReadiness } from "./mcp-runtime-readiness.mjs";
+import { attachPiInspector, createPiInspectionClient } from "./pi-durable-worker-protocol.mjs";
+const parentPiInspection = process.argv.includes('--pi-parent-inspection')
+  ? createPiInspectionClient(process, { timeoutMs: 90_000 })
+  : null;
 import { preserveWorkstreamPrewriteFailure } from "./mcp-workstream-prewrite-failure.mjs";
 import { markPowerShellPreDispatchFailure, preservePowerShellPreDispatchFailure } from "./mcp-powershell-predispatch-failure.mjs";
 import { chatgpt_bridge_save_settlement_report } from "./mcp-direct-pasted-chapter-settlement-wrapper.mjs";
@@ -2177,7 +2181,7 @@ const toolDefinitions = [
     }),
     handler: async args => {
       if (Object.keys(args).length === 0) {
-        const route = await piProductionController.status();
+        const route = await (parentPiInspection?.inspect('route') ?? piProductionController.status());
         return jsonContent({ route, default_path: route.revision > 0 ? "GPT -> Pi -> MCP" : "GPT -> MCP", legacy_migration: false, decision_owner: "GPT", execution_owner: "Pi", tool_owner: "MCP" });
       }
       if (!args.operation_id && !args.intent_id && !args.bootstrap && args.workstream_id && args.workspace_id) {
@@ -2381,7 +2385,7 @@ const toolDefinitions = [
     risk: "read",
     annotations: { readOnlyHint: true },
     inputSchema: baseSchema({}),
-    handler: async () => jsonContent(await dev_workspace_journal_status()),
+    handler: async () => jsonContent(await (parentPiInspection?.inspect('journal') ?? dev_workspace_journal_status())),
   },
   {
     name: "dev_workspace_get_operation",
@@ -6574,10 +6578,17 @@ const runtimeComponents = createRuntimeReadiness([
 
 if(process.argv.includes('--pi-worker')){
  const {runPiDurableWorker}=await import('./pi-durable-worker.mjs');
- await runPiDurableWorker({controller:piProductionController,ready:()=>{
-  void runtimeComponents.start();
-  return runtimeComponents.ensure("journal");
- }});
+ let detachInspection = () => {};
+ try {
+  await runPiDurableWorker({controller:piProductionController,ready:async()=>{
+   void runtimeComponents.start();
+   await runtimeComponents.ensure("journal");
+   detachInspection = attachPiInspector(process, view => view === 'route'
+     ? piProductionController.status() : dev_workspace_journal_status());
+  }});
+ } finally {
+  detachInspection();
+ }
  process.disconnect?.();
  process.exit(0);
 }else{

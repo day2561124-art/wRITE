@@ -2,13 +2,13 @@ import {spawn} from 'node:child_process';
 import path from 'node:path';
 import {projectRoot,releaseRoot} from './project-paths.mjs';
 import {controlledProcessEnvironment} from './process-control.mjs';
-import {PI_DURABLE_WORKER_PROTOCOL} from './pi-durable-worker-protocol.mjs';
+import {createPiInspectionClient,PI_DURABLE_WORKER_PROTOCOL} from './pi-durable-worker-protocol.mjs';
 
 // The long-lived HTTP host owns this process independently of MCP sessions.
 // The journal remains the sole work queue and owner/CAS authority.
 export function createPiDurableWorkerSupervisor({spawnProcess=spawn,root=releaseRoot,
  enabled=true,minRestartMs=1000,maxRestartMs=60000,onStatus=()=>{}}={}){
- let child=null,restartTimer=null,closed=false,attempts=0;
+ let child=null,inspection=null,restartTimer=null,closed=false,attempts=0;
  let status={protocol:PI_DURABLE_WORKER_PROTOCOL,state:enabled?'starting':'disabled',pid:null,restarts:0,operation_id:null,last_exit:null};
  const publish=patch=>{status={...status,...patch};onStatus({...status});};
  function start(){
@@ -23,6 +23,8 @@ export function createPiDurableWorkerSupervisor({spawnProcess=spawn,root=release
     NEXA_PI_REQUIRE_TASK_AUTHORIZATION:process.env.NEXA_PI_REQUIRE_TASK_AUTHORIZATION}),
   });
   const started=Date.now();child=worker;publish({state:'starting',pid:worker.pid??null});
+  const inspector=createPiInspectionClient(worker,{timeoutMs:80_000});
+  inspection=inspector;
   // Child errors contain no commands or caller-selected data in this channel.
   worker.stderr?.on('data',()=>{});
   worker.on('message',message=>{
@@ -40,7 +42,9 @@ export function createPiDurableWorkerSupervisor({spawnProcess=spawn,root=release
   });
   worker.once('error',()=>publish({state:'spawn_failed'}));
   worker.once('close',(code,signal)=>{
+   inspector.close();
    if(child!==worker)return;child=null;
+   inspection=null;
    publish({state:closed?'stopped':'restarting',pid:null,operation_id:null,last_exit:{code,signal}});
    if(!closed){attempts=Date.now()-started>=60000?1:attempts+1;publish({restarts:status.restarts+1});
     restartTimer=setTimeout(start,Math.min(maxRestartMs,minRestartMs*2**Math.min(attempts-1,10)));}
@@ -48,9 +52,15 @@ export function createPiDurableWorkerSupervisor({spawnProcess=spawn,root=release
  }
  function drain(){
   closed=true;clearTimeout(restartTimer);
+  inspection?.close();
   if(child?.connected){publish({state:'draining'});child.send({protocol:PI_DURABLE_WORKER_PROTOCOL,kind:'drain'},()=>{});}
   else if(!child)publish({state:'stopped'});
  }
+ async function inspect(view){
+  if(!inspection||closed)throw new Error('PI_INSPECTION_UNAVAILABLE');
+  if(!['ready','idle','executing'].includes(status.state))throw new Error('PI_INSPECTION_NOT_READY');
+  return inspection.inspect(view);
+ }
  start();
- return Object.freeze({getStatus:()=>({...status,last_exit:status.last_exit?{...status.last_exit}:null}),drain});
+ return Object.freeze({getStatus:()=>({...status,last_exit:status.last_exit?{...status.last_exit}:null}),drain,inspect});
 }

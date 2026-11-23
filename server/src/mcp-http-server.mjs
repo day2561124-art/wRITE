@@ -868,6 +868,7 @@ function createBridgeSession() {
     preparedTurnBroker,
     workspaceSnapshotAuthority,
     workspaceChangeClockProvider,
+    piInspection: isDeveloperReloadAllowed() ? piDurableWorker.inspect : undefined,
     onIncident: (incident) => diagnostics.captureIncident(
       incident?.type ?? 'stdio_incident',
       incident?.details ?? incident ?? {},
