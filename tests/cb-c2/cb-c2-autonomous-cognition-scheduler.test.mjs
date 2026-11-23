@@ -1052,10 +1052,12 @@ try {
     "Listener response must not rewrite original source speech or its hearing receipt.");
   const replyTurn=replyHistory.turns.at(-1);
   assert.equal(replyTurn.event,null);
-  assert.equal(replyTurn.autonomous_actor_initiated_action.character,inquiryAlly);
-  assert.equal(replyTurn.autonomous_actor_initiated_action.listener_clarification_source.source_turn_id,
+  assert.equal(replyTurn.autonomous_actor_initiated_action,undefined,
+    "A listener reply must not spoof a C2 actor-originated scheduled opportunity.");
+  assert.equal(replyTurn.autonomous_listener_clarification_reply.character,inquiryAlly);
+  assert.equal(replyTurn.autonomous_listener_clarification_reply.source_turn_id,
     acousticSourceTurn.turn_id);
-  assert.equal(replyTurn.autonomous_actor_initiated_action.listener_clarification_source.observer_increment_ref,
+  assert.equal(replyTurn.autonomous_listener_clarification_reply.observer_increment_ref,
     sourceAdmission.observer_increment.increment_ref);
   assert.equal(replyTurn.selected_action_intents[0].action_id,
     clarificationCandidate.action_id);
