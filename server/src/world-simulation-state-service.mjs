@@ -389,7 +389,10 @@ export async function commitWorldSimulationTurn(
       || input.subjective_memory_formation?.audit?.version
         !== "phase63a-subjective-memory-formation-v2"
       || input.subjective_memory_mutation_queue?.queue_hash !== meta.mutation_queue_hash
-      || input.chronological_mutation_queue?.queue_hash !== meta.mutation_queue_hash
+      || (meta.claim_adoption == null
+        && input.chronological_mutation_queue?.queue_hash !== meta.mutation_queue_hash)
+      || (meta.claim_adoption != null
+        && input.chronological_mutation_queue != null)
       || !Array.isArray(input.state_transitions)
       || input.state_transitions.length !== (meta.claim_adoption ? 5 : 1)
       || (meta.claim_adoption != null && (
