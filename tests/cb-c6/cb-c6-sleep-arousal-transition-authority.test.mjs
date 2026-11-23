@@ -4898,7 +4898,29 @@ async function c6fNativeAcousticReentry(mode) {
     assert.deepEqual(final.state.event_queue, []);
     assert.equal((final.state.sound_events ?? []).some(item =>
       item.sound_id === signalId), false);
-    assert.deepEqual(final.state.memories, initial.memories);
+    // Actual speech and actual hearing SHOULD form traceable subjective memories.
+    // Offscreen reduction must preserve, not erase, these real experiences.
+    const speakerMemories = final.state.memories.A ?? [];
+    const listenerMemories = final.state.memories.B ?? [];
+    assert.equal(speakerMemories.length, 1);
+    assert.equal(listenerMemories.length, 1);
+    const speakerMemory = speakerMemories[0];
+    const listenerMemory = listenerMemories[0];
+    assert.equal(speakerMemory.memory_type, "episodic_action_experience");
+    assert.equal(speakerMemory.content.kind, "post_outcome_action_experience");
+    assert.equal(speakerMemory.content.perceived_status, "communication_emitted");
+    assert.equal(speakerMemory.internal_provenance.event_id, "c6f-speak");
+    assert.equal(speakerMemory.subjective_memory_not_world_truth, true);
+    assert.equal(listenerMemory.memory_type, "episodic_direct_perception");
+    assert.equal(listenerMemory.content.kind, "audible_sound");
+    assert.equal(listenerMemory.content.perceptual_label, "unidentified_speech_sound");
+    assert.equal(listenerMemory.internal_provenance.event_id, "c6f-hear");
+    assert.equal(listenerMemory.source.kind, "direct_perception");
+    assert.equal(listenerMemory.subjective_memory_not_world_truth, true);
+    for (const value of [meaning, utterance]) {
+      assert.equal(JSON.stringify(listenerMemory.content).includes(value), false,
+        "heard sound memory must not be promoted to understood speech");
+    }
     assert.deepEqual(final.state.characters.A.known, initial.characters.A.known);
     assert.deepEqual(final.state.characters.B.known, initial.characters.B.known);
     assert.deepEqual(final.state.characters.A.relationships,
@@ -4930,7 +4952,20 @@ async function c6fNativeAcousticReentry(mode) {
       heardAgain: afterHeard.includes("unidentified_speech_sound"),
       emissionCount: emitted.length,
       finalSoundCount: (final.state.sound_events ?? []).length,
-      memories: final.state.memories,
+      memoryEvidence: {
+        speaker: {
+          type: speakerMemory.memory_type,
+          content: speakerMemory.content,
+          event: speakerMemory.internal_provenance.event_id,
+          subjective: speakerMemory.subjective_memory_not_world_truth,
+        },
+        listener: {
+          type: listenerMemory.memory_type,
+          content: listenerMemory.content,
+          event: listenerMemory.internal_provenance.event_id,
+          subjective: listenerMemory.subjective_memory_not_world_truth,
+        },
+      },
       speakerKnown: final.state.characters.A.known,
       listenerKnown: final.state.characters.B.known,
       relationships: [final.state.characters.A.relationships,
