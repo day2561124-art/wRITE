@@ -907,7 +907,10 @@ function resolveAbilityFields(input, newFields, nextWorldState, snapshotScene, n
   const newStart = new Map(newFields.map((item) => [item.fieldId, item.activeAfterMs]));
   const rules = object(input.world_state.world_rules ?? input.world_state.rules);
   const defaultTickMs = positiveNumber(rules.ability_field_tick_ms, 100);
-  for (const [fieldId, rawField] of Object.entries(nextWorldState.ability_fields)) {
+  // Concurrent damaging fields must produce the same injury chain regardless of
+  // map insertion order (including after save/load or reconstruction).
+  for (const [fieldId, rawField] of Object.entries(nextWorldState.ability_fields)
+    .sort(([left], [right]) => left.localeCompare(right, "en"))) {
     const field = object(rawField);
     if (field.active !== true || String(field.scene_id ?? "") !== input.scene_id) continue;
     const startMs = newStart.has(fieldId) ? newStart.get(fieldId) : 0;
