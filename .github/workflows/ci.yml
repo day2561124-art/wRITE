@@ -67,6 +67,8 @@ jobs:
           node-version: ${{ matrix.node }}
           package-manager-cache: false
       - run: npm ci
+      - name: Verify isolated runtime data root (Linux and Windows)
+        run: node --test tests/agent/external-data-root-isolation.test.mjs
       - name: Verify Windows Launcher and background OAuth startup
         if: runner.os == 'Windows'
         run: node tests/secure-tunnel-launcher.test.mjs
