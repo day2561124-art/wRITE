@@ -423,6 +423,55 @@ const first = buildReuseTurn(history1, {
 });
 assert.equal(first.phase81Q.evidence_count, 1);
 
+// A long-running World can have a current valid Phase81Q but no historical
+// Phase81Q yet. A prior-Q-free history must not invent longitudinal evidence;
+// frozen input and an equivalent independent JSON snapshot produce the exact
+// same projection hash without taking the deep-copy verification path.
+const firstNoPriorInput = {
+  world_simulation_session_id: sessionId,
+  turn_id: firstTurnId,
+  state_revision: firstRevision,
+  world_state_hash: firstWorldStateHash,
+  world_history: history1,
+  current_phase81q_outcome_evidence: first.phase81Q,
+  counterfactual_linked_experience_reuse_outcome_selected_action_lineage: first.phase81P,
+  subjective_choice_commitment_receipts: first.choices,
+  counterfactual_linked_experience_reuse_outcome_reentry_projections: [first.phase81N],
+  counterfactual_linked_experience_reuse_outcome_deliberation_projections: [first.phase81O],
+  post_outcome_subjective_perception_projection: first.outcome,
+};
+assert.equal(history1.turns.some(turn =>
+  turn.counterfactual_linked_experience_reuse_outcome_selected_action_outcome_evidence != null), false);
+const sourceHistoryHash = hashAgentRunValue(history1);
+const priorFree = buildWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeEvidence(
+  firstNoPriorInput,
+);
+assert.equal(priorFree.context_count, 1);
+assert.equal(priorFree.longitudinal_ready_context_count, 0);
+assert.equal(priorFree.audit.prior_phase81q_projection_count_verified, 0);
+assert.equal(hashAgentRunValue(history1), sourceHistoryHash);
+const frozenPriorFree = deepFreezeCommitted(clone(history1));
+const frozenPriorFreeResult =
+  buildWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeEvidence({
+    ...firstNoPriorInput,
+    world_history: frozenPriorFree,
+  });
+assert.equal(frozenPriorFreeResult.projection_hash, priorFree.projection_hash);
+assert.equal(hashAgentRunValue(frozenPriorFree), sourceHistoryHash);
+
+// The optimized branch must not treat a present but malformed historical
+// Phase81Q as absent. Inserting a forged historical Q still fails closed.
+const malformedPriorQ = clone(history1);
+malformedPriorQ.turns[0].counterfactual_linked_experience_reuse_outcome_selected_action_outcome_evidence =
+  { evidence_count: 0 };
+assert.throws(() =>
+  buildWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeEvidence({
+    ...firstNoPriorInput,
+    world_history: malformedPriorQ,
+  }));
+
+
+
 const history2 = clone(history1);
 history2.turns.push(committedTurn(firstTurnId, firstRevision, firstWorldStateHash, first));
 const secondTurnId = "turn_phase82a_reuse_2";
