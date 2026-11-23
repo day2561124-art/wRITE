@@ -1809,6 +1809,21 @@ try {
     world_truth_claimed:false,
   }));
 
+  // Keep both authentic World histories at the same revision, so the
+  // differential cannot be attributed merely to one extra idle turn.
+  const noClaimNextWorldTurn=await commitWorldSimulationTurn(noClaimSid,{
+    expected_revision:noClaimResultState.revision,
+    expected_state_hash:noClaimResultState.state_hash,
+    turn_id:"cb_c4_reply_declined_claim_real_subsequent_turn",
+    next_world_state:noClaimResultState.state,event:null,
+    selected_action_intents:[],action_outcomes:[],state_transitions:[],
+  },{fixtureRoot:goalFixtureRoot});
+  assert.equal(noClaimNextWorldTurn.state.revision,nextWorldTurn.state.revision);
+  assert.deepEqual(noClaimNextWorldTurn.state.state.available_actions,
+    nextWorldTurn.state.state.available_actions);
+  assert.deepEqual(noClaimNextWorldTurn.state.state.characters,
+    nextWorldTurn.state.state.characters);
+
   // Next actor-owned, eventless World speech must expose only prior-turn
   // Phase66C beliefs. Compare two independent authentic A→B→A histories:
   // one Brain adopted its uncertain guess, the other chose do_not_propose.
