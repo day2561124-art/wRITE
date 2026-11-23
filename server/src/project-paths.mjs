@@ -28,6 +28,11 @@ function selectDataRoot(value) {
 // agent run state, traces, journals, locks and transaction manifests use it.
 export const projectDataRoot = selectDataRoot(process.env.WRITE_DATA_ROOT);
 const realDataRoot = effectiveExistingPath(projectDataRoot);
+// Without explicit opt-in, preserve the original no-symlink-escape
+// restriction for the repository's default data/ directory.
+if (process.env.WRITE_DATA_ROOT === undefined && !isInside(realProjectRoot, realDataRoot)) {
+  throw new Error("The default data root must remain inside the source repository.");
+}
 if (process.env.WRITE_DATA_ROOT !== undefined
     && (isInside(realProjectRoot, realDataRoot) || isInside(realDataRoot, realProjectRoot))) {
   throw new Error("WRITE_DATA_ROOT must resolve independently of the source repository.");
@@ -169,7 +174,8 @@ function assertNoSymlinkEscape(filePath, label) {
   const actual = effectiveExistingPath(filePath);
   const projectScoped = isInside(projectRoot, filePath)
     && isInside(realProjectRoot, actual);
-  const consumerScoped = isInside(projectDataRoot, filePath)
+  const consumerScoped = process.env.WRITE_DATA_ROOT !== undefined
+    && isInside(projectDataRoot, filePath)
     && isInside(realDataRoot, actual);
   if (!projectScoped && !consumerScoped) {
     throw new Error(`${label} escapes the authorized project or data directory through a symbolic link.`);
