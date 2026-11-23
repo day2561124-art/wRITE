@@ -355,6 +355,47 @@ export async function commitWorldSimulationTurn(
       throw error;
     }
   }
+  if (input.autonomous_reply_subjective_memory_encoding != null) {
+    const meta = requireObject(input.autonomous_reply_subjective_memory_encoding,
+      "autonomous_reply_subjective_memory_encoding");
+    if (meta.version !== "world-reply-subjective-dialogue-memory-v1"
+      || input.event != null
+      || input.autonomous_actor_initiated_action != null
+      || input.autonomous_listener_clarification_reply != null
+      || input.autonomous_cognition_goal_commitment != null
+      || input.autonomous_cognition_plan_commitment != null
+      || (input.selected_action_intents ?? []).length !== 0
+      || (input.action_outcomes ?? []).length !== 0
+      || typeof meta.character !== "string" || !meta.character.trim()
+      || typeof meta.scene_id !== "string" || !meta.scene_id.trim()
+      || typeof meta.source_turn_id !== "string" || !meta.source_turn_id.trim()
+      || typeof meta.source_turn_hash !== "string" || !meta.source_turn_hash.trim()
+      || typeof meta.source_character !== "string" || !meta.source_character.trim()
+      || typeof meta.source_action_id !== "string" || !meta.source_action_id.trim()
+      || meta.source_character === meta.character
+      || !Number.isSafeInteger(meta.source_revision_to)
+      || meta.source_revision_to !== input.expected_revision
+      || typeof meta.observer_increment_ref !== "string" || !meta.observer_increment_ref
+      || typeof meta.memory_id !== "string" || !meta.memory_id.trim()
+      || typeof meta.memory_hash !== "string" || !meta.memory_hash.trim()
+      || typeof meta.interpreted_content_hash !== "string"
+      || !meta.interpreted_content_hash.trim()
+      || !["interpreted","partial","uncertain"].includes(meta.interpretation_status)
+      || input.subjective_memory_formation?.result?.created_memory_count !== 1
+      || input.subjective_memory_formation?.audit?.result_hash !== meta.phase63a_result_hash
+      || input.subjective_memory_formation?.audit?.version
+        !== "phase63a-subjective-memory-formation-v2"
+      || input.subjective_memory_mutation_queue?.queue_hash !== meta.mutation_queue_hash
+      || input.chronological_mutation_queue?.queue_hash !== meta.mutation_queue_hash
+      || !Array.isArray(input.state_transitions)
+      || input.state_transitions.length !== 1
+      || input.state_transitions[0]?.field !== "memories." + meta.character) {
+      const error = new Error(
+        "Private subjective reply memory needs an exact Phase63A World-only transaction.");
+      error.code = "WORLD_REPLY_MEMORY_COMMIT_METADATA_INVALID";
+      throw error;
+    }
+  }
   const nextWorldState = requireObject(input.next_world_state, "next_world_state");
   const paths = worldSimulationStatePaths(sessionId, options);
   let committedEnvelope = null;
@@ -382,6 +423,54 @@ export async function commitWorldSimulationTurn(
             const stale = new Error("World simulation state hash changed before commit.");
             stale.code = "WORLD_SIMULATION_STALE_STATE_HASH";
             throw stale;
+          }
+          if (input.autonomous_reply_subjective_memory_encoding != null) {
+            const meta = input.autonomous_reply_subjective_memory_encoding;
+            const oldWorld = cloneJson(current.state);
+            const newWorld = cloneJson(nextWorldState);
+            const oldMemories = isObject(oldWorld.memories) ? oldWorld.memories : {};
+            const newMemories = isObject(newWorld.memories) ? newWorld.memories : {};
+            const oldList = Array.isArray(oldMemories[meta.character])
+              ? oldMemories[meta.character] : [];
+            const newList = Array.isArray(newMemories[meta.character])
+              ? newMemories[meta.character] : [];
+            const latest = newList.at(-1);
+            delete oldWorld.memories;
+            delete newWorld.memories;
+            const priorEntries = cloneJson(oldMemories);
+            const nextEntries = cloneJson(newMemories);
+            delete priorEntries[meta.character];
+            delete nextEntries[meta.character];
+            if (hashAgentRunValue(oldWorld) !== hashAgentRunValue(newWorld)
+              || hashAgentRunValue(priorEntries) !== hashAgentRunValue(nextEntries)
+              || newList.length !== oldList.length + 1
+              || hashAgentRunValue(newList.slice(0,-1)) !== hashAgentRunValue(oldList)
+              || latest?.memory_id !== meta.memory_id
+              || hashAgentRunValue(latest) !== meta.memory_hash
+              || latest?.memory_type !== "episodic_direct_perception"
+              || latest?.source?.kind !== "direct_perception"
+              || latest?.source?.sense !== "auditory"
+              || latest?.content?.kind !== "subjective_spoken_reply_interpretation"
+              || hashAgentRunValue(latest?.content?.interpreted_content)
+                !== meta.interpreted_content_hash
+              || latest?.content?.interpretation_status !== meta.interpretation_status
+              || latest?.content?.source_utterance_verified !== false
+              || latest?.content?.world_truth_claimed !== false
+              || latest?.subjective_memory_not_world_truth !== true
+              || latest?.possibly_incorrect !== true
+              || latest?.internal_provenance?.turn_id !== turnId
+              || latest?.formation_stage !== "encoded_unconsolidated"
+              || input.state_transitions[0].to == null
+              || hashAgentRunValue(input.state_transitions[0].to)
+                !== hashAgentRunValue(newList)
+              || hashAgentRunValue(input.state_transitions[0].from)
+                !== hashAgentRunValue(Array.isArray(oldMemories[meta.character])
+                  ? oldList : null)) {
+              const error = new Error(
+                "Reply encoding must append one uncertain private memory, with no other World changes.");
+              error.code = "WORLD_REPLY_MEMORY_STATE_MUTATION_INVALID";
+              throw error;
+            }
           }
           const now = new Date().toISOString();
           assertWorldSimulationSleepArousalCommitAuthority({
@@ -447,6 +536,41 @@ export async function commitWorldSimulationTurn(
               throw error;
             }
           }
+          if (input.autonomous_reply_subjective_memory_encoding != null) {
+            const meta = input.autonomous_reply_subjective_memory_encoding;
+            const prior = arrayTurns(history).at(-1);
+            const lineage = prior?.autonomous_listener_clarification_reply;
+            const admissions = prior?.communication_observer_increment_admissions;
+            if (!prior || prior.turn_id !== meta.source_turn_id
+              || prior.revision_to !== meta.source_revision_to
+              || hashAgentRunValue(prior) !== meta.source_turn_hash
+              || prior.event !== null
+              || lineage?.version !== "world-listener-clarification-causal-reply-v1"
+              || lineage.character !== meta.source_character
+              || lineage.action_id !== meta.source_action_id
+              || lineage.scene_id !== meta.scene_id
+              || lineage.source_character !== meta.character
+              || !Array.isArray(admissions)
+              || admissions.filter(item =>
+                item?.observer === meta.character
+                && item?.admission_status === "heard_acoustic_cues_only"
+                && item?.audit?.source_action_id === meta.source_action_id
+                && item?.audit?.source_speaker === meta.source_character
+                && item?.observer_increment?.increment_ref
+                  === meta.observer_increment_ref).length !== 1
+              || (input.subjective_memory_formation?.result?.character_updates ?? [])
+                .filter(item => item?.character === meta.character
+                  && item?.created_memory_count === 1
+                  && item?.memory_records?.length === 1
+                  && item.memory_records[0].memory_id === meta.memory_id
+                  && hashAgentRunValue(item.memory_records[0]) === meta.memory_hash)
+                .length !== 1) {
+              const error = new Error(
+                "Subjective memory must retain one exact prior committed acoustic reply source.");
+              error.code = "WORLD_REPLY_MEMORY_SOURCE_COMMIT_INVALID";
+              throw error;
+            }
+          }
           const now = committedEnvelope?.updated_at ?? new Date().toISOString();
           committedHistoryEntry = cloneJson({
             turn_id: turnId,
@@ -468,6 +592,9 @@ export async function commitWorldSimulationTurn(
             ...(input.autonomous_listener_clarification_reply != null
               ? { autonomous_listener_clarification_reply:
                   input.autonomous_listener_clarification_reply } : {}),
+            ...(input.autonomous_reply_subjective_memory_encoding != null
+              ? { autonomous_reply_subjective_memory_encoding:
+                  input.autonomous_reply_subjective_memory_encoding } : {}),
             selected_action_intents: input.selected_action_intents ?? [],
             subjective_choice_commitment_receipts:
               input.subjective_choice_commitment_receipts ?? null,

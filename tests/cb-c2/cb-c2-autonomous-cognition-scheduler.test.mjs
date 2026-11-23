@@ -18,6 +18,7 @@ import { runWorldSimulationCommittedActorSpeechListenerCognition } from "../../s
 import { runWorldSimulationCommittedActorSpeechListenerClarification } from "../../server/src/world-simulation-committed-actor-speech-listener-clarification-service.mjs";
 import { runWorldSimulationCommittedReplySpeakerCognition } from "../../server/src/world-simulation-committed-reply-speaker-ingress-service.mjs";
 import { runWorldSimulationCommittedReplySpeakerLexicalMeaning } from "../../server/src/world-simulation-committed-reply-speaker-lexical-meaning-service.mjs";
+import { runWorldSimulationCommittedReplySubjectiveMemory } from "../../server/src/world-simulation-committed-reply-subjective-memory-service.mjs";
 import { assertWorldSimulationCommittedAcousticSource } from "../../server/src/world-simulation-native-committed-source-service.mjs";
 import { buildCharacterCommunicationActionCandidate } from "../../server/src/character-communication-foundation-service.mjs";
 import { nativeImplementationIntentionActivationCapability } from "../../server/src/world-simulation-goal-implementation-intention-activation-service.mjs";
@@ -1289,6 +1290,113 @@ try {
       world_unchanged:true,brain_calls:invoked,
     }));
   }
+
+  // A genuinely heard and subjectively interpreted reply may be remembered
+  // only if the same original speaker's Brain independently chooses encoding.
+  // Refusal cannot create a token memory or World revision.
+  const interpretedPhrase="我認為對方只是想讓我重新說一次，還不知道原因";
+  let encodingChoices=0;
+  const memoryBrainFor=decision=>async packet=>{
+    if(packet.cognition?.committed_acoustic_observation)
+      return {private_reaction:"heard a voice"};
+    if(packet.cognition?.observer_lexical_recognition)
+      return {
+        recognition_status:"recognized",
+        heard_surface_fragment:
+          packet.cognition.observer_lexical_recognition.emitted_surface_fragment,
+      };
+    if(packet.cognition?.observer_meaning_interpretation)
+      return {
+        interpretation_status:"interpreted",
+        interpreted_content:interpretedPhrase,
+        interpreted_interaction_function:"request_repeat",
+        understanding_attested:true,
+      };
+    if(packet.cognition?.subjective_reply_memory_candidate){
+      encodingChoices++;
+      const view=packet.cognition.subjective_reply_memory_candidate;
+      assert.equal(packet.character,character);
+      assert.equal(view.interpreted_content,interpretedPhrase);
+      assert.equal(view.source_utterance_verified,false);
+      assert.equal(view.possibly_incorrect,true);
+      assert.equal(packet.boundaries.direct_memory_record_write_authority,false);
+      assert.equal(packet.boundaries.belief_write_authority,false);
+      assert.equal(packet.boundaries.world_truth_authority,false);
+      return {decision};
+    }
+    throw new Error("Unexpected private Brain stage in reply memory test.");
+  };
+  const memoryDeclined=await runWorldSimulationCommittedReplySubjectiveMemory(
+    speakerIngressInput,{fixtureRoot:goalFixtureRoot,
+      characterBrain:memoryBrainFor("do_not_encode")});
+  assert.equal(memoryDeclined.status,"character_declined_encoding");
+  assert.equal(memoryDeclined.committed,false);
+  assert.equal(encodingChoices,1);
+  assert.equal((await getWorldSimulationState(
+    acousticSid,{fixtureRoot:goalFixtureRoot})).state_hash,replySnapshot.state_hash);
+  const beforeMemoryHistory=await getWorldSimulationHistory(
+    acousticSid,{fixtureRoot:goalFixtureRoot});
+  assert.deepEqual(beforeMemoryHistory.turns,replyHistory.turns);
+
+  const encodedReply=await runWorldSimulationCommittedReplySubjectiveMemory(
+    speakerIngressInput,{fixtureRoot:goalFixtureRoot,
+      characterBrain:memoryBrainFor("encode")});
+  assert.equal(encodingChoices,2);
+  assert.equal(encodedReply.committed,true);
+  assert.equal(encodedReply.memory_encoded,true);
+  assert.equal(encodedReply.possibly_incorrect,true);
+  assert.equal(encodedReply.fully_consolidated,false);
+  assert.equal(encodedReply.belief_revised,false);
+  assert.equal(encodedReply.world_truth_claimed,false);
+  const afterMemorySnapshot=await getWorldSimulationState(
+    acousticSid,{fixtureRoot:goalFixtureRoot});
+  const afterMemoryHistory=await getWorldSimulationHistory(
+    acousticSid,{fixtureRoot:goalFixtureRoot});
+  assert.equal(afterMemorySnapshot.revision,replySnapshot.revision+1);
+  assert.equal(afterMemoryHistory.turns.length,replyHistory.turns.length+1);
+  assert.deepEqual(afterMemoryHistory.turns.slice(0,-1),replyHistory.turns);
+  assert.deepEqual(afterMemorySnapshot.state.characters,replySnapshot.state.characters);
+  assert.deepEqual(afterMemorySnapshot.state.memories?.[inquiryAlly]??[],
+    replySnapshot.state.memories?.[inquiryAlly]??[]);
+  const priorSelfMem=replySnapshot.state.memories?.[character]??[];
+  const afterSelfMem=afterMemorySnapshot.state.memories?.[character]??[];
+  assert.equal(afterSelfMem.length,priorSelfMem.length+1);
+  assert.deepEqual(afterSelfMem.slice(0,-1),priorSelfMem);
+  const newestMemory=afterSelfMem.at(-1);
+  assert.equal(newestMemory.memory_id,encodedReply.memory_id);
+  assert.equal(newestMemory.content.kind,"subjective_spoken_reply_interpretation");
+  assert.equal(newestMemory.content.interpreted_content,interpretedPhrase);
+  assert.equal(newestMemory.content.source_utterance_verified,false);
+  assert.equal(newestMemory.content.world_truth_claimed,false);
+  assert.equal(newestMemory.possibly_incorrect,true);
+  assert.equal(newestMemory.subjective_memory_not_world_truth,true);
+  assert.equal(newestMemory.formation_stage,"encoded_unconsolidated");
+  const memoryTurn=afterMemoryHistory.turns.at(-1);
+  assert.equal(memoryTurn.event,null);
+  assert.equal(memoryTurn.autonomous_reply_subjective_memory_encoding.memory_id,
+    newestMemory.memory_id);
+  assert.equal(memoryTurn.autonomous_reply_subjective_memory_encoding.source_turn_id,
+    replyTurn.turn_id);
+  assert.equal(memoryTurn.autonomous_reply_subjective_memory_encoding.source_turn_hash,
+    hashAgentRunValue(replyTurn));
+  assert.equal(memoryTurn.selected_action_intents.length,0);
+  assert.equal(memoryTurn.action_outcomes.length,0);
+  assert.equal(afterMemorySnapshot.state.event_queue.length,0);
+  await assert.rejects(
+    runWorldSimulationCommittedReplySubjectiveMemory(
+      speakerIngressInput,{fixtureRoot:goalFixtureRoot,
+        characterBrain:memoryBrainFor("encode")}),
+    error=>["WORLD_REPLY_SPEAKER_WORLD_STALE","WORLD_REPLY_MEMORY_WORLD_STALE"].includes(error?.code));
+  assert.equal((await getWorldSimulationState(
+    acousticSid,{fixtureRoot:goalFixtureRoot})).state_hash,
+    afterMemorySnapshot.state_hash);
+  console.log(JSON.stringify({
+    scenario:"world_source_pinned_subjective_reply_memory_encoding",
+    character_decline_unchanged:true,subsequent_encode_committed:true,
+    prior_world_history_preserved:true,one_subjective_memory_added:true,
+    source_turn_hash_verified:true,other_character_memory_unchanged:true,
+    replay_rejected:true,world_truth_claimed:false,belief_revised:false,
+  }));
 
   // Negative control: a genuine source hearing opportunity is insufficient
   // to force a public reply. A Brain decline, forged action and Runtime
