@@ -965,6 +965,7 @@ function resolveAbilityFields(input, newFields, nextWorldState, snapshotScene, n
         const insideMs = nonNegativeNumber(exposureQuery.result.inside_ms, 0);
         if (insideMs <= 0 || dps <= 0) continue;
         const rawDamage = dps * insideMs / 1000;
+        const contactTimeMs = tickEndMs + nonNegativeNumber(input.field_time_offset_ms, 0);
         const impact = applyWorldSimulationCombatImpact({
           world_state: input.world_state,
           next_world_state: nextWorldState,
@@ -976,7 +977,7 @@ function resolveAbilityFields(input, newFields, nextWorldState, snapshotScene, n
           source: fieldId,
           ignore_armor: effect.ignore_armor === true,
           state_transitions: transitions,
-          time_ms: tickEndMs,
+          time_ms: contactTimeMs,
           source_layer: "continuous_physics",
         });
         if (impact.evaluator_audit) array(input.immutable_causal_evaluator_audits).push(impact.evaluator_audit);
@@ -1035,6 +1036,87 @@ function resolveAbilityFields(input, newFields, nextWorldState, snapshotScene, n
     const projectedLifecycle = projectAbilityFieldLifecycleIntoPrivatePreview(input, nextWorldState, lifecycleEvaluation, fieldEndMs);
     nextWorldState.ability_fields = cloneJson(object(projectedLifecycle.ability_fields));
   }
+}
+
+
+/**
+ * A stationary, field-only long interval must not manufacture a different
+ * injury chain merely because the caller supplied one large elapsed_ms.
+ * The accepted Native offscreen writer resolves every shared earliest field
+ * frontier as a separate canonical turn. Mirror only that narrow chronology
+ * for the continuous-physics preview; moving bodies, active projectiles and
+ * action-bearing turns keep their existing owner and are NOT generalized here.
+ */
+function resolveStationaryFieldOnlySharedFrontiers(
+  input, newFields, nextWorldState, snapshotScene, nextScene,
+  elapsedMs, transitions, outcomes, resolutions,
+) {
+  if (newFields.length
+      || Array.isArray(input.selected_action_intents) && input.selected_action_intents.length
+      || Array.isArray(input.resolved_action_outcomes) && input.resolved_action_outcomes.length
+      || Object.keys(object(input.actor_trajectories)).length
+      || Object.values(object(input.world_state.projectiles)).some(item => item?.active === true)
+      || Object.values(object(nextWorldState.projectiles)).some(item => item?.active === true)
+      || JSON.stringify(object(snapshotScene.entity_positions))
+        !== JSON.stringify(object(nextScene.entity_positions)))
+    return false;
+  const allActive = () => Object.values(object(nextWorldState.ability_fields))
+    .filter(item => item?.active === true);
+  const active = () => allActive().filter(item => item.scene_id === input.scene_id);
+  // This is the separately accepted C6-F two-damaging-field slice, not a
+  // replacement for general stationary, passive or multiscene field physics.
+  if (allActive().length !== 2 || active().length !== 2
+      || !Number.isSafeInteger(elapsedMs) || elapsedMs <= 0)
+    return false;
+  const rules = object(input.world_state.world_rules ?? input.world_state.rules);
+  const tickFor = field => positiveNumber(
+    field.tick_ms ?? object(field.effect).tick_ms,
+    positiveNumber(rules.ability_field_tick_ms, 100),
+  );
+  if (active().some(field =>
+    !Number.isSafeInteger(field.remaining_ms) || field.remaining_ms <= 0
+      || !Number.isSafeInteger(tickFor(field)) || tickFor(field) <= 0
+      || !Number.isFinite(object(field.effect).damage_per_second)
+      || object(field.effect).damage_per_second <= 0))
+    return false;
+  const earliest = Math.min(...active().map(field =>
+    Math.min(positiveNumber(field.remaining_ms, Infinity), tickFor(field))));
+  if (!(earliest > 0) || elapsedMs <= earliest + 1e-9) return false;
+  let elapsed = 0;
+  while (elapsed < elapsedMs - 1e-9) {
+    const ongoing = active();
+    if (!ongoing.length) break;
+    const delta = Math.min(elapsedMs - elapsed, ...ongoing.map(field =>
+      Math.min(positiveNumber(field.remaining_ms, Infinity), tickFor(field))));
+    if (!Number.isFinite(delta) || delta <= 0)
+      throw new Error("Stationary field frontier has no positive bounded interval.");
+    const frontierTransitions = [];
+    const frontierOutcomes = [];
+    const frontierResolutions = [];
+    resolveAbilityFields(
+      { ...input, field_time_offset_ms: elapsed }, [],
+      nextWorldState, snapshotScene, nextScene, delta,
+      frontierTransitions, frontierOutcomes, frontierResolutions,
+    );
+    // Damage evaluator audits already carry absolute hit times. Only lifecycle
+    // proposals and public outcome/response envelopes need the slice offset.
+    const publishTransition = item => {
+      if (item.field === "ability_field_state" && Number.isFinite(item.time_ms))
+        item.time_ms += elapsed;
+      return item;
+    };
+    const publishOutcome = value => {
+      if (Number.isFinite(value.time_ms)) value.time_ms += elapsed;
+      if (Number.isFinite(value.tick_start_ms)) value.tick_start_ms += elapsed;
+      if (Number.isFinite(value.tick_end_ms)) value.tick_end_ms += elapsed;
+      return value;
+    };
+    transitions.push(...frontierTransitions.map(publishTransition));
+    outcomes.push(...frontierOutcomes.map(publishOutcome));
+    resolutions.push(...frontierResolutions.map(publishOutcome));
+    elapsed += delta;
+  }
+  return true;
 }
 
 
@@ -1172,17 +1254,18 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
     projectileResolutions,
   );
 
-  resolveAbilityFields(
-    { ...input, world_state: snapshot, scene_id: sceneId, immutable_causal_evaluator_audits: immutableCausalEvaluatorAudits, immutable_causal_query_audits: immutableCausalQueryAudits },
-    spawnedFields,
-    nextWorldState,
-    snapshotScene,
-    nextScene,
-    elapsedMs,
-    transitions,
-    outcomes,
-    abilityResolutions,
-  );
+  const fieldInput = { ...input, world_state: snapshot, scene_id: sceneId,
+    immutable_causal_evaluator_audits: immutableCausalEvaluatorAudits,
+    immutable_causal_query_audits: immutableCausalQueryAudits };
+  if (!resolveStationaryFieldOnlySharedFrontiers(
+    fieldInput, spawnedFields, nextWorldState, snapshotScene, nextScene,
+    elapsedMs, transitions, outcomes, abilityResolutions,
+  )) {
+    resolveAbilityFields(
+      fieldInput, spawnedFields, nextWorldState, snapshotScene, nextScene,
+      elapsedMs, transitions, outcomes, abilityResolutions,
+    );
+  }
 
   if (isObject(nextWorldState.scenes) && Object.hasOwn(nextWorldState.scenes, sceneId)) {
     nextWorldState.scenes[sceneId] = nextScene;

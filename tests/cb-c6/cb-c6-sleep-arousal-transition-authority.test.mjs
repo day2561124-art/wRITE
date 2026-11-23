@@ -7942,3 +7942,133 @@ for (const startingHp of [12, 7, 1]) {
   }
 }
 console.log("CB-C6-F overlapping persistent field fronts, stable injury order, HP clamp and replay passed.");
+
+
+// C6-F: a single long stationary field-only physical preview must preserve
+// the same injury chain as four canonical 50ms frontiers. Separately prove
+// that one Native batch call is exactly equivalent to separate committed calls.
+import { adjudicateWorldSimulationContinuousPhysics } from "../../server/src/world-simulation-continuous-physics-service.mjs";
+
+function c6fFieldOnlyPreview(state, elapsedMs) {
+  return adjudicateWorldSimulationContinuousPhysics({
+    world_state: state,
+    next_world_state: d1Clone(state),
+    scene_id: "room",
+    event: { event_id: "c6f-long-stationary-field", scene_id: "room" },
+    elapsed_ms: elapsedMs,
+    selected_action_intents: [],
+    resolved_action_outcomes: [],
+  });
+}
+
+for (const hp of [12, 7, 1]) {
+  for (const reverse of [false, true]) {
+    const initial = c6fOverlappingPersistentFields(reverse, hp);
+    const original = d1Clone(initial);
+    const long = c6fFieldOnlyPreview(initial, 200);
+    let segmented = d1Clone(initial);
+    for (let frontier = 0; frontier < 4; frontier++)
+      segmented = c6fFieldOnlyPreview(segmented, 50).next_world_state;
+    assert.deepEqual(long.next_world_state.characters.aria.physical_state,
+      segmented.characters.aria.physical_state,
+      "one long World physics interval must preserve injuries from canonical shared frontiers");
+    assert.deepEqual(long.next_world_state.ability_fields,
+      segmented.ability_fields,
+      "one long World physics interval must preserve precise field lifecycle states");
+    const longHits = long.ability_resolutions.filter(item =>
+      item.result === "ability_field_tick" && item.target === "aria");
+    assert.equal(longHits.length, 7);
+    assert.deepEqual(longHits.map(item => item.field_id), [
+      "field_aux", "field_e3", "field_aux", "field_e3",
+      "field_aux", "field_e3", "field_aux",
+    ]);
+    assert.deepEqual(longHits.map(item => item.time_ms),
+      [50, 50, 100, 100, 150, 150, 200],
+      "causal contact times must remain absolute inside the long turn");
+    assert.deepEqual(longHits.map(item => item.damage_applied), [1, 2, 1, 2, 1, 2, 1]);
+    const injury = long.next_world_state.characters.aria.physical_state;
+    assert.equal(injury.health_current, Math.max(0, hp - 10));
+    assert.equal(injury.injuries.length, 7);
+    assert.equal(new Set(injury.injuries.map(item => item.injury_id)).size, 7);
+    assert.deepEqual(initial, original, "immutable World source may not be altered");
+
+    const root = path.join(projectRoot, "tests", ".tmp",
+      "c6-f-long-vs-segmented-" + hp + "-" + reverse + "-" + process.pid + "-" + Date.now());
+    const bigOptions = { fixtureRoot: path.join(root, "batch"),
+      characterBrain: async () => assert.fail("no subjective cognition in physical-only batch") };
+    const smallOptions = { fixtureRoot: path.join(root, "stepped"),
+      characterBrain: async () => assert.fail("no subjective cognition in physical-only step") };
+    try {
+      const [largeSession, splitSession] = await Promise.all([
+        beginWorldSimulationSession({
+          simulation_label: "C6-F single batch shared field frontiers",
+          seed: "batch-" + hp + "-" + reverse,
+          initial_world_state: d1Clone(initial),
+        }, bigOptions),
+        beginWorldSimulationSession({
+          simulation_label: "C6-F four distinct batches shared field frontiers",
+          seed: "step-" + hp + "-" + reverse,
+          initial_world_state: d1Clone(initial),
+        }, smallOptions),
+      ]);
+      const largeId = largeSession.world_simulation_session_id;
+      const splitId = splitSession.world_simulation_session_id;
+      const at = new Date(Date.parse(initial.simulation_time) + 200).toISOString();
+      const oneBatch = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: largeId, max_turns: 32, target_horizon: at,
+      }, bigOptions);
+      assert.equal(oneBatch.committed_turn_count, 4);
+      assert.equal(oneBatch.committed_physical_step_count, 4);
+      assert.equal(oneBatch.target_horizon_claimed, true);
+      assert.equal(oneBatch.state_reconciliation_required, false);
+      for (let i = 0; i < 4; i++) {
+        const split = await runWorldSimulationOffscreenEventBatch({
+          world_simulation_session_id: splitId,
+          max_turns: 1,
+          target_horizon: at,
+        }, smallOptions);
+        assert.equal(split.committed_turn_count, 1);
+        assert.equal(split.committed_physical_step_count, 1);
+      }
+      const [largeState, splitState, largeHistory, splitHistory] = await Promise.all([
+        getWorldSimulationState(largeId, bigOptions),
+        getWorldSimulationState(splitId, smallOptions),
+        getWorldSimulationHistory(largeId, bigOptions),
+        getWorldSimulationHistory(splitId, smallOptions),
+      ]);
+      assert.equal(largeState.revision, 4);
+      assert.equal(splitState.revision, 4);
+      assert.equal(largeState.state.simulation_time, at);
+      assert.deepEqual(largeState.state.characters.aria.physical_state,
+        splitState.state.characters.aria.physical_state);
+      assert.deepEqual(largeState.state.characters.aria.physical_state,
+        long.next_world_state.characters.aria.physical_state,
+        "pure long preview, one canonical batch and split Native commits must agree");
+      assert.deepEqual(largeState.state.ability_fields, splitState.state.ability_fields);
+      assert.deepEqual(largeState.state.ability_fields, long.next_world_state.ability_fields);
+      assert.equal(largeHistory.turns.length, 4);
+      assert.equal(splitHistory.turns.length, 4);
+      const causal = history => history.turns.flatMap(turn =>
+        turn.action_outcomes.filter(x =>
+          x.result === "ability_field_tick" && x.target === "aria")
+          .map(x => [x.ability_field_id, x.damage_applied]));
+      assert.deepEqual(causal(largeHistory), causal(splitHistory));
+      const oldBytes = await Promise.all([
+        readFile(worldSimulationStatePaths(largeId, bigOptions).state, "utf8"),
+        readFile(worldSimulationStatePaths(largeId, bigOptions).history, "utf8"),
+      ]);
+      const idle = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: largeId, max_turns: 32,
+        target_horizon: new Date(Date.parse(at) + 100).toISOString(),
+      }, bigOptions);
+      assert.equal(idle.committed_turn_count, 0);
+      assert.deepEqual(await Promise.all([
+        readFile(worldSimulationStatePaths(largeId, bigOptions).state, "utf8"),
+        readFile(worldSimulationStatePaths(largeId, bigOptions).history, "utf8"),
+      ]), oldBytes, "replaying a completed long field horizon cannot add injuries");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+}
+console.log("CB-C6-F stationary long-field frontier equivalence and one-batch/split replay passed.");
