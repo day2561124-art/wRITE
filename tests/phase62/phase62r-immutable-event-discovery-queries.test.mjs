@@ -209,6 +209,82 @@ try {
   assert.equal(boundaryStill.result.inside_ms, 100,
     "a genuinely stationary point on the inclusive edge remains exposed");
 
+  // C6-F: no explicit profile.breakpoints. The immutable query must still
+  // resolve all four authoritative movement segments and their rate changes.
+  // Three separate entries into the circle are not equivalent to the direct
+  // segment from the starting point to the final point (both x=0 here).
+  const changeRateTrajectory = {
+    start: { x: 0, y: 0 }, final_position: { x: 0, y: 0 },
+    segments: [
+      { start_ms: 0, end_ms: 200,
+        from: { x: 0, y: 0 }, to: { x: 4, y: 0 } },
+      { start_ms: 200, end_ms: 500,
+        from: { x: 4, y: 0 }, to: { x: 0, y: 0 } },
+      { start_ms: 500, end_ms: 650,
+        from: { x: 0, y: 0 }, to: { x: 4, y: 0 } },
+      { start_ms: 650, end_ms: 800,
+        from: { x: 4, y: 0 }, to: { x: 0, y: 0 } },
+    ],
+  };
+  const multiCrossInput = {
+    ...exposureInput,
+    profile: {
+      start: { x: 0, y: 0 }, end: { x: 0, y: 0 }, durationMs: 800,
+      trajectory: changeRateTrajectory,
+      // No 'breakpoints' intentionally. They must come from the trajectory.
+    },
+    start_ms: 0,
+    end_ms: 800,
+  };
+  const multiCrossBefore = JSON.stringify(multiCrossInput);
+  const pieces = [
+    [0, 200, 100], [200, 500, 150],
+    [500, 650, 75], [650, 800, 75],
+    [0, 500, 250], [200, 650, 225], [0, 800, 400],
+  ];
+  for (const [start_ms, end_ms, expected] of pieces) {
+    const sample = queryWorldSimulationAbilityFieldExposure({
+      ...multiCrossInput, start_ms, end_ms,
+    });
+    assert.equal(sample.result.ok, true);
+    assert.ok(Math.abs(sample.result.inside_ms - expected) < 1e-6,
+      `the ${start_ms}-${end_ms}ms query must sample all trajectory turns and speeds`);
+    assert.equal(sample.audit.query_output_contains_world_state, false);
+    assert.equal(sample.audit.query_output_contains_mutation_proposals, false);
+    assert.equal(sample.audit.deterministic_replay_verified, true);
+  }
+  assert.equal(JSON.stringify(multiCrossInput), multiCrossBefore,
+    "the geometry query cannot mutate externally supplied trajectory segments");
+  const explicit = queryWorldSimulationAbilityFieldExposure({
+    ...multiCrossInput,
+    profile: { ...multiCrossInput.profile, breakpoints: [0, 200, 500, 650, 800] },
+  });
+  assert.equal(explicit.result.inside_ms, 400,
+    "explicit projected breakpoints must have exact parity with trajectory-derived boundaries");
+
+  // A moving point covering less than a micrometre across the edge is not
+  // motionless. The old absolute qa <= 1e-12 shortcut counted a full 400ms
+  // field tick; endpoint roundoff must not create a microscopic injury either.
+  for (const [label, startX, endX, expected] of [
+    ["submicrometre-exit", 1, 1.0000005, 0],
+    ["submicrometre-approach-to-edge", 1.0000005, 1, 0],
+    ["submicrometre-crossing", 0.9999995, 1.0000005, 200],
+  ]) {
+    const micro = queryWorldSimulationAbilityFieldExposure({
+      ...exposureInput,
+      profile: {
+        start: { x: startX, y: 0 }, end: { x: endX, y: 0 },
+        durationMs: 400,
+      },
+      center: { x: 0, y: 0 },
+      radius_m: 1,
+    });
+    assert.equal(micro.result.ok, true, label);
+    assert.ok(Math.abs(micro.result.inside_ms - expected) < 1e-3,
+      label + ": near-edge movement cannot be mistaken for full-time occupancy");
+  }
+
+
   assert.throws(() => runWorldSimulationImmutableCausalQuery({
     query_name: "forbidden-mutation-query",
     context: { value: 1 },

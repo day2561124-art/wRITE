@@ -4,6 +4,7 @@ import {
 import {
   positionAtWorldSimulationActorTrajectory,
   velocityAtWorldSimulationActorTrajectory,
+  worldSimulationActorTrajectoryBreakpoints,
 } from "./world-simulation-actor-state-scheduler.mjs";
 
 export const worldSimulationImmutableEventQueryVersion = "phase62r-immutable-event-query-v1";
@@ -171,6 +172,13 @@ function profileVelocityAt(profile, timeMs) {
 function profileBreakpoints(profile) {
   const record = object(profile);
   const values = new Set(array(record.breakpoints).map((value) => nonNegativeNumber(value, 0)));
+  // Piecewise trajectories already contain their authoritative rate-change
+  // boundaries. Never infer a straight path merely because a query caller
+  // omitted the redundant profile.breakpoints projection.
+  if (Object.keys(object(record.trajectory)).length) {
+    for (const timeMs of worldSimulationActorTrajectoryBreakpoints(record.trajectory))
+      values.add(nonNegativeNumber(timeMs, 0));
+  }
   const durationMs = finiteNumber(record.durationMs ?? record.duration_ms);
   if (durationMs !== null) values.add(Math.max(0, durationMs));
   return [...values].sort((left, right) => left - right);
@@ -422,7 +430,9 @@ function timeInsideStaticCircle(profile, center, radius, startMs, endMs) {
     const qa = dx * dx + dy * dy;
     const qb = 2 * (fx * dx + fy * dy);
     const qc = fx * fx + fy * fy - radius * radius;
-    if (qa <= 1e-12) {
+    if (qa === 0) {
+      // Exact stationary occupancy is not the same as arbitrarily small
+      // movement through a circle boundary.
       if (qc <= 0) insideMs += durationMs;
       continue;
     }
@@ -440,7 +450,9 @@ function timeInsideStaticCircle(profile, center, radius, startMs, endMs) {
     // across the whole tick. The overlap of [enter, exit] with [0, 1]
     // already covers all strictly positive durations (including full
     // interior crossing). Stationary edge occupancy is handled above.
-    if (exit > enter) insideMs += durationMs * (exit - enter);
+    // Suppress only sub-nanofractional root cancellation at a tangential
+    // endpoint. Positive-length crossings retain their exact duration.
+    if (exit > enter + 1e-9) insideMs += durationMs * (exit - enter);
   }
   return insideMs;
 }
