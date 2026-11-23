@@ -5250,4 +5250,163 @@ for (const mode of [
   }
 }
 console.log("CB-C6-F mixed-scene/acoustic precedence, unresolved authority and no fabricated replay passed.");
+// C6-F positive scoped multi-scene fixture: one active physics scene and a
+// separate passive populated scene. The existing single-active-scene authority
+// may progress the room, but MUST preserve every unrelated annex record.
+async function c6fNativePassiveScenePreservation() {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-passive-annex-" + process.pid + "-" + Date.now());
+  const physicalOptions = {
+    fixtureRoot: path.join(root, "offscreen"),
+    characterBrain: async () => assert.fail("physical-only batches may not invoke Brain"),
+  };
+  const foregroundOptions = { fixtureRoot: path.join(root, "foreground") };
+  try {
+    const initial = e7MixedWorld("field-first");
+    initial.characters.remote = {
+      known: ["annex-entry-known-only-to-remote"],
+      current_goal: "continue ordinary routine",
+      physical_state: { health_current: 80, health_max: 100 },
+    };
+    initial.memories.remote = [{
+      memory_id: "c6f-annex-existing", content: "prior observation",
+      source: { kind: "existing_fixture" },
+    }];
+    initial.scenes.annex = {
+      scene_id: "annex", simulation_time: initial.simulation_time,
+      dimensions: { width_m: 8, depth_m: 8 },
+      entity_positions: { remote: { x: 6, y: 6 } },
+      observable_by: { remote: { visual: [], audible: [] } },
+      obstacles: [],
+    };
+    initial.projectiles.parked = {
+      ...d1Clone(initial.projectiles.projectile_e3),
+      projectile_id: "parked", scene_id: "annex",
+      position: { x: 1, y: 1 }, active: false,
+    };
+    initial.ability_fields.quiet = {
+      ...d1Clone(initial.ability_fields.field_e3),
+      field_id: "quiet", scene_id: "annex",
+      center: { x: 6, y: 6 }, active: false,
+    };
+    const sourceCopy = d1Clone(initial);
+    const foregroundInitial = d1Clone(initial);
+    const eventIds = ["c6f-annex-wait-one", "c6f-annex-wait-two"];
+    foregroundInitial.event_queue = eventIds.map(event_id => ({
+      event_id, scene_id: "room", type: "bounded_wait",
+      participants: ["keeper"], summary: "hold position for 50 ms",
+    }));
+    foregroundInitial.available_actions.keeper = [{
+      action_id: "c6f-annex-wait", intent: "remain still", duration_ms: 50,
+    }];
+    const [physicalSession, foregroundSession] = await Promise.all([
+      beginWorldSimulationSession({
+        simulation_label: "C6-F multi-scene passive offscreen physics",
+        seed: "c6f-passive-scene", initial_world_state: initial,
+      }, physicalOptions),
+      beginWorldSimulationSession({
+        simulation_label: "C6-F multi-scene passive foreground physics",
+        seed: "c6f-passive-scene", initial_world_state: foregroundInitial,
+      }, foregroundOptions),
+    ]);
+    const sid = physicalSession.world_simulation_session_id;
+    const visibleSid = foregroundSession.world_simulation_session_id;
+    const runtime = createWorldSimulationCharacterRuntimeManager({
+      identityResolver: async character => ({
+        entity_id: "c6f_passive_" + character,
+        canonical_name: character, identity_source: "c6f_fixture", formal: true,
+      }),
+    });
+    let keeperChoices = 0;
+    const turnOptions = {
+      ...foregroundOptions, characterRuntimeManager: runtime,
+      characterBrain: async packet => {
+        if (packet.character === "keeper") {
+          keeperChoices++;
+          return { action_id: "c6f-annex-wait" };
+        }
+        return "reject_all";
+      },
+    };
+    const at = ms => new Date(Date.parse(initial.simulation_time) + ms).toISOString();
+    const normalize = state => ({
+      time: state.simulation_time,
+      projectile: state.projectiles.projectile_e3,
+      field: state.ability_fields.field_e3,
+      body: state.characters.aria.physical_state,
+      annex: state.scenes.annex,
+      remote: state.characters.remote,
+      remoteMemory: state.memories.remote,
+      parked: state.projectiles.parked,
+      quiet: state.ability_fields.quiet,
+    });
+    const physicalBefore = await getWorldSimulationState(sid, physicalOptions);
+    assert.deepEqual(normalize(physicalBefore.state).annex, initial.scenes.annex);
+    for (const [index, elapsedMs] of [50, 100].entries()) {
+      const batch = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid, max_turns: 1,
+        target_horizon: at(100),
+      }, physicalOptions);
+      assert.equal(batch.committed_turn_count, 1);
+      assert.equal(batch.committed_physical_step_count, 1);
+      assert.equal(batch.reached_simulation_time, at(elapsedMs));
+      assert.equal(batch.automatic_replay_allowed, false);
+      assert.equal(batch.state_reconciliation_required, false);
+      const foregroundTurn = await runWorldSimulationTurn({
+        world_simulation_session_id: visibleSid,
+      }, turnOptions);
+      assert.equal(foregroundTurn.committed, true);
+      const [offscreen, visible] = await Promise.all([
+        getWorldSimulationState(sid, physicalOptions),
+        getWorldSimulationState(visibleSid, foregroundOptions),
+      ]);
+      assert.equal(offscreen.revision, index + 1);
+      assert.equal(visible.revision, index + 1);
+      assert.deepEqual(normalize(offscreen.state), normalize(visible.state),
+        "passive annex and active room agree after each real foreground/offscreen turn");
+      assert.deepEqual(offscreen.state.scenes.annex, initial.scenes.annex);
+      assert.deepEqual(offscreen.state.characters.remote, initial.characters.remote);
+      assert.deepEqual(offscreen.state.memories.remote, initial.memories.remote);
+      assert.deepEqual(offscreen.state.projectiles.parked, initial.projectiles.parked);
+      assert.deepEqual(offscreen.state.ability_fields.quiet, initial.ability_fields.quiet);
+      assert.deepEqual(offscreen.state.memories, initial.memories,
+        "offscreen physics alone cannot forge first-person memories in either scene");
+      const physicalHistory = await getWorldSimulationHistory(sid, physicalOptions);
+      const visibleHistory = await getWorldSimulationHistory(visibleSid, foregroundOptions);
+      assert.equal(physicalHistory.turns.length, index + 1);
+      assert.equal(visibleHistory.turns.length, index + 1);
+      assert.deepEqual(visibleHistory.turns.map(turn => turn.event.event_id),
+        eventIds.slice(0, index + 1));
+      for (const [history, latest] of [
+        [physicalHistory, offscreen], [visibleHistory, visible],
+      ]) {
+        assert.equal(history.turns.at(-1).next_state_hash, latest.state_hash);
+        if (index > 0) assert.equal(history.turns[1].previous_state_hash,
+          history.turns[0].next_state_hash);
+      }
+    }
+    assert.equal(keeperChoices, 2);
+    const final = await getWorldSimulationState(sid, physicalOptions);
+    assert.equal(final.state.projectiles.projectile_e3.termination_reason,
+      "character_contact");
+    assert.equal(final.state.ability_fields.field_e3.active, false);
+    const finalPaths = worldSimulationStatePaths(sid, physicalOptions);
+    const durable = () => Promise.all([
+      readFile(finalPaths.state, "utf8"), readFile(finalPaths.history, "utf8"),
+    ]);
+    const fixedBytes = await durable();
+    const idle = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: 32,
+      target_horizon: at(200),
+    }, physicalOptions);
+    assert.equal(idle.committed_turn_count, 0);
+    assert.equal(idle.target_horizon_claimed, false);
+    assert.deepEqual(await durable(), fixedBytes);
+    assert.deepEqual(initial, sourceCopy);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+await c6fNativePassiveScenePreservation();
+console.log("CB-C6-F positive active-scene/passive-scene isolation, two-step Native parity passed.");
 
