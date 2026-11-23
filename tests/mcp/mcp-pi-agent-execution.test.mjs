@@ -141,7 +141,7 @@ test("Sidecar probe preserves allowlisted runner failure codes without exposing 
   const error = Object.assign(new Error("runner exited"), {
     code: 1,
     killed: false,
-    stdout: '{"ok":false,"reason":"pi_runtime_probe_failed","detail":"ERR_MODULE_NOT_FOUND"}\\n',
+    stdout: '{"ok":false,"reason":"pi_runtime_probe_failed","detail":"ERR_MODULE_NOT_FOUND"}\n',
     stderr: "private diagnostic not to expose",
   });
   const probe = await probePiSidecar({ execute: async () => { throw error; } });
