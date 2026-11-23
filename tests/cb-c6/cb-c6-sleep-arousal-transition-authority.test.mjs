@@ -5140,4 +5140,114 @@ async function c6fNativeTwoBreakpointParity() {
 }
 await c6fNativeTwoBreakpointParity();
 console.log("CB-C6-F multi-breakpoint paired Native physics, damage and replay regression passed.");
+// C6-F combined guard: a valid short field boundary in one scene must not
+// authorize advancing a simultaneous projectile in another scene.  Pending
+// listener ingress takes precedence over physical fast-forward; unresolved
+// velocity blocks discovery itself.  These cases test negative authority,
+// not an invented cross-scene scheduler or acoustic decay mechanism.
+for (const mode of [
+  "cross-scene", "acoustic-before-cross-scene", "unresolved-cross-scene",
+]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-mixed-scenes-" + mode + "-" + process.pid + "-" + Date.now());
+  const options = { fixtureRoot: root,
+    characterBrain: async () => assert.fail("unsupported offscreen fast-forward may not call Brain") };
+  try {
+    const initial = e7MixedWorld("field-first");
+    initial.scenes.annex = { ...d1Clone(initial.scenes.room), scene_id: "annex" };
+    initial.projectiles.projectile_e3.scene_id = "annex";
+    if (mode === "acoustic-before-cross-scene") {
+      initial.sound_events = [{
+        schema_version: "cc6b-communication-acoustic-bridge-v1",
+        kind: "communication_speech_signal",
+        sound_id: "c6f-pending-listener-signal",
+        scene_id: "room", active: true,
+      }];
+    }
+    if (mode === "unresolved-cross-scene")
+      delete initial.projectiles.projectile_e3.velocity_mps;
+    const priorInput = d1Clone(initial);
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-F combined cross-scene acoustic authority",
+      seed: mode, initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, options);
+    const paths = worldSimulationStatePaths(sid, options);
+    const bytes = () => Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]);
+    const durable = await bytes();
+    const at = ms => new Date(Date.parse(before.state.simulation_time) + ms).toISOString();
+    const firstHorizon = at(50);
+    const projection = projectWorldSimulationOffscreenBreakpoint({
+      world_state: before.state, target_horizon: firstHorizon,
+    });
+    assert.equal(projection.breakpoint.kind, "ability_field_expiration");
+    assert.equal(projection.breakpoint.delta_ms, 50);
+    assert.equal(projection.earliest_breakpoint_confirmed,
+      mode !== "unresolved-cross-scene");
+    assert.equal(projection.unresolved_process_count,
+      mode === "unresolved-cross-scene" ? 1 : 0);
+    const originalProjection = projectWorldSimulationOffscreenBreakpoint({
+      world_state: before.state, target_horizon: firstHorizon,
+    });
+    assert.deepEqual(originalProjection, projection);
+    assert.deepEqual(await bytes(), durable, "read-only discovery cannot advance a scene");
+
+    const zero = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: 0,
+      target_horizon: firstHorizon,
+    }, options);
+    assert.equal(zero.committed_turn_count, 0);
+    assert.equal(zero.attempted_turn_count, 0);
+    assert.equal(zero.pending_breakpoint.kind, "ability_field_expiration");
+    assert.equal(zero.pending_breakpoint_confirmed,
+      mode !== "unresolved-cross-scene");
+    assert.equal(zero.target_horizon_claimed, false);
+    assert.equal(zero.reached_simulation_time, before.state.simulation_time);
+    assert.deepEqual(await bytes(), durable);
+
+    // Even an ample turn budget or an exact first-boundary horizon must not
+    // skip a simultaneous scene or consume an acoustic perception event.
+    for (const max_turns of [1, 32]) {
+      const result = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid, max_turns,
+        target_horizon: firstHorizon,
+      }, options);
+      const unresolved = mode === "unresolved-cross-scene";
+      assert.equal(result.attempted_turn_count, unresolved ? 0 : 1);
+      assert.equal(result.committed_turn_count, 0);
+      assert.equal(result.committed_physical_step_count, 0);
+      assert.equal(result.physical_step_blocked_reason, unresolved ? null
+        : mode === "acoustic-before-cross-scene"
+          ? "physical_step_acoustic_ingress_pending"
+          : "physical_step_scene_scope_unresolved");
+      assert.equal(result.status, unresolved
+        ? "slow_process_authority_unresolved" : "slow_process_breakpoint_pending");
+      assert.equal(result.reached_simulation_time, before.state.simulation_time);
+      assert.equal(result.target_horizon_claimed, false);
+      assert.equal(result.pending_breakpoint.kind, "ability_field_expiration");
+      assert.equal(result.pending_breakpoint_confirmed, !unresolved);
+      assert.equal(result.requested_target_horizon, firstHorizon);
+      assert.equal(result.state_reconciliation_required, false);
+      assert.equal(result.automatic_replay_allowed, false);
+      assert.equal(result.wall_clock_catch_up_used, false);
+      assert.deepEqual(await getWorldSimulationState(sid, options), before);
+      assert.deepEqual((await getWorldSimulationHistory(sid, options)).turns, []);
+      assert.deepEqual(await bytes(), durable,
+        "blocked cross-scene/acoustic World remains byte-identical after retries");
+    }
+    const reentry = await scheduleWorldSimulationAutonomousCognitionOpportunities({
+      world_simulation_session_id: sid, runtime_context_by_character: {},
+    }, options);
+    assert.ok(reentry.scheduler_projection);
+    assert.deepEqual(await bytes(), durable,
+      "foreground promotion cannot fabricate missed time, memories or social updates");
+    assert.deepEqual(initial, priorInput);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+console.log("CB-C6-F mixed-scene/acoustic precedence, unresolved authority and no fabricated replay passed.");
 
