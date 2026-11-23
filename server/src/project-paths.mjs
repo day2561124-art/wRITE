@@ -8,130 +8,151 @@ const __dirname = path.dirname(__filename);
 export const projectRoot = path.resolve(__dirname, "..", "..");
 const realProjectRoot = realpathSync.native(projectRoot);
 
+function effectiveExistingPath(filePath) {
+  const ancestor = nearestExistingPath(filePath);
+  return path.resolve(realpathSync.native(ancestor), path.relative(ancestor, filePath));
+}
+function selectDataRoot(value) {
+  if (value === undefined) return path.join(projectRoot, "data");
+  if (typeof value !== "string" || !value.trim() || !path.isAbsolute(value)) {
+    throw new Error("WRITE_DATA_ROOT must be an absolute directory path.");
+  }
+  const root = path.resolve(value);
+  if (root === path.parse(root).root
+      || isInside(projectRoot, root) || isInside(root, projectRoot)) {
+    throw new Error("WRITE_DATA_ROOT must be independent of the source repository.");
+  }
+  return root;
+}
+// Only trusted process configuration may set this. All default data paths,
+// agent run state, traces, journals, locks and transaction manifests use it.
+export const projectDataRoot = selectDataRoot(process.env.WRITE_DATA_ROOT);
+const realDataRoot = effectiveExistingPath(projectDataRoot);
+// Without explicit opt-in, preserve the original no-symlink-escape
+// restriction for the repository's default data/ directory.
+if (process.env.WRITE_DATA_ROOT === undefined && !isInside(realProjectRoot, realDataRoot)) {
+  throw new Error("The default data root must remain inside the source repository.");
+}
+if (process.env.WRITE_DATA_ROOT !== undefined
+    && (isInside(realProjectRoot, realDataRoot) || isInside(realDataRoot, realProjectRoot))) {
+  throw new Error("WRITE_DATA_ROOT must resolve independently of the source repository.");
+}
+
 export const projectPaths = {
-  outputs: path.join(projectRoot, "data", "outputs"),
-  outputLogs: path.join(projectRoot, "data", "outputs", "logs"),
-  creativeTasks: path.join(projectRoot, "data", "outputs", "creative_tasks"),
-  creativeTaskLog: path.join(projectRoot, "data", "outputs", "logs", "creative_task_runs.jsonl"),
-  gptWritingContexts: path.join(projectRoot, "data", "outputs", "gpt_writing_contexts"),
-  writingCandidates: path.join(projectRoot, "data", "outputs", "writing_candidates"),
-  drafts: path.join(projectRoot, "data", "outputs", "drafts"),
-  proofReports: path.join(projectRoot, "data", "outputs", "proof_reports"),
-  proofingContexts: path.join(projectRoot, "data", "outputs", "proofing_contexts"),
-  adoptedWritings: path.join(projectRoot, "data", "outputs", "adopted_writings"),
+  outputs: path.join(projectDataRoot, "outputs"),
+  outputLogs: path.join(projectDataRoot, "outputs", "logs"),
+  creativeTasks: path.join(projectDataRoot, "outputs", "creative_tasks"),
+  creativeTaskLog: path.join(projectDataRoot, "outputs", "logs", "creative_task_runs.jsonl"),
+  gptWritingContexts: path.join(projectDataRoot, "outputs", "gpt_writing_contexts"),
+  writingCandidates: path.join(projectDataRoot, "outputs", "writing_candidates"),
+  drafts: path.join(projectDataRoot, "outputs", "drafts"),
+  proofReports: path.join(projectDataRoot, "outputs", "proof_reports"),
+  proofingContexts: path.join(projectDataRoot, "outputs", "proofing_contexts"),
+  adoptedWritings: path.join(projectDataRoot, "outputs", "adopted_writings"),
   adoptedWritingSettlementContexts: path.join(
-    projectRoot,
-    "data",
+    projectDataRoot,
     "outputs",
     "settlement_contexts",
   ),
   adoptedWritingSettlementReports: path.join(
-    projectRoot,
-    "data",
+    projectDataRoot,
     "outputs",
     "settlement_reports",
   ),
   engineCandidateReviews: path.join(
-    projectRoot,
-    "data",
+    projectDataRoot,
     "outputs",
     "engine_candidate_reviews",
   ),
-  settlementProposals: path.join(projectRoot, "data", "outputs", "settlement_proposals"),
-  compressedRuleCandidates: path.join(projectRoot, "data", "outputs", "compressed_rule_candidates"),
-  visualDb: path.join(projectRoot, "data", "visual_db"),
-  visualAssets: path.join(projectRoot, "data", "visual_db", "assets"),
-  visualIndex: path.join(projectRoot, "data", "visual_db", "visual_index.jsonl"),
-  agentRuns: path.join(projectRoot, "data", "agent_runs"),
-  neuralTraces: path.join(projectRoot, "data", "agent_runs", "neural_traces"),
-  neuralModuleOutputs: path.join(projectRoot, "data", "agent_runs", "neural_outputs"),
-  canonDb: path.join(projectRoot, "data", "canon_db"),
-  activeEngine: path.join(projectRoot, "data", "canon_db", "active_engine.md"),
-  canonSources: path.join(projectRoot, "data", "canon_db", "sources"),
-  engineVersions: path.join(projectRoot, "data", "canon_db", "versions"),
-  pendingEngineCandidates: path.join(projectRoot, "data", "canon_db", "pending_engine_candidates"),
-  rejectedEngineCandidates: path.join(projectRoot, "data", "canon_db", "rejected_engine_candidates"),
-  engineSnapshots: path.join(projectRoot, "data", "canon_db", "engine_snapshots"),
-  engineArchive: path.join(projectRoot, "data", "canon_db", "archive"),
-  activationLogs: path.join(projectRoot, "data", "canon_db", "activation_logs"),
-  activationLog: path.join(projectRoot, "data", "canon_db", "activation_logs", "activation_log.jsonl"),
-  rollback: path.join(projectRoot, "data", "canon_db", "rollback"),
-  rollbackIndex: path.join(projectRoot, "data", "canon_db", "rollback", "rollback_index.json"),
-  writingWorkflow: path.join(projectRoot, "data", "writing_workflow"),
-  candidateDrafts: path.join(projectRoot, "data", "writing_workflow", "candidate_drafts"),
-  workflowProofReports: path.join(projectRoot, "data", "writing_workflow", "proof_reports"),
-  adoptedChapters: path.join(projectRoot, "data", "writing_workflow", "adopted_chapters"),
-  contextBundles: path.join(projectRoot, "data", "writing_workflow", "context_bundles"),
-  workflowLogs: path.join(projectRoot, "data", "writing_workflow", "logs"),
-  settlementWorkflow: path.join(projectRoot, "data", "writing_workflow", "settlements"),
-  settlementContexts: path.join(projectRoot, "data", "writing_workflow", "settlements", "contexts"),
-  settlementReports: path.join(projectRoot, "data", "writing_workflow", "settlements", "reports"),
-  approvalQueue: path.join(projectRoot, "data", "approval_queue"),
-  approvalItems: path.join(projectRoot, "data", "approval_queue", "items"),
-  approvalLogs: path.join(projectRoot, "data", "approval_queue", "logs"),
-  approvalLog: path.join(projectRoot, "data", "approval_queue", "logs", "approval_log.jsonl"),
-  settingChangeProposals: path.join(projectRoot, "data", "setting_change_proposals"),
-  entityRegistry: path.join(projectRoot, "data", "entity_registry"),
-  entityRegistryData: path.join(projectRoot, "data", "entity_registry", "entity_registry.json"),
-  entityRegistryIndex: path.join(projectRoot, "data", "entity_registry", "entity_registry.index.json"),
-  entityRegistrySchema: path.join(projectRoot, "data", "entity_registry", "entity_registry.schema.json"),
-  entityRegistryBuildReport: path.join(projectRoot, "data", "entity_registry", "entity_registry_build_report.json"),
-  entityRegistryConflictReport: path.join(projectRoot, "data", "entity_registry", "conflict_report.json"),
-  entityRegistryProvenance: path.join(projectRoot, "data", "entity_registry", "provenance.json"),
-  characterProfileDb: path.join(projectRoot, "data", "character_profile_db"),
+  settlementProposals: path.join(projectDataRoot, "outputs", "settlement_proposals"),
+  compressedRuleCandidates: path.join(projectDataRoot, "outputs", "compressed_rule_candidates"),
+  visualDb: path.join(projectDataRoot, "visual_db"),
+  visualAssets: path.join(projectDataRoot, "visual_db", "assets"),
+  visualIndex: path.join(projectDataRoot, "visual_db", "visual_index.jsonl"),
+  agentRuns: path.join(projectDataRoot, "agent_runs"),
+  neuralTraces: path.join(projectDataRoot, "agent_runs", "neural_traces"),
+  neuralModuleOutputs: path.join(projectDataRoot, "agent_runs", "neural_outputs"),
+  canonDb: path.join(projectDataRoot, "canon_db"),
+  activeEngine: path.join(projectDataRoot, "canon_db", "active_engine.md"),
+  canonSources: path.join(projectDataRoot, "canon_db", "sources"),
+  engineVersions: path.join(projectDataRoot, "canon_db", "versions"),
+  pendingEngineCandidates: path.join(projectDataRoot, "canon_db", "pending_engine_candidates"),
+  rejectedEngineCandidates: path.join(projectDataRoot, "canon_db", "rejected_engine_candidates"),
+  engineSnapshots: path.join(projectDataRoot, "canon_db", "engine_snapshots"),
+  engineArchive: path.join(projectDataRoot, "canon_db", "archive"),
+  activationLogs: path.join(projectDataRoot, "canon_db", "activation_logs"),
+  activationLog: path.join(projectDataRoot, "canon_db", "activation_logs", "activation_log.jsonl"),
+  rollback: path.join(projectDataRoot, "canon_db", "rollback"),
+  rollbackIndex: path.join(projectDataRoot, "canon_db", "rollback", "rollback_index.json"),
+  writingWorkflow: path.join(projectDataRoot, "writing_workflow"),
+  candidateDrafts: path.join(projectDataRoot, "writing_workflow", "candidate_drafts"),
+  workflowProofReports: path.join(projectDataRoot, "writing_workflow", "proof_reports"),
+  adoptedChapters: path.join(projectDataRoot, "writing_workflow", "adopted_chapters"),
+  contextBundles: path.join(projectDataRoot, "writing_workflow", "context_bundles"),
+  workflowLogs: path.join(projectDataRoot, "writing_workflow", "logs"),
+  settlementWorkflow: path.join(projectDataRoot, "writing_workflow", "settlements"),
+  settlementContexts: path.join(projectDataRoot, "writing_workflow", "settlements", "contexts"),
+  settlementReports: path.join(projectDataRoot, "writing_workflow", "settlements", "reports"),
+  approvalQueue: path.join(projectDataRoot, "approval_queue"),
+  approvalItems: path.join(projectDataRoot, "approval_queue", "items"),
+  approvalLogs: path.join(projectDataRoot, "approval_queue", "logs"),
+  approvalLog: path.join(projectDataRoot, "approval_queue", "logs", "approval_log.jsonl"),
+  settingChangeProposals: path.join(projectDataRoot, "setting_change_proposals"),
+  entityRegistry: path.join(projectDataRoot, "entity_registry"),
+  entityRegistryData: path.join(projectDataRoot, "entity_registry", "entity_registry.json"),
+  entityRegistryIndex: path.join(projectDataRoot, "entity_registry", "entity_registry.index.json"),
+  entityRegistrySchema: path.join(projectDataRoot, "entity_registry", "entity_registry.schema.json"),
+  entityRegistryBuildReport: path.join(projectDataRoot, "entity_registry", "entity_registry_build_report.json"),
+  entityRegistryConflictReport: path.join(projectDataRoot, "entity_registry", "conflict_report.json"),
+  entityRegistryProvenance: path.join(projectDataRoot, "entity_registry", "provenance.json"),
+  characterProfileDb: path.join(projectDataRoot, "character_profile_db"),
   characterVoiceRegistry: path.join(
-    projectRoot,
-    "data",
+    projectDataRoot,
     "character_profile_db",
     "active_character_voice_registry.md",
   ),
-  cleanupRoot: path.join(projectRoot, "data", "cleanup"),
-  cleanupProposals: path.join(projectRoot, "data", "cleanup", "proposals"),
-  cleanupLogs: path.join(projectRoot, "data", "cleanup", "logs"),
-  cleanupLog: path.join(projectRoot, "data", "cleanup", "logs", "cleanup_log.jsonl"),
-  cleanupTrash: path.join(projectRoot, "data", "cleanup", "trash"),
-  cleanupStaging: path.join(projectRoot, "data", "cleanup", "staging"),
-  cleanupTombstones: path.join(projectRoot, "data", "cleanup", "tombstones"),
-  pendingErrorReports: path.join(projectRoot, "data", "feedback_db", "pending_error_reports.jsonl"),
-  errorReportDb: path.join(projectRoot, "data", "error_report_db"),
-  compressedRules: path.join(projectRoot, "data", "error_report_db", "compressed_rules.md"),
-  feedbackLoop: path.join(projectRoot, "data", "feedback_loop"),
-  feedbackLoopItems: path.join(projectRoot, "data", "feedback_loop", "items"),
-  feedbackLoopDigests: path.join(projectRoot, "data", "feedback_loop", "digests"),
+  cleanupRoot: path.join(projectDataRoot, "cleanup"),
+  cleanupProposals: path.join(projectDataRoot, "cleanup", "proposals"),
+  cleanupLogs: path.join(projectDataRoot, "cleanup", "logs"),
+  cleanupLog: path.join(projectDataRoot, "cleanup", "logs", "cleanup_log.jsonl"),
+  cleanupTrash: path.join(projectDataRoot, "cleanup", "trash"),
+  cleanupStaging: path.join(projectDataRoot, "cleanup", "staging"),
+  cleanupTombstones: path.join(projectDataRoot, "cleanup", "tombstones"),
+  pendingErrorReports: path.join(projectDataRoot, "feedback_db", "pending_error_reports.jsonl"),
+  errorReportDb: path.join(projectDataRoot, "error_report_db"),
+  compressedRules: path.join(projectDataRoot, "error_report_db", "compressed_rules.md"),
+  feedbackLoop: path.join(projectDataRoot, "feedback_loop"),
+  feedbackLoopItems: path.join(projectDataRoot, "feedback_loop", "items"),
+  feedbackLoopDigests: path.join(projectDataRoot, "feedback_loop", "digests"),
   feedbackLoopRuleCandidates: path.join(
-    projectRoot,
-    "data",
+    projectDataRoot,
     "feedback_loop",
     "rule_candidates",
   ),
   feedbackLoopRuleUpdateProposals: path.join(
-    projectRoot,
-    "data",
+    projectDataRoot,
     "feedback_loop",
     "rule_update_proposals",
   ),
   feedbackLoopRuleUpdateApplications: path.join(
-    projectRoot,
-    "data",
+    projectDataRoot,
     "feedback_loop",
     "rule_update_applications",
   ),
   feedbackLoopRuleUpdateBackups: path.join(
-    projectRoot,
-    "data",
+    projectDataRoot,
     "feedback_loop",
     "rule_update_backups",
   ),
   feedbackLoopContextBundles: path.join(
-    projectRoot,
-    "data",
+    projectDataRoot,
     "feedback_loop",
     "context_bundles",
   ),
-  backupsRoot: path.join(projectRoot, "data", "backups"),
-  projectBackups: path.join(projectRoot, "data", "backups", "project_backups"),
-  backupExports: path.join(projectRoot, "data", "backups", "exports"),
-  restorePreviews: path.join(projectRoot, "data", "backups", "restore_previews"),
+  backupsRoot: path.join(projectDataRoot, "backups"),
+  projectBackups: path.join(projectDataRoot, "backups", "project_backups"),
+  backupExports: path.join(projectDataRoot, "backups", "exports"),
+  restorePreviews: path.join(projectDataRoot, "backups", "restore_previews"),
 };
 
 function isInside(basePath, targetPath) {
@@ -150,10 +171,14 @@ function nearestExistingPath(filePath) {
 }
 
 function assertNoSymlinkEscape(filePath, label) {
-  const existing = nearestExistingPath(filePath);
-  const realExisting = realpathSync.native(existing);
-  if (!isInside(realProjectRoot, realExisting)) {
-    throw new Error(`${label} resolves outside the project through a symbolic link.`);
+  const actual = effectiveExistingPath(filePath);
+  const projectScoped = isInside(projectRoot, filePath)
+    && isInside(realProjectRoot, actual);
+  const consumerScoped = process.env.WRITE_DATA_ROOT !== undefined
+    && isInside(projectDataRoot, filePath)
+    && isInside(realDataRoot, actual);
+  if (!projectScoped && !consumerScoped) {
+    throw new Error(`${label} escapes the authorized project or data directory through a symbolic link.`);
   }
 }
 
@@ -166,8 +191,8 @@ export function resolveProjectPath(value, label = "path") {
     throw new Error(`${label} requires a path.`);
   }
   const resolved = path.resolve(projectRoot, value);
-  if (!isInside(projectRoot, resolved)) {
-    throw new Error(`${label} must stay inside the project.`);
+  if (!isInside(projectRoot, resolved) && !isInside(projectDataRoot, resolved)) {
+    throw new Error(`${label} must stay inside the project or configured data directory.`);
   }
   assertNoSymlinkEscape(resolved, label);
   return resolved;
