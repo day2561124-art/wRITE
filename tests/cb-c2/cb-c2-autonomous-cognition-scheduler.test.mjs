@@ -13,6 +13,8 @@ import { projectRoot } from "../../server/src/project-paths.mjs";
 import { beginWorldSimulationSession } from "../../server/src/world-simulation-session-service.mjs";
 import { commitWorldSimulationTurn, getWorldSimulationHistory, getWorldSimulationState } from "../../server/src/world-simulation-state-service.mjs";
 import { hashAgentRunValue } from "../../server/src/agent-run-service.mjs";
+import { adjudicateWorldSimulationCausality }
+  from "../../server/src/world-simulation-causal-rule-engine.mjs";
 import { runWorldSimulationActorInitiatedSpeech } from "../../server/src/world-simulation-actor-initiated-speech-service.mjs";
 import { runWorldSimulationCommittedActorSpeechListenerCognition } from "../../server/src/world-simulation-committed-actor-speech-listener-ingress-service.mjs";
 import { runWorldSimulationCommittedActorSpeechListenerClarification } from "../../server/src/world-simulation-committed-actor-speech-listener-clarification-service.mjs";
@@ -1649,14 +1651,52 @@ try {
 
   // A subsequent REAL World turn may expose the belief through Phase66C.
   // No result is spliced back into the memory-encoding turn or World truth.
+  // An acknowledged, already released CC6B signal still requires its normal
+  // next perception/causal boundary to expire. Never suppress this guard
+  // inside actor-initiated speech or manually delete pending sound events.
+  // A genuine previously emitted-and-heard reply is the internal cause for
+  // this zero-action, zero-elapsed World acoustic settlement turn.
+  const settlePreviouslyHeardSpeech=async(sessionId,snapshot,turnId)=>{
+    const pendingSounds=snapshot.state.sound_events??[];
+    assert.equal(pendingSounds.length,1);
+    assert.equal(pendingSounds[0].schema_version,
+      "cc6b-communication-acoustic-bridge-v1");
+    assert.equal(pendingSounds[0].lifecycle,"next_perception_only");
+    assert.equal(pendingSounds[0].source_entity_id,inquiryAlly);
+    assert.equal(pendingSounds[0].communication_action_id,
+      clarificationCandidate.action_id);
+    const causal=await adjudicateWorldSimulationCausality({
+      world_simulation_session_id:sessionId,turn_id:turnId,
+      world_state:snapshot.state,world_state_revision:snapshot.revision,
+      world_state_hash:snapshot.state_hash,
+      event:{event_id:turnId,scene_id:actionScene,
+        type:"committed_reply_followup_perception_causal_context",
+        simulation_time:snapshot.state.simulation_time,participants:[character]},
+      selected_action_intents:[],
+    });
+    assert.deepEqual(causal.action_outcomes,[]);
+    assert.deepEqual(causal.knowledge_transitions,[]);
+    assert.deepEqual(causal.scheduled_events,[]);
+    assert.deepEqual(causal.next_world_state.sound_events,[]);
+    assert.equal(causal.state_transitions.length,1);
+    assert.equal(causal.state_transitions[0].entity,"world");
+    assert.equal(causal.state_transitions[0].field,"sound_events");
+    assert.deepEqual(causal.state_transitions[0].from,pendingSounds);
+    assert.deepEqual(causal.state_transitions[0].to,[]);
+    const committed=await commitWorldSimulationTurn(sessionId,{
+      expected_revision:snapshot.revision,
+      expected_state_hash:snapshot.state_hash,
+      turn_id:turnId,next_world_state:causal.next_world_state,
+      event:null,selected_action_intents:[],action_outcomes:[],
+      state_transitions:causal.state_transitions,
+    },{fixtureRoot:goalFixtureRoot});
+    assert.equal(committed.state.revision,snapshot.revision+1);
+    assert.deepEqual(committed.state.state.sound_events,[]);
+    return committed;
+  };
   const realNextTurn="cb_c4_reply_belief_real_subsequent_turn";
-  const nextWorldTurn=await commitWorldSimulationTurn(acousticSid,{
-    expected_revision:afterMemorySnapshot.revision,
-    expected_state_hash:afterMemorySnapshot.state_hash,
-    turn_id:realNextTurn,
-    next_world_state:afterMemorySnapshot.state,event:null,
-    selected_action_intents:[],action_outcomes:[],state_transitions:[],
-  },{fixtureRoot:goalFixtureRoot});
+  const nextWorldTurn=await settlePreviouslyHeardSpeech(
+    acousticSid,afterMemorySnapshot,realNextTurn);
   assert.equal(nextWorldTurn.state.revision,afterMemorySnapshot.revision+1);
   const effectiveForSpeaker=projectWorldSimulationSubjectiveBeliefsForCharacter({
     world_state:nextWorldTurn.state.state,character,current_turn_id:realNextTurn,
@@ -1811,13 +1851,9 @@ try {
 
   // Keep both authentic World histories at the same revision, so the
   // differential cannot be attributed merely to one extra idle turn.
-  const noClaimNextWorldTurn=await commitWorldSimulationTurn(noClaimSid,{
-    expected_revision:noClaimResultState.revision,
-    expected_state_hash:noClaimResultState.state_hash,
-    turn_id:"cb_c4_reply_declined_claim_real_subsequent_turn",
-    next_world_state:noClaimResultState.state,event:null,
-    selected_action_intents:[],action_outcomes:[],state_transitions:[],
-  },{fixtureRoot:goalFixtureRoot});
+  const noClaimNextWorldTurn=await settlePreviouslyHeardSpeech(
+    noClaimSid,noClaimResultState,
+    "cb_c4_reply_declined_claim_real_subsequent_turn");
   assert.equal(noClaimNextWorldTurn.state.revision,nextWorldTurn.state.revision);
   assert.deepEqual(noClaimNextWorldTurn.state.state.available_actions,
     nextWorldTurn.state.state.available_actions);
