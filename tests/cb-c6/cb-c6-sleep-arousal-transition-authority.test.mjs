@@ -6068,11 +6068,15 @@ for (const reverse of [false, true]) {
     ]);
     let previous = await getWorldSimulationState(jointSid, jointOptions);
     const at = ms => new Date(Date.parse(initial.simulation_time) + ms).toISOString();
-    const neverAuto = await runWorldSimulationOffscreenEventBatch({
-      world_simulation_session_id: jointSid, max_turns: 1,
+    // The canonical batch can now use the independently certified injury
+    // route, but an explicit zero budget must still forbid any commit.
+    const zeroBudget = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: jointSid, max_turns: 0,
     }, jointOptions);
-    assert.equal(neverAuto.committed_turn_count, 0,
-      "new damage authority must NOT implicitly widen old canonical batch");
+    assert.equal(zeroBudget.committed_turn_count, 0);
+    assert.equal(zeroBudget.attempted_turn_count, 0);
+    assert.equal(zeroBudget.automatic_replay_allowed, false);
+    assert.equal((await getWorldSimulationState(jointSid, jointOptions)).revision, 0);
     assert.equal(neverAuto.physical_step_blocked_reason,
       "physical_step_scene_scope_unresolved");
     for (const [index, elapsed] of [50, 100].entries()) {
