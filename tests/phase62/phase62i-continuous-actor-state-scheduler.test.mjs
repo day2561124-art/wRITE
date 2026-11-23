@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 
 import { projectRoot } from "../../server/src/project-paths.mjs";
@@ -21,6 +21,7 @@ import {
 import {
   getWorldSimulationHistory,
   getWorldSimulationState,
+  worldSimulationStatePaths,
 } from "../../server/src/world-simulation-state-service.mjs";
 
 const fixtureRoot = path.join(
@@ -198,6 +199,10 @@ function actionFor(eventId, character) {
     "evt-field-ticks-refine-movement": {
       [fieldOwner]: "maintain-field-i",
       [fieldMover]: "field-run-i",
+    },
+    "evt-field-injury-reentry": {
+      [fieldMover]: "field-run-i",
+      [fieldOwner]: "field-owner-move-i",
     },
   };
   return map[eventId]?.[character] ?? null;
@@ -396,6 +401,10 @@ try {
       event_id: "evt-field-ticks-refine-movement",
       scene_id: fieldScene, participants: [fieldMover],
     }];
+    if (startingHp === 5) crossing.event_queue.push({
+      event_id: "evt-field-injury-reentry",
+      scene_id: fieldScene, participants: [fieldMover],
+    });
     crossing.characters[fieldMover].physical_state = {
       health_current: startingHp, health_max: 1000,
       injuries: [], movement_multiplier: 1, combat_multiplier: 1,
@@ -484,7 +493,155 @@ try {
     assert.equal(new Set(body.injuries.map(item => item.injury_id)).size,
       body.injuries.length, "committed injury identities must remain unique");
     assert.deepEqual(crossing, fixtureBefore, "source World state must stay immutable");
+    const persistedPaths = worldSimulationStatePaths(crossingId, options);
+    const bytesBeforeRead = await Promise.all([
+      readFile(persistedPaths.state, "utf8"),
+      readFile(persistedPaths.history, "utf8"),
+    ]);
+    assert.deepEqual(await getWorldSimulationState(crossingId, { fixtureRoot }),
+      crossingState, "a fresh disk reader must reproduce the committed World Body");
+    assert.deepEqual(await getWorldSimulationHistory(crossingId, { fixtureRoot }),
+      crossingHistory, "a fresh disk reader must reproduce the causal trajectory and injury order");
+    assert.deepEqual(await Promise.all([
+      readFile(persistedPaths.state, "utf8"),
+      readFile(persistedPaths.history, "utf8"),
+    ]), bytesBeforeRead, "read-only rehydration cannot rewrite durable World evidence");
+    assert.equal(turn.previous_state_hash !== turn.next_state_hash, true);
+    assert.equal(turn.next_state_hash, crossingState.state_hash);
+    if (startingHp === 5) {
+      // A second canonical turn consumes the next queued event from disk.
+      // Reusing the previously selected movement intent cannot resurrect a
+      // 0HP actor or rewind the first turn's incapacitation trajectory.
+      const fatalPosition = structuredClone(trajectory.final_position);
+      const fatalBody = structuredClone(body);
+      await runWorldSimulationTurn({
+        world_simulation_session_id: crossingId,
+      }, { ...options, characterBrain });
+      const later = await getWorldSimulationState(crossingId, { fixtureRoot });
+      const laterHistory = await getWorldSimulationHistory(crossingId, { fixtureRoot });
+      assert.equal(later.revision, 2);
+      assert.equal(laterHistory.turns.length, 2);
+      assert.deepEqual(later.state.scenes[fieldScene].entity_positions[fieldMover],
+        fatalPosition, "a durable fatal field interruption forbids reentry movement");
+      assert.deepEqual(later.state.characters[fieldMover].physical_state, fatalBody,
+        "a blocked reentry cannot mutate persisted injury provenance");
+      const blocked = laterHistory.turns[1].action_outcomes.filter(item =>
+        item.actor === fieldMover && item.action_id === "field-run-i");
+      assert.equal(blocked.some(item => item.result === "movement_blocked"), true);
+      assert.equal(blocked.some(item => item.result === "movement_completed"), false);
+      assert.deepEqual(laterHistory.turns[0], turn,
+        "the original trajectory and causally ordered field injuries must never be replayed differently");
+      assert.equal(laterHistory.turns[1].previous_state_hash, crossingState.state_hash);
+      assert.equal(laterHistory.turns[1].next_state_hash, later.state_hash);
+    }
   }
+
+  // A legacy or externally imported Body record may be incapacitated or
+  // unconscious without also setting immobilized. Persisted physiological
+  // authority, not the incidental redundancy of flags, gates later movement.
+  for (const [where, flag] of [
+    ["physical", "incapacitated"],
+    ["physical", "unconscious"],
+    ["physical", "immobilized"],
+    ["character", "incapacitated"],
+    ["character", "unconscious"],
+    ["character", "immobilized"],
+  ]) {
+    const disabled = structuredClone(initialWorldState);
+    disabled.event_queue = [{
+      event_id: "evt-field-injury-reentry",
+      scene_id: fieldScene, participants: [fieldMover],
+    }];
+    disabled.ability_fields = {};
+    disabled.projectiles = {};
+    const character = disabled.characters[fieldMover];
+    character.physical_state = {
+      health_current: 60, health_max: 100,
+      movement_multiplier: 1, immobilized: false,
+      incapacitated: false, unconscious: false,
+    };
+    if (where === "physical") character.physical_state[flag] = true;
+    else character[flag] = true;
+    const source = structuredClone(disabled);
+    const disabledSession = await beginWorldSimulationSession({
+      source_text: "C6-F persisted Body movement authority " + where + "/" + flag,
+      characters: Object.keys(disabled.characters),
+      initial_world_state: disabled,
+    }, options);
+    const id = disabledSession.world_simulation_session_id;
+    const beforeState = await getWorldSimulationState(id, options);
+    await runWorldSimulationTurn({ world_simulation_session_id: id },
+      { ...options, characterBrain });
+    const afterState = await getWorldSimulationState(id, { fixtureRoot });
+    const afterHistory = await getWorldSimulationHistory(id, { fixtureRoot });
+    const result = afterHistory.turns[0];
+    assert.equal(afterState.revision, 1, where + "/" + flag);
+    assert.equal(afterHistory.turns.length, 1);
+    assert.equal(result.previous_state_hash, beforeState.state_hash);
+    assert.equal(result.next_state_hash, afterState.state_hash);
+    assert.deepEqual(afterState.state.scenes[fieldScene].entity_positions[fieldMover],
+      source.scenes[fieldScene].entity_positions[fieldMover],
+      where + "/" + flag + ": persisted Body restrictions must block the next movement");
+    assert.equal(result.action_outcomes.some(item =>
+      item.actor === fieldMover && item.result === "movement_blocked"), true,
+      where + "/" + flag + ": the cause must be a World refusal rather than a hidden teleport");
+    assert.equal(result.action_outcomes.some(item =>
+      item.actor === fieldMover && item.result === "movement_completed"), false);
+    assert.equal(result.causal_timeline.actor_trajectories[fieldMover] ?? null, null,
+      "blocked reentry must not create a new motion trajectory");
+    assert.deepEqual(afterState.state.characters[fieldMover].physical_state,
+      source.characters[fieldMover].physical_state);
+    assert.deepEqual(disabled, source, "the initial fixture must not be mutated");
+  }
+
+
+  // A physically disabled actor's desired destination is not a real claim.
+  // The spatial planner must reject that intent without falsely reserving
+  // the same endpoint against an independent, healthy moving actor.
+  const deniedClaimWorld = structuredClone(initialWorldState);
+  deniedClaimWorld.event_queue = [{
+    event_id: "evt-field-injury-reentry",
+    scene_id: fieldScene, participants: [fieldMover, fieldOwner],
+  }];
+  deniedClaimWorld.ability_fields = {};
+  deniedClaimWorld.projectiles = {};
+  deniedClaimWorld.characters[fieldMover].physical_state = {
+    health_current: 60, health_max: 100,
+    movement_multiplier: 1, incapacitated: true, immobilized: false,
+  };
+  deniedClaimWorld.available_actions[fieldOwner] = [{
+    action_id: "field-owner-move-i", intent: "向自由目的地移動",
+    duration_ms: 1000, movement: { to: { x: 4, y: 1 } },
+  }];
+  const deniedClaimBefore = structuredClone(deniedClaimWorld);
+  const deniedClaimSession = await beginWorldSimulationSession({
+    source_text: "C6-F disabled actor cannot reserve live mover destination",
+    characters: Object.keys(deniedClaimWorld.characters),
+    initial_world_state: deniedClaimWorld,
+  }, options);
+  const deniedClaimId = deniedClaimSession.world_simulation_session_id;
+  await runWorldSimulationTurn({
+    world_simulation_session_id: deniedClaimId,
+  }, { ...options, characterBrain });
+  const deniedClaimState = await getWorldSimulationState(deniedClaimId, { fixtureRoot });
+  const deniedClaimHistory = await getWorldSimulationHistory(deniedClaimId, { fixtureRoot });
+  assert.equal(deniedClaimState.revision, 1);
+  assert.equal(deniedClaimHistory.turns.length, 1);
+  assert.deepEqual(deniedClaimState.state.scenes[fieldScene].entity_positions[fieldMover],
+    { x: 0, y: 1 }, "an incapacitated actor cannot claim the target location");
+  assert.deepEqual(deniedClaimState.state.scenes[fieldScene].entity_positions[fieldOwner],
+    { x: 4, y: 1 }, "a healthy actor must reach a destination a disabled actor merely requested");
+  const claimOutcomes = deniedClaimHistory.turns[0].action_outcomes;
+  assert.equal(claimOutcomes.some(item => item.actor === fieldMover
+    && item.action_id === "field-run-i" && item.result === "movement_blocked"), true);
+  assert.equal(claimOutcomes.some(item => item.actor === fieldOwner
+    && item.action_id === "field-owner-move-i" && item.result === "movement_completed"), true);
+  assert.equal(claimOutcomes.some(item => item.actor === fieldOwner
+    && item.action_id === "field-owner-move-i" && item.result === "movement_blocked"), false);
+  assert.equal(deniedClaimHistory.turns[0].previous_state_hash !==
+    deniedClaimHistory.turns[0].next_state_hash, true);
+  assert.equal(deniedClaimHistory.turns[0].next_state_hash, deniedClaimState.state_hash);
+  assert.deepEqual(deniedClaimWorld, deniedClaimBefore);
 
   console.log(JSON.stringify({
     actor_state_scheduler_version: worldSimulationActorStateSchedulerVersion,
