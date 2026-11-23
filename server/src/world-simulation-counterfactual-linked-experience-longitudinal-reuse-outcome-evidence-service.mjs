@@ -71,9 +71,14 @@ function exactQExpectedFromTurn(turn) {
   };
 }
 function historyPrefix(worldHistory, endIndex) {
-  const history = isObject(worldHistory) ? cloneJson(worldHistory) : { turns: cloneJson(turns(worldHistory)) };
-  history.turns = turns(worldHistory).slice(0, endIndex).map(cloneJson);
-  return history;
+  // Revalidate a prior turn using only its committed history prefix.
+  // Previously, every anchor cloned the entire future history first, then
+  // cloned the prefix again. Preserve deep-copy isolation and canonical
+  // evidence while avoiding both unnecessary copies.
+  const prefixTurns = turns(worldHistory).slice(0, endIndex);
+  return cloneJson(isObject(worldHistory)
+    ? { ...worldHistory, turns: prefixTurns }
+    : { turns: prefixTurns });
 }
 function canonicalPriorQ(worldHistory, turn, index, sessionId) {
   const projection = turn?.counterfactual_linked_experience_reuse_outcome_selected_action_outcome_evidence;
