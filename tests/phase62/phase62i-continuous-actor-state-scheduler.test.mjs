@@ -10,6 +10,9 @@ import {
   worldSimulationActorStateSchedulerVersion,
 } from "../../server/src/world-simulation-actor-state-scheduler.mjs";
 import {
+  queryWorldSimulationAbilityFieldExposure,
+} from "../../server/src/world-simulation-immutable-event-query-service.mjs";
+import {
   runWorldSimulationTurn as runWorldSimulationTurnRuntime,
 } from "../../server/src/world-simulation-loop-service.mjs";
 import {
@@ -267,6 +270,43 @@ try {
   assert.ok(movementRateChange);
   assert.equal(movementRateChange.time_ms, 100);
   assert.ok(secondTimeline.entries.some((item) => item.kind === "movement_completion_refined" && item.actor === fieldMover));
+
+  // C6-F: use an actual committed Phase62I movement trajectory whose speed
+  // falls from 4 m/s to 3.4 m/s after the first 100ms field injury. The
+  // immutable exposure query must derive segment boundaries directly from
+  // the trajectory, without a duplicate breakpoints property from its caller.
+  // Narrow field x=.5..1.5 is entirely crossed after the rate reduction:
+  // exposure = 1m / 3.4m/s, not 1m / 4m/s.
+  const rateTrajectoryInput = {
+    profile: {
+      start: fieldTrajectory.start,
+      end: fieldTrajectory.final_position,
+      durationMs: fieldTrajectory.completion_time_ms,
+      trajectory: fieldTrajectory,
+    },
+    center: { x: 1, y: 1 }, radius_m: 0.5,
+    start_ms: 0,
+    end_ms: fieldTrajectory.completion_time_ms,
+    character: fieldMover, field_id: "rate-change-measurement",
+  };
+  const beforeRateInput = JSON.stringify(rateTrajectoryInput);
+  const actualRateExposure = queryWorldSimulationAbilityFieldExposure(rateTrajectoryInput);
+  assert.ok(Math.abs(actualRateExposure.result.inside_ms - 1000 / 3.4) < 1e-5,
+    "post-injury 3.4m/s trajectory must determine the physical time spent inside the circle");
+  const times = [0, 100, 200, 300, 500, fieldTrajectory.completion_time_ms];
+  let segmentedRateExposureMs = 0;
+  for (let i = 0; i < times.length - 1; i++) {
+    const partial = queryWorldSimulationAbilityFieldExposure({
+      ...rateTrajectoryInput,
+      start_ms: times[i], end_ms: times[i + 1],
+    });
+    segmentedRateExposureMs += partial.result.inside_ms;
+    assert.equal(partial.audit.deterministic_replay_verified, true);
+  }
+  assert.ok(Math.abs(segmentedRateExposureMs - actualRateExposure.result.inside_ms) < 1e-6,
+    "splitting a rate-adjusted trajectory at arbitrary times cannot change total exposure");
+  assert.equal(JSON.stringify(rateTrajectoryInput), beforeRateInput);
+
 
 
   // C6-F: a later slow-field hit may not be applied before an earlier fast
