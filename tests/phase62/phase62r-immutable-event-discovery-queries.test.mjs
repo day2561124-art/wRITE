@@ -169,6 +169,46 @@ try {
   assert.equal(exposureQuery.audit.input_context_immutable, true);
   assert.equal(exposureQuery.audit.deterministic_replay_verified, true);
 
+  // C6-F: a zero-duration boundary contact is NOT a full exposure tick.
+  // A moving point at the circle exit at t=300ms is leaving the field:
+  // the following [300,400]ms interval is outside, despite q(0) == 0.
+  // Positive-length standing exactly on the boundary remains inside.
+  for (const [label, interval, expectedMs] of [
+    ["enter-at-end", [0, 100], 0],
+    ["cross-inside", [100, 300], 200],
+    ["exit-at-start", [300, 400], 0],
+    ["exit-then-outside", [350, 400], 0],
+  ]) {
+    const boundary = queryWorldSimulationAbilityFieldExposure({
+      ...exposureInput, start_ms: interval[0], end_ms: interval[1],
+    });
+    assert.equal(boundary.result.ok, true, label);
+    assert.ok(Math.abs(boundary.result.inside_ms - expectedMs) < 1e-6,
+      label + ": tangential/endpoint contact must have zero exposure measure");
+    assert.equal(boundary.audit.query_output_contains_mutation_proposals, false);
+    assert.equal(boundary.audit.deterministic_replay_verified, true);
+  }
+  const outwardTangent = queryWorldSimulationAbilityFieldExposure({
+    ...exposureInput,
+    profile: {
+      start: { x: 2, y: 1 }, end: { x: 4, y: 1 },
+      durationMs: 100, breakpoints: [],
+    },
+    start_ms: 0, end_ms: 100,
+  });
+  assert.equal(outwardTangent.result.inside_ms, 0,
+    "tangent at the segment origin cannot create a phantom full tick");
+  const boundaryStill = queryWorldSimulationAbilityFieldExposure({
+    ...exposureInput,
+    profile: {
+      start: { x: 3, y: 0 }, end: { x: 3, y: 0 },
+      durationMs: 0, breakpoints: [],
+    },
+    start_ms: 300, end_ms: 400,
+  });
+  assert.equal(boundaryStill.result.inside_ms, 100,
+    "a genuinely stationary point on the inclusive edge remains exposed");
+
   assert.throws(() => runWorldSimulationImmutableCausalQuery({
     query_name: "forbidden-mutation-query",
     context: { value: 1 },
