@@ -1053,7 +1053,9 @@ function resolveStationaryFieldOnlySharedFrontiers(
 ) {
   if (newFields.length
       || Array.isArray(input.selected_action_intents) && input.selected_action_intents.length
+      || Array.isArray(input.resolved_action_outcomes) && input.resolved_action_outcomes.length
       || Object.keys(object(input.actor_trajectories)).length
+      || Object.values(object(input.world_state.projectiles)).some(item => item?.active === true)
       || Object.values(object(nextWorldState.projectiles)).some(item => item?.active === true)
       || JSON.stringify(object(snapshotScene.entity_positions))
         !== JSON.stringify(object(nextScene.entity_positions)))
