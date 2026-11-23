@@ -36,7 +36,7 @@ export function assertWorldSimulationReplySubjectiveBeliefCommit(input) {
     return;
   }
   if(adoption.decision!=="propose_and_adopt_if_unopposed"
-    || Object.keys(adoption).length!==9
+    || Object.keys(adoption).length!==11
     || !Object.values(adoption).every(value=>typeof value==="string"&&value.trim())
     || !Array.isArray(payload.state_transitions)
     || payload.state_transitions.length!==5
@@ -117,24 +117,57 @@ export function assertWorldSimulationReplySubjectiveBeliefCommit(input) {
   ];
   if(!same(expected,payload.state_transitions))
     invalid("The exact canonical claim and revision transitions were not supplied.");
-  const queue=buildWorldSimulationChronologicalMutationQueue({
+  const memoryQueue=buildWorldSimulationChronologicalMutationQueue({
     turn_id:turnId,world_state_hash:oldHash,
-    state_transitions:expected,elapsed_ms:2,
+    state_transitions:[payload.state_transitions[0]],elapsed_ms:0,
   });
-  if(queue.queue_hash!==meta.mutation_queue_hash
-    || !same(queue,payload.chronological_mutation_queue)
-    || !same(queue,payload.subjective_memory_mutation_queue)
-    || !same(queue,payload.subjective_claim_mutation_queue)
-    || !same(queue,payload.subjective_belief_revision_mutation_queue))
-    invalid("Every subsystem must use the same authoritative chronological queue.");
-  const executed=executeWorldSimulationChronologicalMutationQueue({
-    world_state:previous,preview_world_state:next,
-    queue,scene_id:meta.scene_id,
+  if(memoryQueue.queue_hash!==meta.mutation_queue_hash
+    || !same(memoryQueue,payload.subjective_memory_mutation_queue))
+    invalid("Phase63A requires its exact independent memory queue.");
+  const memoryExecution=executeWorldSimulationChronologicalMutationQueue({
+    world_state:previous,preview_world_state:memoryOnly,
+    queue:memoryQueue,scene_id:meta.scene_id,
   });
-  if(!same(executed.next_world_state,next)
-    || !same(executed.execution,payload.chronological_mutation_execution)
-    || !same(executed.execution,payload.subjective_memory_mutation_execution)
-    || !same(executed.execution,payload.subjective_claim_mutation_execution)
-    || !same(executed.execution,payload.subjective_belief_revision_mutation_execution))
-    invalid("Only the canonical mutation executor may write the belief pipeline.");
+  if(!same(memoryExecution.next_world_state,memoryOnly)
+    || !same(memoryExecution.execution,payload.subjective_memory_mutation_execution))
+    invalid("Phase63A memory queue execution diverged.");
+
+  const claimQueue=buildWorldSimulationChronologicalMutationQueue({
+    turn_id:`${turnId}:subjective_claim`,
+    world_state_hash:hashAgentRunValue(memoryOnly),
+    state_transitions:proposed.result.state_transitions,elapsed_ms:0,
+  });
+  if(claimQueue.queue_hash!==adoption.phase65a_queue_hash
+    || !same(claimQueue,payload.subjective_claim_mutation_queue))
+    invalid("Phase65A requires its own exact source-turn claim queue.");
+  const claimExecution=executeWorldSimulationChronologicalMutationQueue({
+    world_state:memoryOnly,
+    preview_world_state:proposed.result.preview_world_state,
+    queue:claimQueue,scene_id:meta.scene_id,
+  });
+  if(!same(claimExecution.next_world_state,proposed.result.preview_world_state)
+    || !same(claimExecution.execution,payload.subjective_claim_mutation_execution))
+    invalid("Phase65A claim queue execution diverged.");
+
+  const revisionQueue=buildWorldSimulationChronologicalMutationQueue({
+    turn_id:`${turnId}:subjective_belief_revision`,
+    world_state_hash:hashAgentRunValue(proposed.result.preview_world_state),
+    state_transitions:revised.result.state_transitions,elapsed_ms:0,
+  });
+  if(revisionQueue.queue_hash!==adoption.phase66a_queue_hash
+    || !same(revisionQueue,payload.subjective_belief_revision_mutation_queue))
+    invalid("Phase66A requires its exact source-turn revision queue.");
+  const revisionExecution=executeWorldSimulationChronologicalMutationQueue({
+    world_state:proposed.result.preview_world_state,
+    preview_world_state:next,queue:revisionQueue,
+    scene_id:meta.scene_id,
+  });
+  if(!same(revisionExecution.next_world_state,next)
+    || !same(revisionExecution.execution,
+      payload.subjective_belief_revision_mutation_execution))
+    invalid("Phase66A adopted belief queue execution diverged.");
+  if(exists(payload.chronological_mutation_queue)
+    || exists(payload.chronological_mutation_execution))
+    invalid("Three source-scoped queues must not be disguised as one chronological queue.");
+
 }
