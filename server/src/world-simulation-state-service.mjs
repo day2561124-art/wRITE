@@ -517,6 +517,13 @@ export async function commitWorldSimulationTurn(
             }
           }
           const now = new Date().toISOString();
+          // The Body sleep authority uses history only if a sleep transition is
+          // present. Missing transitions still fail on changed sleep state,
+          // before any read; the later history factory always reopens disk.
+          const sleepTransitionProposed = Array.isArray(input.state_transitions)
+          && input.state_transitions.some(
+            (transition) => transition?.field === "physical_state.sleep_arousal",
+          );
           assertWorldSimulationSleepArousalCommitAuthority({
             world_state: current.state,
             world_state_revision: current.revision,
@@ -524,7 +531,9 @@ export async function commitWorldSimulationTurn(
             next_world_state: nextWorldState,
             event: input.event,
             state_transitions: input.state_transitions,
-            committed_history: await readJson(paths.history, "world simulation history"),
+            committed_history: sleepTransitionProposed
+              ? await readJson(paths.history, "world simulation history")
+              : undefined,
           });
           committedEnvelope = stateEnvelope(
             sessionId,
