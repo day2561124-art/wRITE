@@ -590,6 +590,16 @@ assert.throws(() =>
     ...scopedInputs, world_history: invalidDetachedHistory,
   }),
 );
+// The private isolation tag is NOT a provenance certificate: even a forged
+// historical-Q projection inside a newly and legitimately isolated snapshot
+// must still fail its exact Phase81P/Phase76A/history-lineage checks.
+const forgedButIsolated = isolateWorldSimulationPhase82AHistoryForTurn(invalidDetachedHistory);
+assert.ok(Object.isFrozen(forgedButIsolated));
+assert.throws(() =>
+  buildWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeEvidence({
+    ...scopedInputs, world_history: forgedButIsolated,
+  }),
+);
 // A locally re-hashed historical Phase81Q record cannot become longitudinal
 // evidence if it no longer matches that turn's canonical Phase76A experience.
 const forgedHistory = clone(history2);
