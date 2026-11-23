@@ -1424,7 +1424,13 @@ try {
   assert.equal(memoryTurn.subjective_belief_revision_projection.result
     .revision_events_created.length,1);
   assert.equal(memoryTurn.state_transitions.length,5);
-  assert.ok(memoryTurn.chronological_mutation_queue);
+  assert.equal(memoryTurn.chronological_mutation_queue,null);
+  assert.equal(memoryTurn.chronological_mutation_execution,null);
+  assert.ok(memoryTurn.subjective_memory_mutation_queue?.queue_hash);
+  assert.ok(memoryTurn.subjective_claim_mutation_queue?.queue_hash);
+  assert.ok(memoryTurn.subjective_belief_revision_mutation_queue?.queue_hash);
+  assert.equal(memoryTurn.subjective_belief_revision_mutation_queue.turn_id,
+    memoryTurn.turn_id+":subjective_belief_revision");
   await assert.rejects(async ()=>projectWorldSimulationSubjectiveBeliefsForCharacter({
     world_state:afterMemorySnapshot.state,
     character,current_turn_id:memoryTurn.turn_id,
