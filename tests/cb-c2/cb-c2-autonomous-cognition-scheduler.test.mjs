@@ -15,6 +15,7 @@ import { commitWorldSimulationTurn, getWorldSimulationHistory, getWorldSimulatio
 import { hashAgentRunValue } from "../../server/src/agent-run-service.mjs";
 import { runWorldSimulationActorInitiatedSpeech } from "../../server/src/world-simulation-actor-initiated-speech-service.mjs";
 import { runWorldSimulationCommittedActorSpeechListenerCognition } from "../../server/src/world-simulation-committed-actor-speech-listener-ingress-service.mjs";
+import { runWorldSimulationCommittedActorSpeechListenerClarification } from "../../server/src/world-simulation-committed-actor-speech-listener-clarification-service.mjs";
 import { assertWorldSimulationCommittedAcousticSource } from "../../server/src/world-simulation-native-committed-source-service.mjs";
 import { buildCharacterCommunicationActionCandidate } from "../../server/src/character-communication-foundation-service.mjs";
 import { nativeImplementationIntentionActivationCapability } from "../../server/src/world-simulation-goal-implementation-intention-activation-service.mjs";
@@ -822,6 +823,24 @@ try {
   assert.equal(acousticCandidate.communication.surface_realization_complete,true);
   const acousticWorld=structuredClone(spontaneousWorld);
   acousticWorld.available_actions[character]=[acousticCandidate];
+  // The listener has a pre-existing World-trusted clarification action.
+  // It is not generated from the unheard transcript or selected by World.
+  const clarificationWords="你能再說一次剛剛那句話嗎";
+  const clarificationCandidate=buildCharacterCommunicationActionCandidate({
+    character:inquiryAlly,cognition:{communication_goal:{
+      character:inquiryAlly,purpose:"request_information",mode:"direct",
+      addressee:character,public_content:clarificationWords,
+      surface_realization:{
+        schema_version:"cc5-mandarin-clause-request-v1",
+        semantic_anchor:clarificationWords,
+        clause:{subject:"你",predicate:"能再說一次",object:"剛剛那句話",
+          sentence_final_particle:"嗎"},
+      },
+    }},
+  });
+  assert.equal(clarificationCandidate.communication.surface_realization_complete,true);
+  acousticWorld.available_actions[inquiryAlly]=[clarificationCandidate];
+  acousticWorld.characters[inquiryAlly].speech_acoustics={sound_level_db_at_1m:65};
   acousticWorld.characters[character].speech_acoustics={sound_level_db_at_1m:65};
   acousticWorld.scenes[actionScene].audibility_profiles={
     [character]:{minimum_audible_db:35},
@@ -993,6 +1012,233 @@ try {
     const afterFault=await getWorldSimulationState(
       acousticSid,{fixtureRoot:goalFixtureRoot});
     assert.equal(afterFault.state_hash,acousticSnapshot.state_hash);
+  }
+
+  // A real listener-owned second decision must produce one *new* World speech
+  // outcome. The previously verified source and its acoustic evidence survive.
+  let privateListenerPasses=0, listenerReplyDecisions=0;
+  const listenerClarification=await runWorldSimulationCommittedActorSpeechListenerClarification(
+    listenerIngressInput,
+    {fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+      assert.equal(packet.character,inquiryAlly);
+      if(packet.cognition?.clarification_opportunity){
+        listenerReplyDecisions++;
+        assert.equal(packet.cognition.clarification_opportunity.lexical_meaning_understood,false);
+        assert.equal(packet.cognition.committed_acoustic_observation.content_understood,false);
+        assert.equal(packet.boundaries.source_transcript_exposed,false);
+        assert.equal(packet.boundaries.action_choice_owner,"character_brain");
+        assert.equal(JSON.stringify(packet).includes(acousticContent),false);
+        assert.ok(packet.candidate_action_intents.some(item=>
+          item.action_id===clarificationCandidate.action_id));
+        return {action_id:clarificationCandidate.action_id};
+      }
+      privateListenerPasses++;
+      assert.equal(packet.cognition.committed_acoustic_observation.kind,"speech_sound_detected");
+      assert.equal(packet.boundaries.action_selection_authority,false);
+      return {private_reaction:"heard something without identifying the words"};
+    }});
+  assert.equal(privateListenerPasses,1);
+  assert.equal(listenerReplyDecisions,1);
+  assert.equal(listenerClarification.committed,true);
+  assert.equal(listenerClarification.public_reply_emitted,true);
+  assert.equal(listenerClarification.information_verified,false);
+  assert.equal(listenerClarification.content_understood,false);
+  assert.equal(listenerClarification.external_world_event_created,false);
+  const replySnapshot=await getWorldSimulationState(acousticSid,{fixtureRoot:goalFixtureRoot});
+  const replyHistory=await getWorldSimulationHistory(acousticSid,{fixtureRoot:goalFixtureRoot});
+  assert.equal(replySnapshot.revision,acousticSnapshot.revision+1);
+  assert.equal(replyHistory.turns.length,acousticHistory.turns.length+1);
+  assert.deepEqual(replyHistory.turns.at(-2),acousticSourceTurn,
+    "Listener response must not rewrite original source speech or its hearing receipt.");
+  const replyTurn=replyHistory.turns.at(-1);
+  assert.equal(replyTurn.event,null);
+  assert.equal(replyTurn.autonomous_actor_initiated_action,undefined,
+    "A listener reply must not spoof a C2 actor-originated scheduled opportunity.");
+  assert.equal(replyTurn.autonomous_listener_clarification_reply.character,inquiryAlly);
+  assert.equal(replyTurn.autonomous_listener_clarification_reply.source_turn_id,
+    acousticSourceTurn.turn_id);
+  assert.equal(replyTurn.autonomous_listener_clarification_reply.observer_increment_ref,
+    sourceAdmission.observer_increment.increment_ref);
+  assert.equal(replyTurn.selected_action_intents[0].action_id,
+    clarificationCandidate.action_id);
+  const actualReply=replyTurn.action_outcomes.filter(item=>
+    item.actor===inquiryAlly
+    && item.action_id===clarificationCandidate.action_id
+    && item.result==="communication_emitted");
+  assert.equal(actualReply.length,1);
+  assert.equal(actualReply[0].communication_event.addressee,character);
+  assert.equal(actualReply[0].communication_event.semantic_content,clarificationWords);
+  assert.equal(actualReply[0].communication_event.world_truth_claimed,false);
+  const replyReplayBefore=await getWorldSimulationHistory(
+    acousticSid,{fixtureRoot:goalFixtureRoot});
+  await assert.rejects(
+    runWorldSimulationCommittedActorSpeechListenerClarification(
+      listenerIngressInput,
+      {fixtureRoot:goalFixtureRoot,characterBrain:async ()=>({
+        action_id:clarificationCandidate.action_id,
+      })}),
+    error=>error?.code==="WORLD_LISTENER_CUE_WORLD_STATE_STALE",
+    "Committed listener source must not produce a second public reply on replay.");
+  const replyReplayAfter=await getWorldSimulationHistory(
+    acousticSid,{fixtureRoot:goalFixtureRoot});
+  assert.deepEqual(replyReplayAfter.turns,replyReplayBefore.turns);
+  console.log(JSON.stringify({
+    scenario:"world_actor_verified_hearing_to_listener_owned_causal_clarification",
+    source_turn_preserved:true,private_brain_passes:privateListenerPasses,
+    explicit_reply_choices:listenerReplyDecisions,
+    committed_reply_outcomes:actualReply.length,
+    source_transcript_leaked:false,belief_verified:false,replay_blocked:true,
+  }));
+
+  // Negative control: a genuine source hearing opportunity is insufficient
+  // to force a public reply. A Brain decline, forged action and Runtime
+  // attempt to replace the Brain decision must all leave World unchanged.
+  for(const replyFault of ["decline","forged_action","runtime_override","runtime_substitution","ambiguous_scene","forged_source_writer"]){
+    const guardedReplyWorld=structuredClone(acousticWorld);
+    if(replyFault==="ambiguous_scene"){
+      guardedReplyWorld.characters["路過同伴"]={known:[]};
+      guardedReplyWorld.scenes[actionScene].entity_positions["路過同伴"]={x:3,y:1};
+    }
+    const guardedReplySession=await beginWorldSimulationSession({
+      source_text:"authenticated listener clarification guard "+replyFault,
+      characters:Object.keys(guardedReplyWorld.characters),
+      initial_world_state:guardedReplyWorld,
+    },{fixtureRoot:goalFixtureRoot});
+    const guardedReplySid=guardedReplySession.world_simulation_session_id;
+    const groundedSource=await runWorldSimulationActorInitiatedSpeech({
+      world_simulation_session_id:guardedReplySid,
+      character,runtime_context_by_character:planCue,
+    },{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+      if(packet.cognition?.implementation_intention_activation){
+        const activation=packet.cognition.implementation_intention_activation;
+        return {
+          plan_activation_context_token:activation.context_token,
+          activated_plan_tokens:[activation.plans[0].plan_token],
+        };
+      }
+      return {action_id:acousticCandidate.action_id};
+    }});
+    assert.equal(groundedSource.committed,true);
+    const guardedSourceSnapshot=await getWorldSimulationState(
+      guardedReplySid,{fixtureRoot:goalFixtureRoot});
+    const guardedSourceHistory=await getWorldSimulationHistory(
+      guardedReplySid,{fixtureRoot:goalFixtureRoot});
+    if(replyFault==="forged_source_writer"){
+      const original=guardedSourceHistory.turns.at(-1);
+      const actualAdmission=original.communication_observer_increment_admissions
+        .find(item=>item.observer===inquiryAlly
+          && item.admission_status==="heard_acoustic_cues_only");
+      assert.ok(actualAdmission?.observer_increment?.increment_ref);
+      await assert.rejects(
+        commitWorldSimulationTurn(guardedReplySid,{
+          expected_revision:guardedSourceSnapshot.revision,
+          expected_state_hash:guardedSourceSnapshot.state_hash,
+          turn_id:"forged_listener_reply_cas_writer",
+          next_world_state:guardedSourceSnapshot.state,event:null,
+          selected_action_intents:[{
+            character:inquiryAlly,selection:"candidate_action_intent",
+            action_id:clarificationCandidate.action_id,
+            intent:clarificationCandidate.intent,candidate:clarificationCandidate,
+          }],
+          action_outcomes:[{
+            actor:inquiryAlly,action_id:clarificationCandidate.action_id,
+            result:"communication_emitted",
+            communication_event:{channel:"speech",world_truth_claimed:false},
+          }],
+          causal_resolution_id:"forged_reply_causal_claim",
+          autonomous_listener_clarification_reply:{
+            version:"world-listener-clarification-causal-reply-v1",
+            character:inquiryAlly,scene_id:actionScene,
+            action_id:clarificationCandidate.action_id,
+            causal_resolution_id:"forged_reply_causal_claim",
+            source_turn_id:original.turn_id,
+            source_turn_hash:"forged_source_turn_hash",
+            source_revision_to:original.revision_to,
+            source_character:character,source_action_id:acousticCandidate.action_id,
+            observer_increment_ref:actualAdmission.observer_increment.increment_ref,
+          },
+        },{fixtureRoot:goalFixtureRoot}),
+        error=>error?.code==="WORLD_LISTENER_REPLY_SOURCE_COMMIT_INVALID",
+        "Direct World writer must not accept a forged source hash even with a real observed listener.");
+      const afterForged=await getWorldSimulationState(
+        guardedReplySid,{fixtureRoot:goalFixtureRoot});
+      const historyAfterForged=await getWorldSimulationHistory(
+        guardedReplySid,{fixtureRoot:goalFixtureRoot});
+      assert.equal(afterForged.revision,guardedSourceSnapshot.revision);
+      assert.equal(afterForged.state_hash,guardedSourceSnapshot.state_hash);
+      assert.deepEqual(historyAfterForged.turns,guardedSourceHistory.turns);
+      console.log(JSON.stringify({
+        scenario:"world_listener_reply_writer_source_forgery",
+        forged_source_rejected:true,atomic_world_unchanged:true,
+      }));
+      continue;
+    }
+    let replyBrainChoices=0;
+    const replyOptions={
+      fixtureRoot:goalFixtureRoot,
+      characterBrain:async packet=>{
+        if(!packet.cognition?.clarification_opportunity)
+          return {private_reaction:"noticed nonlexical speech"};
+        replyBrainChoices++;
+        return {action_id:replyFault==="forged_action"
+          ? "fake_listener_action_not_in_world"
+          : "reject_all"};
+      },
+    };
+    if(replyFault==="runtime_override") {
+      replyOptions.characterRuntimeManager={
+        runCharacterTurn:async ({brain_input,characterBrain})=>{
+          await characterBrain(brain_input);
+          // This is the Runtime's fabricated action, not the Brain's result.
+          return {action_id:clarificationCandidate.action_id};
+        },
+      };
+    }
+    if(replyFault==="runtime_substitution"){
+      replyOptions.characterRuntimeManager={
+        runCharacterTurn:async ({brain_input,characterBrain})=>
+          characterBrain(brain_input.cognition?.clarification_opportunity
+            ? {...brain_input,character:"fake_listener"}
+            : brain_input),
+      };
+    }
+    const guardedReplyCall=()=>runWorldSimulationCommittedActorSpeechListenerClarification({
+      world_simulation_session_id:guardedReplySid,
+      observer:inquiryAlly,
+      source_turn_id:guardedSourceHistory.turns.at(-1).turn_id,
+      expected_revision:guardedSourceSnapshot.revision,
+      expected_state_hash:guardedSourceSnapshot.state_hash,
+    },replyOptions);
+    if(replyFault==="forged_action")
+      await assert.rejects(guardedReplyCall(),
+        error=>error?.code==="WORLD_LISTENER_REPLY_ACTION_NOT_AVAILABLE");
+    else if(replyFault==="ambiguous_scene")
+      await assert.rejects(guardedReplyCall(),
+        error=>error?.code==="WORLD_LISTENER_REPLY_MULTIPARTY_UNSUPPORTED");
+    else if(replyFault==="runtime_substitution")
+      await assert.rejects(guardedReplyCall(),
+        error=>error?.code==="WORLD_LISTENER_REPLY_BRAIN_IDENTITY_INVALID");
+    else{
+      const declined=await guardedReplyCall();
+      assert.equal(declined.committed,false);
+      assert.equal(declined.public_reply_emitted,false);
+      assert.equal(declined.status,"listener_declined_clarification");
+    }
+    const guardedAfter=await getWorldSimulationState(
+      guardedReplySid,{fixtureRoot:goalFixtureRoot});
+    const guardedHistoryAfter=await getWorldSimulationHistory(
+      guardedReplySid,{fixtureRoot:goalFixtureRoot});
+    assert.equal(guardedAfter.revision,guardedSourceSnapshot.revision);
+    assert.equal(guardedAfter.state_hash,guardedSourceSnapshot.state_hash);
+    assert.deepEqual(guardedHistoryAfter.turns,guardedSourceHistory.turns);
+    assert.equal(replyBrainChoices,
+      ["runtime_substitution","ambiguous_scene"].includes(replyFault)?0:1,
+      "A substituted identity must be rejected before the listener Brain executes.");
+    console.log(JSON.stringify({
+      scenario:"world_listener_causal_clarification_negative",
+      fault:replyFault,brain_choices:replyBrainChoices,
+      world_unchanged:true,public_reply:false,
+    }));
   }
 
   // An actor can decline a real plan cue and a genuine available action.
