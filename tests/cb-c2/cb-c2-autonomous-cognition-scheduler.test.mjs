@@ -16,6 +16,7 @@ import { hashAgentRunValue } from "../../server/src/agent-run-service.mjs";
 import { runWorldSimulationActorInitiatedSpeech } from "../../server/src/world-simulation-actor-initiated-speech-service.mjs";
 import { runWorldSimulationCommittedActorSpeechListenerCognition } from "../../server/src/world-simulation-committed-actor-speech-listener-ingress-service.mjs";
 import { runWorldSimulationCommittedActorSpeechListenerClarification } from "../../server/src/world-simulation-committed-actor-speech-listener-clarification-service.mjs";
+import { runWorldSimulationCommittedReplySpeakerCognition } from "../../server/src/world-simulation-committed-reply-speaker-ingress-service.mjs";
 import { assertWorldSimulationCommittedAcousticSource } from "../../server/src/world-simulation-native-committed-source-service.mjs";
 import { buildCharacterCommunicationActionCandidate } from "../../server/src/character-communication-foundation-service.mjs";
 import { nativeImplementationIntentionActivationCapability } from "../../server/src/world-simulation-goal-implementation-intention-activation-service.mjs";
@@ -1089,6 +1090,98 @@ try {
     committed_reply_outcomes:actualReply.length,
     source_transcript_leaked:false,belief_verified:false,replay_blocked:true,
   }));
+
+  // Separate final acoustic edge: after the listener's *actual* World reply,
+  // the original speaker sees only their own newly admitted sound, not a
+  // canned answer or the engine's transcript/identity.
+  assert.equal(actualReply[0].communication_acoustic_signal?.registered,true,
+    "The listener reply must register real physical sound.");
+  const originalSpeakerHearing=(replyTurn.communication_observer_increment_admissions??[])
+    .find(item=>item.observer===character
+      && item.admission_status==="heard_acoustic_cues_only"
+      && item.audit?.source_action_id===clarificationCandidate.action_id);
+  assert.ok(originalSpeakerHearing?.observer_increment,
+    "The original speaker must have a real World-acoustic observer admission.");
+  const speakerIngressInput={
+    world_simulation_session_id:acousticSid,observer:character,
+    source_turn_id:replyTurn.turn_id,
+    expected_revision:replySnapshot.revision,
+    expected_state_hash:replySnapshot.state_hash,
+  };
+  let originalSpeakerBrainCalls=0;
+  const originalSpeakerCognition=await runWorldSimulationCommittedReplySpeakerCognition(
+    speakerIngressInput,{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+      originalSpeakerBrainCalls++;
+      assert.equal(packet.character,character);
+      const cue=packet.cognition.committed_acoustic_observation;
+      assert.equal(cue.kind,"speech_sound_detected");
+      assert.equal(cue.increment_ref,
+        originalSpeakerHearing.observer_increment.increment_ref);
+      assert.equal(cue.content_understood,false);
+      assert.equal(cue.heard_surface_fragment,null);
+      assert.equal(cue.speaker_identity_recognized,false);
+      assert.equal(cue.lexical_intelligibility_attested,false);
+      assert.equal(packet.boundaries.reply_surface_exposed,false);
+      assert.equal(packet.boundaries.action_selection_authority,false);
+      assert.equal(packet.boundaries.future_cues_exposed,false);
+      assert.equal(JSON.stringify(packet).includes(clarificationWords),false,
+        "World transcript must not be smuggled into private acoustic cognition.");
+      return {private_reaction:"heard another voice, words not verified"};
+    }});
+  assert.equal(originalSpeakerBrainCalls,1);
+  assert.equal(originalSpeakerCognition.source_chain_verified,true);
+  assert.equal(originalSpeakerCognition.character_brain_invoked,true);
+  assert.equal(originalSpeakerCognition.world_mutation_performed,false);
+  assert.equal(originalSpeakerCognition.content_understood,false);
+  assert.equal(originalSpeakerCognition.public_reply_emitted,false);
+  const afterSpeakerIngress=await getWorldSimulationState(
+    acousticSid,{fixtureRoot:goalFixtureRoot});
+  const historyAfterSpeakerIngress=await getWorldSimulationHistory(
+    acousticSid,{fixtureRoot:goalFixtureRoot});
+  assert.equal(afterSpeakerIngress.revision,replySnapshot.revision);
+  assert.equal(afterSpeakerIngress.state_hash,replySnapshot.state_hash);
+  assert.deepEqual(historyAfterSpeakerIngress.turns,replyHistory.turns);
+  console.log(JSON.stringify({
+    scenario:"world_actor_clarification_reply_to_original_speaker_acoustic_ingress",
+    source_chain_verified:true,reply_registered_sound:true,
+    original_speaker_brain_calls:originalSpeakerBrainCalls,
+    transcript_hidden:true,world_unchanged:true,understanding_claimed:false,
+  }));
+
+  for(const fault of ["wrong_observer","stale_world","runtime_substitution","forged_public_action"]){
+    let invoked=0;
+    const faultInput={...speakerIngressInput};
+    if(fault==="wrong_observer")faultInput.observer=inquiryAlly;
+    if(fault==="stale_world")faultInput.expected_revision++;
+    const faultOptions={
+      fixtureRoot:goalFixtureRoot,
+      characterBrain:async ()=>{
+        invoked++;
+        return fault==="forged_public_action"
+          ? {action_id:acousticCandidate.action_id}
+          : {private_reaction:"observed sound"};
+      },
+    };
+    if(fault==="runtime_substitution")faultOptions.characterRuntimeManager={
+      runCharacterTurn:async ({brain_input,characterBrain})=>
+        characterBrain({...brain_input,character:"forged_listener"}),
+    };
+    await assert.rejects(
+      runWorldSimulationCommittedReplySpeakerCognition(faultInput,faultOptions),
+      error=>error?.code===({
+        wrong_observer:"WORLD_REPLY_SPEAKER_SOURCE_NOT_CURRENT",
+        stale_world:"WORLD_REPLY_SPEAKER_WORLD_STALE",
+        runtime_substitution:"WORLD_REPLY_SPEAKER_BRAIN_PACKET_INVALID",
+        forged_public_action:"WORLD_REPLY_SPEAKER_PUBLIC_ACTION_UNSUPPORTED",
+      })[fault]);
+    assert.equal(invoked,fault==="forged_public_action"?1:0);
+    const unchanged=await getWorldSimulationState(acousticSid,{fixtureRoot:goalFixtureRoot});
+    assert.equal(unchanged.state_hash,replySnapshot.state_hash);
+    console.log(JSON.stringify({
+      scenario:"world_original_speaker_hearing_negative",fault,
+      world_unchanged:true,brain_calls:invoked,
+    }));
+  }
 
   // Negative control: a genuine source hearing opportunity is insufficient
   // to force a public reply. A Brain decline, forged action and Runtime
