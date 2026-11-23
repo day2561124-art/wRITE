@@ -740,6 +740,7 @@ export function createDevOperationJournalService({
   let explicitDegraded = false;
   // Only successfully classified snapshots are cached; public results never alias them.
   let verifiedSnapshot = null;
+  let verificationInFlight = null;
   const workspaceMutationState = new Map();
   const recoveringOperations = new Map();
   let recoveryTimer = null;
@@ -1244,7 +1245,7 @@ export function createDevOperationJournalService({
     };
   }
 
-  async function verify() {
+  async function verifyStableSnapshot() {
     try {
       const { eventsPath } = await ensureStorageRoot(storageRoot);
       let verified = verifiedSnapshot ?? { head: emptyHead(), files: [], events: [], versions: [] };
@@ -1254,11 +1255,8 @@ export function createDevOperationJournalService({
         const confirmation = await captureSnapshot(eventsPath);
         if (snapshotsEqual(snapshot, confirmation)) {
           const result = classifyVerifiedSnapshot(verified);
-          // An overlapping older verification must not roll the cache backwards.
-          if (!verifiedSnapshot || verifiedSnapshot.head.latest_sequence <= verified.head.latest_sequence) {
-            verifiedSnapshot = verified;
-          }
-          return structuredClone(result);
+          verifiedSnapshot = verified;
+          return result;
         }
         snapshot = confirmation;
       }
@@ -1271,6 +1269,15 @@ export function createDevOperationJournalService({
       lastHealthError = error.message;
       throw error;
     }
+  }
+
+  async function verify() {
+    // The initial readiness check and the first tool call can overlap. Share the
+    // in-progress disk verification, including its live head confirmation.
+    verificationInFlight ??= verifyStableSnapshot().finally(() => {
+      verificationInFlight = null;
+    });
+    return structuredClone(await verificationInFlight);
   }
 
   async function append(input, {beforeAppend} = {}) {

@@ -569,6 +569,41 @@ for (const warm of [false, true]) {
   }
 }
 
+// A cold MCP status request can arrive while startup is reading the same Journal.
+{
+  const { fixture } = await completedFixture("concurrent-cold-status");
+  let markFirstRead;
+  let releaseReads;
+  const firstRead = new Promise(resolve => { markFirstRead = resolve; });
+  const readGate = new Promise(resolve => { releaseReads = resolve; });
+  let reads = 0;
+  const service = createDevOperationJournalService({
+    storageRoot: fixture.storageRoot,
+    backgroundRecovery: true,
+    eventReader: async (...args) => {
+      reads += 1;
+      markFirstRead();
+      await readGate;
+      return readFile(...args);
+    },
+  });
+  try {
+    const starting = service.initialize();
+    await firstRead;
+    const querying = service.status();
+    await delay(100);
+    releaseReads();
+    const [startup, query] = await Promise.all([starting, querying]);
+    assert.equal(query.latest_sequence, 2);
+    assert.equal(query.latest_event_hash, startup.latest_event_hash);
+    assert.equal(query.chain_verified, true);
+    assert.equal(reads, 2, "startup and status share one cold verification");
+  } finally {
+    releaseReads();
+    await clean(fixture);
+  }
+}
+
 // R6: startup still reconciles dead owners and returns read-only corruption diagnosis.
 {
   const fixture = await tempFixture("r6-initialize-recovery");
