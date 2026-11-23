@@ -1,7 +1,7 @@
 import { getWorldSimulationState } from "./world-simulation-state-service.mjs";
 import { runWorldSimulationTurn } from "./world-simulation-loop-service.mjs";
 import { runWorldSimulationOffscreenPhysicalStep } from "./world-simulation-offscreen-physical-step-service.mjs";
-import { runWorldSimulationOffscreenMultiSceneFieldStep } from "./world-simulation-offscreen-multiscene-field-step-service.mjs";
+import { runWorldSimulationOffscreenMultiSceneFieldStep, runWorldSimulationOffscreenMultiSceneFieldDamageStep } from "./world-simulation-offscreen-multiscene-field-step-service.mjs";
 import {
   projectWorldSimulationOffscreenBreakpoint,
 } from "./world-simulation-offscreen-breakpoint-service.mjs";
@@ -182,7 +182,16 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
           delete physicalOnlyOptions.characterBrain;
           const scoped = await runWorldSimulationOffscreenMultiSceneFieldStep(
             physicalInput, physicalOnlyOptions);
-          if (scoped.committed === true) result = scoped;
+          if (scoped.committed === true) {
+            result = scoped;
+          } else if (scoped.blocked_reason === "nonharmful_field_lifecycle_authority_required") {
+            // A second, separately accepted immutable injury owner may admit
+            // exactly two disjoint damaging field scenes. Never alter the
+            // original blocked reason if this narrower branch also refuses.
+            const independentDamage = await runWorldSimulationOffscreenMultiSceneFieldDamageStep(
+              physicalInput, physicalOnlyOptions);
+            if (independentDamage.committed === true) result = independentDamage;
+          }
         }
         eventId = result.turn_id ?? null;
         // Physical Native returns the atomic writer envelope, not queued-turn shape.
