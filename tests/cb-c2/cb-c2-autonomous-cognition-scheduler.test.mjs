@@ -28,6 +28,8 @@ import { resolveWorldSimulationSubjectiveBeliefs } from "../../server/src/world-
 import { buildWorldSimulationSubjectiveBeliefRevisions } from "../../server/src/world-simulation-subjective-belief-revision-service.mjs";
 import { projectWorldSimulationSubjectiveBeliefsForCharacter }
   from "../../server/src/world-simulation-subjective-belief-character-projection-service.mjs";
+import { assertWorldSimulationReplySubjectiveBeliefCommit }
+  from "../../server/src/world-simulation-reply-subjective-belief-commit-guard.mjs";
 import {
   buildWorldSimulationChronologicalMutationQueue,
   executeWorldSimulationChronologicalMutationQueue,
@@ -1343,10 +1345,12 @@ try {
     throw new Error("Unexpected private Brain stage in reply memory test.");
   };
   const memoryDeclined=await runWorldSimulationCommittedReplySubjectiveMemory(
-    speakerIngressInput,{fixtureRoot:goalFixtureRoot,
+    {...speakerIngressInput,enable_subjective_reply_claim:true},
+    {fixtureRoot:goalFixtureRoot,
       characterBrain:memoryBrainFor("do_not_encode")});
   assert.equal(memoryDeclined.status,"character_declined_encoding");
   assert.equal(memoryDeclined.committed,false);
+  assert.equal(claimOpportunities,0);
   assert.equal(encodingChoices,1);
   assert.equal((await getWorldSimulationState(
     acousticSid,{fixtureRoot:goalFixtureRoot})).state_hash,replySnapshot.state_hash);
@@ -1450,7 +1454,81 @@ try {
     character_decline_unchanged:true,subsequent_encode_committed:true,
     prior_world_history_preserved:true,one_subjective_memory_added:true,
     source_turn_hash_verified:true,other_character_memory_unchanged:true,
-    replay_rejected:true,world_truth_claimed:false,belief_revised:false,
+    replay_rejected:true,world_truth_claimed:false,belief_revised:true,
+  }));
+
+  // Writer-side verification must never trust a marker or test Brain output
+  // instead of the canonical Phase63A/65A/65D/66A source image and queues.
+  const writerProof={
+    previous_world_state:replySnapshot.state,
+    next_world_state:afterMemorySnapshot.state,
+    turn_id:memoryTurn.turn_id,
+    commit:memoryTurn,
+    metadata:memoryTurn.autonomous_reply_subjective_memory_encoding,
+    world_state_hash:replySnapshot.state_hash,
+  };
+  assert.doesNotThrow(()=>assertWorldSimulationReplySubjectiveBeliefCommit(
+    writerProof));
+  const worldStateHashBeforeForgedProof=hashAgentRunValue(afterMemorySnapshot.state);
+  const badCommitKinds=[
+    "wrong_proposition_hash",
+    "forged_claim_text",
+    "forged_claim_source_memory",
+    "wrong_revision_queue",
+    "wrong_original_speaker",
+    "rewritten_personal_memory",
+    "extra_other_actor_knowledge",
+    "fake_world_fact",
+    "hidden_adoption_flag",
+    "forged_revision_event",
+  ];
+  for(const fault of badCommitKinds){
+    const corrupted=structuredClone(writerProof);
+    if(fault==="wrong_proposition_hash"){
+      corrupted.metadata.claim_adoption.proposition_hash="forged";
+    }else if(fault==="forged_claim_text"){
+      corrupted.commit.subjective_claim_projection.result
+        .claim_events_created[0].proposition="This was objective truth";
+    }else if(fault==="forged_claim_source_memory"){
+      corrupted.commit.subjective_claim_projection.result
+        .claim_events_created[0].evidence[0].source_memory_ref="forged_memory";
+    }else if(fault==="wrong_revision_queue"){
+      corrupted.commit.subjective_belief_revision_mutation_queue.turn_id=
+        memoryTurn.turn_id+":untrusted_revision_queue";
+    }else if(fault==="wrong_original_speaker"){
+      corrupted.metadata.character=inquiryAlly;
+    }else if(fault==="rewritten_personal_memory"){
+      corrupted.next_world_state.memories[character].at(-1)
+        .content.interpreted_content="A rewritten false personal memory";
+    }else if(fault==="extra_other_actor_knowledge"){
+      corrupted.next_world_state.characters[inquiryAlly]
+        .knowledge_injection="fabricated";
+    }else if(fault==="fake_world_fact"){
+      corrupted.next_world_state.objective_truth={
+        "speaker_intention_verified":true};
+    }else if(fault==="hidden_adoption_flag"){
+      delete corrupted.metadata.claim_adoption;
+    }else if(fault==="forged_revision_event"){
+      corrupted.commit.subjective_belief_revision_projection.result
+        .revision_events_created[0].character=inquiryAlly;
+    }
+    assert.throws(
+      ()=>assertWorldSimulationReplySubjectiveBeliefCommit(corrupted),
+      error=>error?.code==="WORLD_REPLY_BELIEF_COMMIT_INVALID",
+      "World writer must reject forged reply claim evidence: "+fault);
+    assert.equal(hashAgentRunValue(afterMemorySnapshot.state),
+      worldStateHashBeforeForgedProof);
+  }
+  assert.equal((await getWorldSimulationState(
+    acousticSid,{fixtureRoot:goalFixtureRoot})).state_hash,
+    afterMemorySnapshot.state_hash);
+  console.log(JSON.stringify({
+    scenario:"world_source_pinned_reply_belief_atomic_writer_negative_controls",
+    positive_canonical_attestation:true,
+    forged_commit_vectors_rejected:badCommitKinds.length,
+    private_memory_preserved:true,
+    subjective_belief_persisted_without_truth_authority:true,
+    world_snapshot_unchanged:true,
   }));
 
   // The next private cognition invocation sees committed personal memory,
