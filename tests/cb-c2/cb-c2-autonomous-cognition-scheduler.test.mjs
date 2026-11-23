@@ -1093,7 +1093,7 @@ try {
   // Negative control: a genuine source hearing opportunity is insufficient
   // to force a public reply. A Brain decline, forged action and Runtime
   // attempt to replace the Brain decision must all leave World unchanged.
-  for(const replyFault of ["decline","forged_action","runtime_override","runtime_substitution","ambiguous_scene"]){
+  for(const replyFault of ["decline","forged_action","runtime_override","runtime_substitution","ambiguous_scene","forged_source_writer"]){
     const guardedReplyWorld=structuredClone(acousticWorld);
     if(replyFault==="ambiguous_scene"){
       guardedReplyWorld.characters["路過同伴"]={known:[]};
@@ -1123,6 +1123,56 @@ try {
       guardedReplySid,{fixtureRoot:goalFixtureRoot});
     const guardedSourceHistory=await getWorldSimulationHistory(
       guardedReplySid,{fixtureRoot:goalFixtureRoot});
+    if(replyFault==="forged_source_writer"){
+      const original=guardedSourceHistory.turns.at(-1);
+      const actualAdmission=original.communication_observer_increment_admissions
+        .find(item=>item.observer===inquiryAlly
+          && item.admission_status==="heard_acoustic_cues_only");
+      assert.ok(actualAdmission?.observer_increment?.increment_ref);
+      await assert.rejects(
+        commitWorldSimulationTurn(guardedReplySid,{
+          expected_revision:guardedSourceSnapshot.revision,
+          expected_state_hash:guardedSourceSnapshot.state_hash,
+          turn_id:"forged_listener_reply_cas_writer",
+          next_world_state:guardedSourceSnapshot.state,event:null,
+          selected_action_intents:[{
+            character:inquiryAlly,selection:"candidate_action_intent",
+            action_id:clarificationCandidate.action_id,
+            intent:clarificationCandidate.intent,candidate:clarificationCandidate,
+          }],
+          action_outcomes:[{
+            actor:inquiryAlly,action_id:clarificationCandidate.action_id,
+            result:"communication_emitted",
+            communication_event:{channel:"speech",world_truth_claimed:false},
+          }],
+          causal_resolution_id:"forged_reply_causal_claim",
+          autonomous_listener_clarification_reply:{
+            version:"world-listener-clarification-causal-reply-v1",
+            character:inquiryAlly,scene_id:actionScene,
+            action_id:clarificationCandidate.action_id,
+            causal_resolution_id:"forged_reply_causal_claim",
+            source_turn_id:original.turn_id,
+            source_turn_hash:"forged_source_turn_hash",
+            source_revision_to:original.revision_to,
+            source_character:character,source_action_id:acousticCandidate.action_id,
+            observer_increment_ref:actualAdmission.observer_increment.increment_ref,
+          },
+        },{fixtureRoot:goalFixtureRoot}),
+        error=>error?.code==="WORLD_LISTENER_REPLY_SOURCE_COMMIT_INVALID",
+        "Direct World writer must not accept a forged source hash even with a real observed listener.");
+      const afterForged=await getWorldSimulationState(
+        guardedReplySid,{fixtureRoot:goalFixtureRoot});
+      const historyAfterForged=await getWorldSimulationHistory(
+        guardedReplySid,{fixtureRoot:goalFixtureRoot});
+      assert.equal(afterForged.revision,guardedSourceSnapshot.revision);
+      assert.equal(afterForged.state_hash,guardedSourceSnapshot.state_hash);
+      assert.deepEqual(historyAfterForged.turns,guardedSourceHistory.turns);
+      console.log(JSON.stringify({
+        scenario:"world_listener_reply_writer_source_forgery",
+        forged_source_rejected:true,atomic_world_unchanged:true,
+      }));
+      continue;
+    }
     let replyBrainChoices=0;
     const replyOptions={
       fixtureRoot:goalFixtureRoot,
