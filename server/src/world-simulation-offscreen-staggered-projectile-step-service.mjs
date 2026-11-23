@@ -124,13 +124,13 @@ export async function runWorldSimulationOffscreenStaggeredProjectileStep(
     || (active.length === 1 && projectiles.some(([, projectile]) =>
       projectile.active !== true
       && (projectile.termination_reason !== "character_contact"
-        || !Number.isFinite(projectile.age_ms))))
+        || !Number.isFinite(projectile.age_ms)))))
     return blocked("exactly_one_earliest_and_one_later_contact_required");
 
   const residentScene = new Map();
-  for (const scene of plan.scenes) {
-    const record = object(object(state.scenes)[scene.scene_id]);
-    if (record.scene_id !== scene.scene_id
+  for (const sceneId of sceneIds) {
+    const record = object(object(state.scenes)[sceneId]);
+    if (record.scene_id !== sceneId
       || record.simulation_time !== state.simulation_time
       || !canonicalTimestamp(record.simulation_time)
       || array(record.obstacles).length)
