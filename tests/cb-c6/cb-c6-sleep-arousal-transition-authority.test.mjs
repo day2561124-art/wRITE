@@ -4980,4 +4980,164 @@ const c6fAcousticOffscreen = await c6fNativeAcousticReentry("offscreen");
 assert.deepEqual(c6fAcousticOffscreen, c6fAcousticForeground,
   "queued offscreen replay preserves actual speech, listener ingress and social evidence");
 console.log("CB-C6-F Native speech/acoustic foreground and offscreen reentry parity passed.");
+// C6-F multi-breakpoint paired causal chronology: two actual Native foreground
+// wait turns versus two separately budgeted offscreen World physical commits.
+// Physical consequences must stay aligned without collapsing the intervening
+// 50 ms boundary, duplicating damage or inventing offscreen autobiography.
+async function c6fNativeTwoBreakpointParity() {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-two-boundaries-" + process.pid + "-" + Date.now());
+  const foregroundOptions = { fixtureRoot: path.join(root, "foreground") };
+  const offscreenOptions = {
+    fixtureRoot: path.join(root, "offscreen"),
+    characterBrain: async () => assert.fail(
+      "no Character Brain may run during empty-queue physical catch-up"),
+  };
+  try {
+    const initial = e7MixedWorld("field-first");
+    const initialCopy = d1Clone(initial);
+    const foregroundInitial = d1Clone(initial);
+    const eventIds = ["c6f-first-wait", "c6f-second-wait"];
+    foregroundInitial.event_queue = eventIds.map(event_id => ({
+      event_id, type: "bounded_wait", scene_id: "room",
+      participants: ["keeper"], summary: "remain still through a physical boundary",
+    }));
+    foregroundInitial.available_actions.keeper = [{
+      action_id: "c6f-wait-50ms", intent: "remain still", duration_ms: 50,
+    }];
+    const [offscreenSession, foregroundSession] = await Promise.all([
+      beginWorldSimulationSession({
+        simulation_label: "C6-F two bounded offscreen physical steps",
+        seed: "two-physical-boundaries", initial_world_state: initial,
+      }, offscreenOptions),
+      beginWorldSimulationSession({
+        simulation_label: "C6-F two normal foreground causal waits",
+        seed: "two-physical-boundaries", initial_world_state: foregroundInitial,
+      }, foregroundOptions),
+    ]);
+    const offscreenSid = offscreenSession.world_simulation_session_id;
+    const foregroundSid = foregroundSession.world_simulation_session_id;
+    const [offscreenBefore, foregroundBefore] = await Promise.all([
+      getWorldSimulationState(offscreenSid, offscreenOptions),
+      getWorldSimulationState(foregroundSid, foregroundOptions),
+    ]);
+    const at = ms => new Date(Date.parse(initial.simulation_time) + ms).toISOString();
+    const runtime = createWorldSimulationCharacterRuntimeManager({
+      identityResolver: async name => ({
+        entity_id: "c6f_two_boundary_" + name, canonical_name: name,
+        identity_source: "c6f_fixture", formal: true,
+      }),
+    });
+    const selectedActors = [];
+    const foregroundTurnOptions = {
+      ...foregroundOptions,
+      characterRuntimeManager: runtime,
+      characterBrain: async packet => {
+        if (packet.character === "keeper") {
+          selectedActors.push(packet.character);
+          return { action_id: "c6f-wait-50ms" };
+        }
+        return "reject_all";
+      },
+    };
+    const readDurable = async (sid, options) => {
+      const paths = worldSimulationStatePaths(sid, options);
+      return Promise.all([readFile(paths.state, "utf8"),
+        readFile(paths.history, "utf8")]);
+    };
+    const normalizeEffects = turn => turn.action_outcomes
+      .filter(item => ["ability_field_tick", "projectile_hit_character"].includes(item.result))
+      .map(item => ({
+        result: item.result, target: item.target, damage_applied: item.damage_applied,
+      }));
+
+    for (const [index, elapsed] of [50, 100].entries()) {
+      const batch = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: offscreenSid,
+        max_turns: 1, target_horizon: at(100),
+      }, offscreenOptions);
+      assert.equal(batch.committed_turn_count, 1);
+      assert.equal(batch.committed_physical_step_count, 1);
+      assert.equal(batch.reached_simulation_time, at(elapsed));
+      assert.equal(batch.automatic_replay_allowed, false);
+      assert.equal(batch.state_reconciliation_required, false);
+      assert.equal(batch.target_horizon_claimed, elapsed === 100);
+      const foregroundTurn = await runWorldSimulationTurn({
+        world_simulation_session_id: foregroundSid,
+      }, foregroundTurnOptions);
+      assert.equal(foregroundTurn.committed, true);
+      const [offscreen, visible] = await Promise.all([
+        getWorldSimulationState(offscreenSid, offscreenOptions),
+        getWorldSimulationState(foregroundSid, foregroundOptions),
+      ]);
+      assert.equal(offscreen.revision, offscreenBefore.revision + index + 1);
+      assert.equal(visible.revision, foregroundBefore.revision + index + 1);
+      assert.equal(offscreen.state.simulation_time, at(elapsed));
+      assert.equal(visible.state.simulation_time, at(elapsed));
+      assert.deepEqual(offscreen.state.projectiles, visible.state.projectiles);
+      assert.deepEqual(offscreen.state.ability_fields, visible.state.ability_fields);
+      assert.deepEqual(offscreen.state.characters.aria.physical_state,
+        visible.state.characters.aria.physical_state);
+      assert.deepEqual(offscreen.state.memories, initial.memories,
+        "physics without actor participation cannot invent subjective memories");
+      assert.deepEqual(offscreen.state.motivational_goal_events,
+        initial.motivational_goal_events);
+      assert.deepEqual(offscreen.state.motivational_goal_history,
+        initial.motivational_goal_history);
+      assert.deepEqual(offscreen.state.event_queue, []);
+      const [offscreenHistory, foregroundHistory] = await Promise.all([
+        getWorldSimulationHistory(offscreenSid, offscreenOptions),
+        getWorldSimulationHistory(foregroundSid, foregroundOptions),
+      ]);
+      assert.equal(offscreenHistory.turns.length, index + 1);
+      assert.equal(foregroundHistory.turns.length, index + 1);
+      assert.deepEqual(foregroundHistory.turns.map(turn => turn.event.event_id),
+        eventIds.slice(0, index + 1));
+      assert.deepEqual(
+        normalizeEffects(offscreenHistory.turns.at(-1)),
+        normalizeEffects(foregroundHistory.turns.at(-1)),
+        "each physical boundary must keep same per-turn impact and damage");
+      for (const [history, startingHash, currentHash] of [
+        [offscreenHistory, offscreenBefore.state_hash, offscreen.state_hash],
+        [foregroundHistory, foregroundBefore.state_hash, visible.state_hash],
+      ]) {
+        assert.equal(history.turns[0].previous_state_hash, startingHash);
+        assert.equal(history.turns.at(-1).next_state_hash, currentHash);
+        for (let i = 1; i < history.turns.length; i++)
+          assert.equal(history.turns[i].previous_state_hash,
+            history.turns[i - 1].next_state_hash);
+      }
+    }
+
+    const finished = await getWorldSimulationState(offscreenSid, offscreenOptions);
+    assert.equal(finished.state.ability_fields.field_e3.active, false);
+    assert.equal(finished.state.projectiles.projectile_e3.active, false);
+    assert.equal(finished.state.projectiles.projectile_e3.termination_reason,
+      "character_contact");
+    assert.equal(finished.state.projectiles.projectile_e3.age_ms, 100);
+    assert.equal(selectedActors.length, 2);
+    const afterBytes = await readDurable(offscreenSid, offscreenOptions);
+    const noReplay = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: offscreenSid,
+      max_turns: 32, target_horizon: at(200),
+    }, offscreenOptions);
+    assert.equal(noReplay.committed_turn_count, 0);
+    assert.equal(noReplay.target_horizon_claimed, false);
+    assert.deepEqual(await readDurable(offscreenSid, offscreenOptions), afterBytes,
+      "replay after resolved physics may not duplicate a contact or create a turn");
+    const beforeReentry = await readDurable(offscreenSid, offscreenOptions);
+    const reentry = await scheduleWorldSimulationAutonomousCognitionOpportunities({
+      world_simulation_session_id: offscreenSid,
+      runtime_context_by_character: {},
+    }, offscreenOptions);
+    assert.ok(reentry.scheduler_projection);
+    assert.deepEqual(await readDurable(offscreenSid, offscreenOptions),
+      beforeReentry, "read-only foreground promotion cannot forge event history");
+    assert.deepEqual(initial, initialCopy);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+await c6fNativeTwoBreakpointParity();
+console.log("CB-C6-F multi-breakpoint paired Native physics, damage and replay regression passed.");
 
