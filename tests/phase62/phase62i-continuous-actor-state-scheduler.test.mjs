@@ -390,6 +390,128 @@ try {
   assert.deepEqual(moved.state.ability_fields["z-fast-moving-field"].remaining_ms, 0);
   assert.deepEqual(overlapWorld, overlapRoot, "the overlap fixture is immutable");
 
+  // C6-F: three pre-existing damaging fields and one isolated mover must
+  // share actual absolute frontiers, not field-ID grouped tick batches.
+  //
+  // t=100ms: a-slow .5 + m-medium 2 + z-fast 2 = 4.5 HP;
+  // t=150ms: a-slow .25 + m-medium 1 = 1.25 HP;
+  // t=200ms: a-slow .25 HP. With initial 6 HP, incapacitation is
+  // exactly 200ms, not 100ms or 150ms from prematurely grouped fields.
+  const tripleExpectedSources = [
+    "a-triple-slow-field", "m-triple-medium-field", "z-triple-fast-field",
+    "a-triple-slow-field", "m-triple-medium-field", "a-triple-slow-field",
+  ];
+  const tripleExpectedTimes = [100, 100, 100, 150, 150, 200];
+  const tripleExpectedDamage = [0.5, 2, 2, 0.25, 1, 0.25];
+  const tripleExpectedHpHigh = [100, 99.5, 97.5, 95.5, 95.25, 94.25, 94];
+  const tripleExpectedHpFatal = [6, 5.5, 3.5, 1.5, 1.25, 0.25, 0];
+  for (const [startingHp, reverse] of [[6, false], [6, true], [100, false]]) {
+    const triple = structuredClone(initialWorldState);
+    triple.event_queue = [{
+      event_id: "evt-field-ticks-refine-movement",
+      scene_id: fieldScene, participants: [fieldMover],
+    }];
+    triple.characters[fieldMover].physical_state = {
+      health_current: startingHp, health_max: 100,
+      injuries: [], movement_multiplier: 1, combat_multiplier: 1,
+      incapacitated: false, immobilized: false,
+    };
+    const a = structuredClone(triple.ability_fields["persistent-field-i"]);
+    a.field_id = "a-triple-slow-field";
+    a.tick_ms = 200;
+    a.remaining_ms = 200;
+    a.effect.damage_per_second = 5;
+    a.effect.damage_type = "triple_slow";
+    const m = structuredClone(a);
+    m.field_id = "m-triple-medium-field";
+    m.tick_ms = 150;
+    m.remaining_ms = 150;
+    m.effect.damage_per_second = 20;
+    m.effect.damage_type = "triple_medium";
+    const z = structuredClone(a);
+    z.field_id = "z-triple-fast-field";
+    z.tick_ms = 100;
+    z.remaining_ms = 100;
+    z.effect.damage_per_second = 20;
+    z.effect.damage_type = "triple_fast";
+    triple.ability_fields = Object.fromEntries(reverse
+      ? [[z.field_id, z], [m.field_id, m], [a.field_id, a]]
+      : [[a.field_id, a], [m.field_id, m], [z.field_id, z]]);
+    const tripleFixtureBefore = structuredClone(triple);
+    const tripleSession = await beginWorldSimulationSession({
+      source_text: "C6-F moving target three staggered damaging fields",
+      characters: Object.keys(triple.characters),
+      initial_world_state: triple,
+    }, options);
+    const tripleId = tripleSession.world_simulation_session_id;
+    const tripleInitial = await getWorldSimulationState(tripleId, options);
+    await runWorldSimulationTurn({
+      world_simulation_session_id: tripleId,
+    }, { ...options, characterBrain });
+    const tripleState = await getWorldSimulationState(tripleId, { fixtureRoot });
+    const tripleHistory = await getWorldSimulationHistory(tripleId, { fixtureRoot });
+    assert.equal(tripleState.revision, 1);
+    assert.equal(tripleHistory.turns.length, 1);
+    const tripleTurn = tripleHistory.turns[0];
+    const tripleHits = tripleTurn.action_outcomes.filter(item =>
+      item.result === "ability_field_tick" && item.target === fieldMover);
+    assert.deepEqual(tripleHits.map(item => item.ability_field_id), tripleExpectedSources,
+      "three moving field hits require time-first and stable ID tie-breaks");
+    assert.deepEqual(tripleHits.map(item => item.time_ms), tripleExpectedTimes,
+      "the three field lifetimes must keep absolute 100/150/200ms frontiers");
+    assert.deepEqual(tripleHits.map(item => item.damage_applied), tripleExpectedDamage);
+    const hps = startingHp === 6 ? tripleExpectedHpFatal : tripleExpectedHpHigh;
+    assert.deepEqual(tripleHits.map(item => item.health_before), hps.slice(0, -1));
+    assert.deepEqual(tripleHits.map(item => item.health_after), hps.slice(1));
+    const body = tripleState.state.characters[fieldMover].physical_state;
+    assert.equal(body.health_current, hps.at(-1));
+    assert.deepEqual(body.injuries.map(item => item.source), tripleExpectedSources);
+    assert.equal(new Set(body.injuries.map(item => item.injury_id)).size,
+      tripleExpectedSources.length);
+    const trajectory = tripleTurn.causal_timeline.actor_trajectories[fieldMover];
+    assert.ok(trajectory, "moving actor trajectory is persisted in the canonical timeline");
+    if (startingHp === 6) {
+      assert.equal(body.incapacitated, true);
+      assert.equal(body.immobilized, true);
+      assert.equal(trajectory.interrupted, true);
+      assert.equal(trajectory.interrupted_at_ms, 200,
+        "the 200ms lethal field hit stops the moving actor at the genuine causal frontier");
+      assert.ok(Math.abs(trajectory.final_position.x - 0.8) < 1e-9,
+        "a 4m/s mover must stop at x=.8m when it collapses at 200ms");
+    } else {
+      assert.equal(body.incapacitated, false);
+      assert.equal(trajectory.interrupted, false);
+      assert.deepEqual(trajectory.final_position, { x: 4, y: 1 });
+    }
+    assert.deepEqual(tripleState.state.scenes[fieldScene].entity_positions[fieldMover],
+      trajectory.final_position, "durable scene position cannot differ from causal actor trajectory");
+    assert.deepEqual(Object.keys(tripleState.state.ability_fields)
+      .sort().map(key => [key, tripleState.state.ability_fields[key].remaining_ms]), [
+      ["a-triple-slow-field", 0],
+      ["m-triple-medium-field", 0],
+      ["z-triple-fast-field", 0],
+    ]);
+    assert.equal(tripleTurn.previous_state_hash, tripleInitial.state_hash);
+    assert.equal(tripleTurn.next_state_hash, tripleState.state_hash);
+    assert.ok(tripleTurn.chronological_mutation_queue.queue_hash);
+    assert.ok(tripleTurn.chronological_mutation_execution.execution_hash);
+    const physicalStatePaths = worldSimulationStatePaths(tripleId, options);
+    const persistedBefore = await Promise.all([
+      readFile(physicalStatePaths.state, "utf8"),
+      readFile(physicalStatePaths.history, "utf8"),
+    ]);
+    assert.deepEqual(await getWorldSimulationState(tripleId, { fixtureRoot }),
+      tripleState, "rehydrated triple field Body and position must remain identical");
+    assert.deepEqual(await getWorldSimulationHistory(tripleId, { fixtureRoot }),
+      tripleHistory, "rehydrated triple field injury clock and timeline must remain identical");
+    assert.deepEqual(await Promise.all([
+      readFile(physicalStatePaths.state, "utf8"),
+      readFile(physicalStatePaths.history, "utf8"),
+    ]), persistedBefore, "World state/history rehydration must be read-only");
+    assert.deepEqual(triple, tripleFixtureBefore);
+  }
+
+
   // C6-F: a moving target enters and exits two partially overlapping circles.
   // Integer 125ms sampling and binary-exact .5m boundaries make these precise:
   // A: x=.5..1.5 => t=125..375, B: x=1..2 => t=250..500.
