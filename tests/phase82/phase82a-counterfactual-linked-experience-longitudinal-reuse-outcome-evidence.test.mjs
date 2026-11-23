@@ -513,6 +513,37 @@ assert.throws(
     === "WORLD_SIMULATION_COUNTERFACTUAL_LINKED_REUSE_OUTCOME_SELECTED_ACTION_OUTCOME_EVIDENCE_LINEAGE_MISMATCH",
 );
 
+// Revalidating multiple historical Phase81Q sources must not write to
+// external World History, must work on deeply frozen committed input and must
+// produce exactly the same canonical Phase82A projection hash.
+function deepFreezeCommitted(value) {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const nested of Object.values(value)) deepFreezeCommitted(nested);
+    Object.freeze(value);
+  }
+  return value;
+}
+const immutableHistory = deepFreezeCommitted(clone(history2));
+const immutableHash = hashAgentRunValue(immutableHistory);
+const repeatLongitudinal = buildWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeEvidence({
+  world_simulation_session_id: sessionId,
+  turn_id: secondTurnId,
+  state_revision: secondRevision,
+  world_state_hash: secondWorldStateHash,
+  world_history: immutableHistory,
+  current_phase81q_outcome_evidence: second.phase81Q,
+  counterfactual_linked_experience_reuse_outcome_selected_action_lineage: second.phase81P,
+  subjective_choice_commitment_receipts: second.choices,
+  counterfactual_linked_experience_reuse_outcome_reentry_projections: [second.phase81N],
+  counterfactual_linked_experience_reuse_outcome_deliberation_projections: [second.phase81O],
+  post_outcome_subjective_perception_projection: second.outcome,
+});
+assert.equal(repeatLongitudinal.projection_hash, longitudinal.projection_hash);
+assert.equal(hashAgentRunValue(immutableHistory), immutableHash);
+assert.ok(Object.isFrozen(immutableHistory.turns[1]));
+assert.ok(Object.isFrozen(immutableHistory.turns[1]
+  .counterfactual_linked_experience_reuse_outcome_selected_action_outcome_evidence));
+
 const loopSource = await readFile("server/src/world-simulation-loop-service.mjs", "utf8");
 const stateSource = await readFile("server/src/world-simulation-state-service.mjs", "utf8");
 const qIndex = loopSource.indexOf(
