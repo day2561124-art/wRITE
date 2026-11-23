@@ -1041,14 +1041,14 @@ function resolveAbilityFields(input, newFields, nextWorldState, snapshotScene, n
 
 /**
  * Pre-existing damaging fields must resolve in shared earliest-frontier
- * order rather than sorting all hits by source identity. Existing admissions:
- * exactly two fields with no action, or with one isolated movement, and the
- * separately verified three-field stationary no-action slice.
+ * order rather than sorting all hits by source identity. Bounded admissions:
+ * exactly two or three existing damaging fields, with either no action
+ * (stationary scene) or exactly one isolated movement.
  * Native offscreen remains the World writer; this is an immutable preview.
- * Moving actors with three or more fields, projectiles, new fields and mixed
- * action turns retain their established owners/unsupported boundaries.
+ * Four or more active fields, projectiles, newly spawned fields, additional
+ * actions and mixed-scene turns retain their established owners/boundaries.
  */
-function resolveSupportedDualFieldSharedFrontiers(
+function resolveSupportedMultiFieldSharedFrontiers(
   input, newFields, nextWorldState, snapshotScene, nextScene,
   elapsedMs, transitions, outcomes, resolutions,
 ) {
@@ -1077,13 +1077,12 @@ function resolveSupportedDualFieldSharedFrontiers(
   const allActive = () => Object.values(object(nextWorldState.ability_fields))
     .filter(item => item?.active === true);
   const active = () => allActive().filter(item => item.scene_id === input.scene_id);
-  // Bounded admissions only: an accepted pair may carry an isolated
-  // movement, but three fields are restricted to an unchanged stationary
-  // scene with no selections or outcomes. Everything else keeps its owner.
+  // Bounded admissions only: the accepted pair/triple may contain a
+  // stationary scene or exactly one isolated mover. No additional actions,
+  // active fields in other scenes or projectile ownership can enter here.
   const fieldCount = active().length;
   if (allActive().length !== fieldCount
       || (fieldCount !== 2 && fieldCount !== 3)
-      || (fieldCount === 3 && !stationary)
       || !Number.isSafeInteger(elapsedMs) || elapsedMs <= 0)
     return false;
   const rules = object(input.world_state.world_rules ?? input.world_state.rules);
@@ -1276,7 +1275,7 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
   const fieldInput = { ...input, world_state: snapshot, scene_id: sceneId,
     immutable_causal_evaluator_audits: immutableCausalEvaluatorAudits,
     immutable_causal_query_audits: immutableCausalQueryAudits };
-  if (!resolveSupportedDualFieldSharedFrontiers(
+  if (!resolveSupportedMultiFieldSharedFrontiers(
     fieldInput, spawnedFields, nextWorldState, snapshotScene, nextScene,
     elapsedMs, transitions, outcomes, abilityResolutions,
   )) {
