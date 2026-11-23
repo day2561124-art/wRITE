@@ -5633,4 +5633,202 @@ console.log("CB-C6-F read-only per-scene physical frontier and multi-active-scen
   }
 }
 console.log("CB-C6-F Native batch reports multi-scene pending evidence without write authority passed.");
+import {
+  runWorldSimulationOffscreenMultiSceneFieldStep,
+  worldSimulationOffscreenMultiSceneFieldStepVersion,
+} from "../../server/src/world-simulation-offscreen-multiscene-field-step-service.mjs";
+
+function c6fTwoHarmlessFieldScenes() {
+  const state = e4FieldWorld();
+  state.ability_fields.field_e3.remaining_ms = 50;
+  state.scenes.annex = {
+    ...d1Clone(state.scenes.room),
+    scene_id: "annex", simulation_time: state.simulation_time,
+    entity_positions: { remote: { x: 4, y: 4 } },
+    observable_by: { remote: { visual: [], audible: [] } },
+    obstacles: [],
+  };
+  state.characters.remote = {
+    known: ["annex-private-context"],
+    current_goal: "continue ordinary activity",
+    physical_state: { health_current: 85, health_max: 100 },
+  };
+  state.memories.remote = [{
+    memory_id: "c6f-annex-prior-event", content: "prior observation",
+    source: { kind: "preexisting_fixture" },
+  }];
+  state.ability_fields.annex_field = {
+    ...d1Clone(state.ability_fields.field_e3),
+    field_id: "annex_field", scene_id: "annex",
+    center: { x: 4, y: 4 }, owner: "remote", remaining_ms: 100,
+  };
+  return state;
+}
+for (const reverse of [false, true]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-atomic-fields-" + reverse + "-" + process.pid + "-" + Date.now());
+  const options = { fixtureRoot: root };
+  try {
+    const initial = c6fTwoHarmlessFieldScenes();
+    if (reverse) {
+      initial.ability_fields = {
+        annex_field: initial.ability_fields.annex_field,
+        field_e3: initial.ability_fields.field_e3,
+      };
+      initial.scenes = {
+        annex: initial.scenes.annex,
+        room: initial.scenes.room,
+      };
+    }
+    const originalInput = d1Clone(initial);
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-F two nonharmful fields atomic World",
+      seed: "two-independent-fields",
+      initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const paths = worldSimulationStatePaths(sid, options);
+    const bytes = () => Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]);
+    const at = ms => new Date(Date.parse(initial.simulation_time) + ms).toISOString();
+    let before = await getWorldSimulationState(sid, options);
+    const originalBytes = await bytes();
+    const wrongHorizon = await runWorldSimulationOffscreenMultiSceneFieldStep({
+      world_simulation_session_id: sid,
+      expected_revision: before.revision,
+      expected_state_hash: before.state_hash,
+      target_horizon: at(49),
+    }, options);
+    assert.equal(wrongHorizon.committed, false);
+    assert.equal(wrongHorizon.automatic_replay_allowed, false);
+    assert.deepEqual(await bytes(), originalBytes,
+      "a requested ceiling before the earliest physical boundary may not commit");
+    for (const [index, elapsed] of [50, 100].entries()) {
+      const committed = await runWorldSimulationOffscreenMultiSceneFieldStep({
+        world_simulation_session_id: sid,
+        expected_revision: before.revision,
+        expected_state_hash: before.state_hash,
+        target_horizon: at(100),
+      }, options);
+      assert.equal(committed.version, worldSimulationOffscreenMultiSceneFieldStepVersion);
+      assert.equal(committed.committed, true);
+      assert.equal(committed.reached_simulation_time, at(elapsed));
+      assert.equal(committed.automatic_replay_allowed, false);
+      assert.deepEqual(committed.scene_ids, ["annex", "room"]);
+      const after = await getWorldSimulationState(sid, options);
+      assert.equal(after.revision, before.revision + 1);
+      assert.equal(after.state.simulation_time, at(elapsed));
+      assert.equal(after.state.scenes.room.simulation_time, at(elapsed));
+      assert.equal(after.state.scenes.annex.simulation_time, at(elapsed));
+      assert.equal(after.state.ability_fields.field_e3.remaining_ms, 0);
+      assert.equal(after.state.ability_fields.field_e3.active, false);
+      assert.equal(after.state.ability_fields.annex_field.remaining_ms,
+        index === 0 ? 50 : 0);
+      assert.equal(after.state.ability_fields.annex_field.active, index === 0);
+      assert.deepEqual(after.state.characters, initial.characters);
+      assert.deepEqual(after.state.memories, initial.memories);
+      assert.deepEqual(after.state.event_queue, []);
+      assert.deepEqual(after.state.motivational_goal_history,
+        initial.motivational_goal_history);
+      const history = await getWorldSimulationHistory(sid, options);
+      assert.equal(history.turns.length, index + 1,
+        "all simultaneous scenes commit one shared World revision");
+      const turn = history.turns.at(-1);
+      assert.equal(turn.previous_state_hash, before.state_hash);
+      assert.equal(turn.next_state_hash, after.state_hash);
+      assert.equal(turn.event.type, "offscreen_multiscene_ability_field_step");
+      assert.deepEqual(turn.event.scene_ids, ["annex", "room"]);
+      assert.deepEqual(turn.selected_action_intents, []);
+      assert.deepEqual(turn.action_outcomes, []);
+      assert.deepEqual(turn.knowledge_transitions, []);
+      assert.ok(turn.chronological_mutation_queue.queue_hash);
+      assert.ok(turn.chronological_mutation_execution.execution_hash);
+      assert.equal(turn.pure_proposal_producers.audit_count, 2);
+      assert.equal(turn.state_transitions.filter(t =>
+        t.field === "simulation_time").length, 3);
+      const expectedFields = index === 0
+        ? ["annex_field", "field_e3"] : ["annex_field"];
+      assert.deepEqual(turn.state_transitions.filter(t =>
+        t.field === "ability_field_state").map(t => t.entity).sort(),
+        expectedFields);
+      const committedBytes = await bytes();
+      await assert.rejects(runWorldSimulationOffscreenMultiSceneFieldStep({
+        world_simulation_session_id: sid,
+        expected_revision: before.revision,
+        expected_state_hash: before.state_hash,
+      }, options), { code: "C6F_MULTI_SCENE_FIELD_STEP_STALE" });
+      assert.deepEqual(await bytes(), committedBytes,
+        "stale retries cannot replay World damage, lifecycle or history");
+      before = after;
+    }
+    const atRest = await bytes();
+    const noMore = await runWorldSimulationOffscreenMultiSceneFieldStep({
+      world_simulation_session_id: sid,
+      expected_revision: before.revision,
+      expected_state_hash: before.state_hash,
+      target_horizon: at(200),
+    }, options);
+    assert.equal(noMore.committed, false);
+    assert.equal(noMore.blocked_reason, "requires_exactly_two_active_field_scenes");
+    assert.deepEqual(await bytes(), atRest);
+    assert.deepEqual(initial, originalInput);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+for (const mode of ["queued", "acoustic", "harmful", "projectile", "missing-scene"]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-atomic-refuse-" + mode + "-" + process.pid + "-" + Date.now());
+  const options = { fixtureRoot: root };
+  try {
+    const initial = c6fTwoHarmlessFieldScenes();
+    if (mode === "queued") initial.event_queue = [{
+      event_id: "c6f-pending-queue", scene_id: "room",
+    }];
+    if (mode === "acoustic") initial.sound_events = [{
+      schema_version: "cc6b-communication-acoustic-bridge-v1",
+      sound_id: "c6f-pending-acoustic", scene_id: "annex",
+    }];
+    if (mode === "harmful")
+      initial.ability_fields.annex_field.effect.damage_per_second = 20;
+    if (mode === "projectile") {
+      const p = d1Clone(e3PersistentProcessWorld().projectiles.projectile_e3);
+      p.scene_id = "annex";
+      initial.projectiles = { annex_projectile: { ...p, projectile_id: "annex_projectile" } };
+    }
+    if (mode === "missing-scene")
+      initial.ability_fields.annex_field.scene_id = "lost";
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-F bounded multiscene unsafe authority",
+      seed: mode, initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, options);
+    const paths = worldSimulationStatePaths(sid, options);
+    const bytes = () => Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]);
+    const original = await bytes();
+    const blocked = await runWorldSimulationOffscreenMultiSceneFieldStep({
+      world_simulation_session_id: sid,
+      expected_revision: before.revision,
+      expected_state_hash: before.state_hash,
+    }, options);
+    assert.equal(blocked.committed, false);
+    assert.equal(blocked.automatic_replay_allowed, false);
+    assert.equal(blocked.blocked_reason, {
+      queued: "queued_event_precedes_physical_step",
+      acoustic: "listener_acoustic_ingress_pending",
+      harmful: "nonharmful_field_lifecycle_authority_required",
+      projectile: "active_projectile_not_yet_supported",
+      "missing-scene": "unresolved_physical_authority",
+    }[mode]);
+    assert.deepEqual(await getWorldSimulationState(sid, options), before);
+    assert.deepEqual(await bytes(), original);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+console.log("CB-C6-F two-scene nonharmful field atomic commit, CAS and guard regression passed.");
 
