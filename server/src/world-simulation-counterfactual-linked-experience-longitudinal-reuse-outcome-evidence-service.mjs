@@ -52,6 +52,42 @@ function turns(worldHistory) {
   if (Array.isArray(worldHistory)) return worldHistory;
   return array(worldHistory?.turns);
 }
+// Identity tags *only* snapshots made by the full JSON isolation boundary.
+// This is not a cache of evidence, hashes, or prior-Q validation results.
+// Weak references do not retain snapshots across completed World turns.
+const phase82aIsolatedHistorySnapshots = new WeakSet();
+
+function freezeIsolatedJson(root) {
+  const pending = [root];
+  while (pending.length) {
+    const value = pending.pop();
+    if (!value || typeof value !== "object" || Object.isFrozen(value)) continue;
+    for (const nested of Object.values(value)) {
+      if (nested && typeof nested === "object") pending.push(nested);
+    }
+    Object.freeze(value);
+  }
+  return root;
+}
+
+// Create exactly one detached, JSON-normalized, immutable history snapshot
+// inside a World resolution, after history has been obtained from its actual
+// committed state. All nested Phase82A/B/C/D reconstructions STILL revalidate
+// every historical Q and its full provenance separately against this snapshot.
+// This helper does not attest evidence validity and skips no hash checks.
+export function isolateWorldSimulationPhase82AHistoryForTurn(worldHistory) {
+  const sourceTurns = turns(worldHistory);
+  if (!sourceTurns.some((turn) => isObject(turn)
+    && isObject(turn.counterfactual_linked_experience_reuse_outcome_selected_action_outcome_evidence))) {
+    return worldHistory;
+  }
+  const snapshot = cloneJson(isObject(worldHistory)
+    ? worldHistory
+    : { turns: sourceTurns });
+  freezeIsolatedJson(snapshot);
+  phase82aIsolatedHistorySnapshots.add(snapshot);
+  return snapshot;
+}
 function exactQExpectedFromTurn(turn) {
   return {
     world_simulation_session_id: undefined,
@@ -309,10 +345,17 @@ export function buildWorldSimulationCounterfactualLinkedExperienceLongitudinalRe
   const sourceTurns = turns(input.world_history);
   const priorQPresent = sourceTurns.some((turn) => isObject(turn)
     && isObject(turn.counterfactual_linked_experience_reuse_outcome_selected_action_outcome_evidence));
+  // If this exact object was created by our turn-scoped JSON isolation
+  // boundary, it is deeply frozen and detached from the caller. Reuse only
+  // the bytes/objects, NEVER the result of validating historical Phase81Q.
+  // Direct callers without a marked snapshot still get fresh isolation.
   const isolatedHistory = priorQPresent
-    ? cloneJson(isObject(input.world_history)
-      ? input.world_history
-      : { turns: sourceTurns })
+    ? (isObject(input.world_history)
+        && phase82aIsolatedHistorySnapshots.has(input.world_history)
+        ? input.world_history
+        : cloneJson(isObject(input.world_history)
+          ? input.world_history
+          : { turns: sourceTurns }))
     : null;
   const canonicalPrior = [];
   if (isolatedHistory) {
