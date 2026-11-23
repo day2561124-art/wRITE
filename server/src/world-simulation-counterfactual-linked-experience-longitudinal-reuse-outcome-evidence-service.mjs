@@ -70,15 +70,18 @@ function exactQExpectedFromTurn(turn) {
       turn.post_outcome_subjective_perception_projection,
   };
 }
-function historyPrefix(worldHistory, endIndex) {
-  // Revalidate a prior turn using only its committed history prefix.
-  // Previously, every anchor cloned the entire future history first, then
-  // cloned the prefix again. Preserve deep-copy isolation and canonical
-  // evidence while avoiding both unnecessary copies.
-  const prefixTurns = turns(worldHistory).slice(0, endIndex);
-  return cloneJson(isObject(worldHistory)
-    ? { ...worldHistory, turns: prefixTurns }
-    : { turns: prefixTurns });
+function historyPrefix(isolatedHistory, endIndex) {
+  // Callers receive only the committed prefix. The source history has
+  // already been canonicalized and deep-cloned once for this Phase82A
+  // invocation; re-copying the growing prefix for every prior turn made
+  // nested Phase82B/C/D canonical verification superlinear.
+  //
+  // Share *only* the internal isolated snapshot's historical turn objects.
+  // Neither the original World History nor any committed memory is aliased.
+  const prefixTurns = turns(isolatedHistory).slice(0, endIndex);
+  return isObject(isolatedHistory)
+    ? { ...isolatedHistory, turns: prefixTurns }
+    : { turns: prefixTurns };
 }
 function canonicalPriorQ(worldHistory, turn, index, sessionId) {
   const projection = turn?.counterfactual_linked_experience_reuse_outcome_selected_action_outcome_evidence;
@@ -294,12 +297,19 @@ export function buildWorldSimulationCounterfactualLinkedExperienceLongitudinalRe
     );
   }
 
+  // The World History boundary is JSON. Normalize and isolate it once,
+  // including removal of any non-JSON-only optional values, before Phase81Q
+  // provenance rechecks. A different build call always gets a fresh snapshot
+  // so even callers that later alter their input cannot reuse stale evidence.
+  const isolatedHistory = cloneJson(isObject(input.world_history)
+    ? input.world_history
+    : { turns: turns(input.world_history) });
   const canonicalPrior = [];
-  const historyTurns = turns(input.world_history);
+  const historyTurns = turns(isolatedHistory);
   for (let index = 0; index < historyTurns.length; index += 1) {
     const turn = historyTurns[index];
     if (!isObject(turn)) continue;
-    const priorQ = canonicalPriorQ(input.world_history, turn, index, worldSimulationSessionId);
+    const priorQ = canonicalPriorQ(isolatedHistory, turn, index, worldSimulationSessionId);
     if (!priorQ) continue;
     canonicalPrior.push({ turn_index: index, projection: priorQ });
   }
