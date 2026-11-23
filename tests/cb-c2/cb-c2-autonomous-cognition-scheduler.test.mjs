@@ -17,6 +17,7 @@ import { runWorldSimulationActorInitiatedSpeech } from "../../server/src/world-s
 import { runWorldSimulationCommittedActorSpeechListenerCognition } from "../../server/src/world-simulation-committed-actor-speech-listener-ingress-service.mjs";
 import { runWorldSimulationCommittedActorSpeechListenerClarification } from "../../server/src/world-simulation-committed-actor-speech-listener-clarification-service.mjs";
 import { runWorldSimulationCommittedReplySpeakerCognition } from "../../server/src/world-simulation-committed-reply-speaker-ingress-service.mjs";
+import { runWorldSimulationCommittedReplySpeakerLexicalMeaning } from "../../server/src/world-simulation-committed-reply-speaker-lexical-meaning-service.mjs";
 import { assertWorldSimulationCommittedAcousticSource } from "../../server/src/world-simulation-native-committed-source-service.mjs";
 import { buildCharacterCommunicationActionCandidate } from "../../server/src/character-communication-foundation-service.mjs";
 import { nativeImplementationIntentionActivationCapability } from "../../server/src/world-simulation-goal-implementation-intention-activation-service.mjs";
@@ -1147,6 +1148,112 @@ try {
     original_speaker_brain_calls:originalSpeakerBrainCalls,
     transcript_hidden:true,world_unchanged:true,understanding_claimed:false,
   }));
+
+  // Hearing a reply alone does NOT imply lexical recognition. The same
+  // first real CC7 source fragment is offered only to the original speaker's
+  // separate Brain lexical decision and subsequent private meaning decision.
+  let lexicalBrainCalls=0,meaningBrainCalls=0,privateHearingCalls=0;
+  const recognizedReply=await runWorldSimulationCommittedReplySpeakerLexicalMeaning(
+    speakerIngressInput,{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+      assert.equal(packet.character,character);
+      if(packet.cognition?.observer_lexical_recognition){
+        lexicalBrainCalls++;
+        const lexical=packet.cognition.observer_lexical_recognition;
+        assert.equal(lexical.observer,character);
+        assert.ok(typeof lexical.emitted_surface_fragment==="string"
+          && lexical.emitted_surface_fragment.length>0);
+        assert.equal(lexical.boundaries.source_semantics_available,false);
+        assert.equal(lexical.boundaries.source_identity_available,false);
+        assert.equal(lexical.boundaries.future_fragment_available,false);
+        assert.equal(packet.boundaries.world_truth_authority,false);
+        return {recognition_status:"recognized",
+          heard_surface_fragment:lexical.emitted_surface_fragment};
+      }
+      if(packet.cognition?.observer_meaning_interpretation){
+        meaningBrainCalls++;
+        const meaning=packet.cognition.observer_meaning_interpretation;
+        assert.equal(meaning.observer,character);
+        assert.ok(meaning.current_heard_surface_fragment);
+        assert.equal(meaning.boundaries.source_semantics_available,false);
+        assert.equal(meaning.boundaries.world_truth_authority,false);
+        assert.equal(packet.boundaries.belief_write_authority,false);
+        return {
+          interpretation_status:"interpreted",
+          interpreted_content:"或許對方希望我再說一遍",
+          interpreted_interaction_function:"request_repeat",
+          understanding_attested:true,
+        };
+      }
+      privateHearingCalls++;
+      assert.equal(packet.cognition.committed_acoustic_observation.content_understood,false);
+      return {private_reaction:"noticed a voice before attempting recognition"};
+    }});
+  assert.equal(privateHearingCalls,1);
+  assert.equal(lexicalBrainCalls,1);
+  assert.equal(meaningBrainCalls,1);
+  assert.equal(recognizedReply.status,"original_speaker_subjective_interpretation_observed");
+  assert.equal(recognizedReply.source_chain_verified,true);
+  assert.equal(recognizedReply.lexical_recognition_count,1);
+  assert.equal(recognizedReply.meaning_interpretation_count,1);
+  assert.equal(recognizedReply.subjective_understanding_attested,true);
+  assert.equal(recognizedReply.world_truth_claimed,false);
+  assert.equal(recognizedReply.world_mutation_performed,false);
+  assert.equal(recognizedReply.durable_memory_written,false);
+  assert.equal(recognizedReply.public_action_performed,false);
+  const afterRecognized=await getWorldSimulationState(
+    acousticSid,{fixtureRoot:goalFixtureRoot});
+  const historyAfterRecognized=await getWorldSimulationHistory(
+    acousticSid,{fixtureRoot:goalFixtureRoot});
+  assert.equal(afterRecognized.state_hash,replySnapshot.state_hash);
+  assert.deepEqual(historyAfterRecognized.turns,replyHistory.turns);
+  console.log(JSON.stringify({
+    scenario:"world_original_speaker_reply_private_lexical_meaning",
+    hearing_calls:privateHearingCalls,lexical_calls:lexicalBrainCalls,
+    meaning_calls:meaningBrainCalls,
+    lexical_recognitions:recognizedReply.lexical_recognition_count,
+    subjective_interpretations:recognizedReply.meaning_interpretation_count,
+    world_unchanged:true,world_truth_claimed:false,
+  }));
+
+  // The Brain may choose to NOT recognize a heard fragment. This must
+  // prevent the meaning stage; the engine cannot auto-fill understanding.
+  let noRecognitionMeaningCalls=0;
+  const declinedLexical=await runWorldSimulationCommittedReplySpeakerLexicalMeaning(
+    speakerIngressInput,{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+      if(packet.cognition?.observer_lexical_recognition) return null;
+      if(packet.cognition?.observer_meaning_interpretation){
+        noRecognitionMeaningCalls++;
+        return {interpretation_status:"interpreted",
+          interpreted_content:"fabricated",understanding_attested:true};
+      }
+      return {private_reaction:"heard sound without recognizing words"};
+    }});
+  assert.equal(declinedLexical.status,"speaker_declined_lexical_recognition");
+  assert.equal(declinedLexical.lexical_recognition_count,0);
+  assert.equal(declinedLexical.meaning_interpretation_count,0);
+  assert.equal(declinedLexical.subjective_understanding_attested,false);
+  assert.equal(noRecognitionMeaningCalls,0);
+  assert.equal((await getWorldSimulationState(
+    acousticSid,{fixtureRoot:goalFixtureRoot})).state_hash,replySnapshot.state_hash);
+
+  // A Runtime may not replace the lexical packet with somebody else's
+  // identity or unseen content. No meaning recognition or World write.
+  await assert.rejects(
+    runWorldSimulationCommittedReplySpeakerLexicalMeaning(
+      speakerIngressInput,{fixtureRoot:goalFixtureRoot,
+        characterBrain:async packet=>packet.cognition?.observer_lexical_recognition
+          ? {recognition_status:"recognized",heard_surface_fragment:"fake"}
+          : {private_reaction:"heard"},
+        characterRuntimeManager:{
+          runCharacterTurn:async ({brain_input,characterBrain})=>
+            characterBrain(brain_input.cognition?.observer_lexical_recognition
+              ? {...brain_input,character:"forged_other_speaker"}
+              : brain_input),
+        },
+      }),
+    error=>error?.code==="WORLD_REPLY_LEXICAL_BRAIN_PACKET_INVALID");
+  assert.equal((await getWorldSimulationState(
+    acousticSid,{fixtureRoot:goalFixtureRoot})).state_hash,replySnapshot.state_hash);
 
   for(const fault of ["wrong_observer","stale_world","runtime_substitution","forged_public_action"]){
     let invoked=0;
