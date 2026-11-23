@@ -16,6 +16,10 @@ The affected gate uses the existing fail-closed affected selector. Unknown, unsc
 
 The workflow does not use top-level `paths` or `paths-ignore` filters. This keeps required PR checks visible even when a change is documentation-heavy.
 
+### Mandatory Pi sidecar integration (pull requests and main pushes)
+
+On Ubuntu and Windows with Node 24, CI installs the pinned dependency lockfile in `scripts/pi-runtime` (separate from root npm), executes the real `runner.mjs status` probe, then runs the SDK/MCP durability test and the Codemode bridge test. The probe is a hard gate: missing packages, unsupported exports, or nonzero status fail CI instead of silently skipping an optional Pi test. This tests CI's installed package, **not** the separate protected Windows production release; that release must still run the same probe before cutover.
+
 ### Main push
 
 A push to `main` runs:
