@@ -1171,7 +1171,8 @@ try {
     assert.equal(guardedAfter.revision,guardedSourceSnapshot.revision);
     assert.equal(guardedAfter.state_hash,guardedSourceSnapshot.state_hash);
     assert.deepEqual(guardedHistoryAfter.turns,guardedSourceHistory.turns);
-    assert.equal(replyBrainChoices,1);
+    assert.equal(replyBrainChoices,replyFault==="runtime_substitution"?0:1,
+      "A substituted identity must be rejected before the listener Brain executes.");
     console.log(JSON.stringify({
       scenario:"world_listener_causal_clarification_negative",
       fault:replyFault,brain_choices:replyBrainChoices,
