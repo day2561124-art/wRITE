@@ -7201,3 +7201,238 @@ for (const mode of ["acoustic", "obstacle", "overlap", "active-field", "scene-mi
   }
 }
 console.log("CB-C6-F canonical staggered two-frontier projectile batch and refusal passed.");
+import {
+  runWorldSimulationOffscreenMixedFieldProjectileStep,
+  worldSimulationOffscreenMixedFieldProjectileVersion,
+} from "../../server/src/world-simulation-offscreen-mixed-field-projectile-service.mjs";
+
+function c6fMixedIndependentFieldProjectileWorld() {
+  const state = c6fDualProjectileContactWorld();
+  const field = d1Clone(e7MixedWorld("tie").ability_fields.field_e3);
+  field.remaining_ms = 100;
+  field.tick_ms = 50;
+  field.effect = { damage_per_second: 20 };
+  state.ability_fields = { field_e3: field };
+  state.projectiles = {
+    annex_projectile: d1Clone(state.projectiles.annex_projectile),
+  };
+  return state;
+}
+for (const reverse of [false, true]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-mixed-field-projectile-" + reverse + "-" + process.pid + "-" + Date.now());
+  const jointOptions = { fixtureRoot: path.join(root, "joint") };
+  const fieldOptions = { fixtureRoot: path.join(root, "field"),
+    characterBrain: async () => assert.fail("standalone field cannot call Brain") };
+  const shotOptions = { fixtureRoot: path.join(root, "shot"),
+    characterBrain: async () => assert.fail("standalone projectile cannot call Brain") };
+  try {
+    const initial = c6fMixedIndependentFieldProjectileWorld();
+    if (reverse)
+      initial.scenes = { annex: initial.scenes.annex, room: initial.scenes.room };
+    const sourceCopy = d1Clone(initial);
+    const fieldOnly = d1Clone(initial);
+    fieldOnly.projectiles = {};
+    const shotOnly = d1Clone(initial);
+    shotOnly.ability_fields = {};
+    const [session, fieldSession, shotSession] = await Promise.all([
+      beginWorldSimulationSession({
+        simulation_label: "C6-F mixed independent field/projectile World",
+        seed: "mixed-two-scene-frontiers", initial_world_state: initial,
+      }, jointOptions),
+      beginWorldSimulationSession({
+        simulation_label: "C6-F standalone room damaging field",
+        seed: "mixed-room-reference", initial_world_state: fieldOnly,
+      }, fieldOptions),
+      beginWorldSimulationSession({
+        simulation_label: "C6-F standalone annex projectile",
+        seed: "mixed-annex-reference", initial_world_state: shotOnly,
+      }, shotOptions),
+    ]);
+    const sid = session.world_simulation_session_id;
+    const paths = worldSimulationStatePaths(sid, jointOptions);
+    const durable = () => Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]);
+    let before = await getWorldSimulationState(sid, jointOptions);
+    const initialBytes = await durable();
+    const at = ms => new Date(Date.parse(initial.simulation_time) + ms).toISOString();
+    const early = await runWorldSimulationOffscreenMixedFieldProjectileStep({
+      world_simulation_session_id: sid,
+      expected_revision: before.revision, expected_state_hash: before.state_hash,
+      target_horizon: at(49),
+    }, jointOptions);
+    assert.equal(early.committed, false);
+    assert.deepEqual(await durable(), initialBytes);
+    for (const [index, elapsed] of [50, 100].entries()) {
+      const planned = projectWorldSimulationOffscreenSceneBreakpointPlan({
+        world_state: before.state, target_horizon: at(100),
+      });
+      assert.equal(planned.active_scene_count, 2);
+      assert.equal(planned.global_breakpoint.delta_ms, 50);
+      assert.equal(planned.multi_scene_atomic_execution_authorized, false);
+      const committed = await runWorldSimulationOffscreenMixedFieldProjectileStep({
+        world_simulation_session_id: sid,
+        expected_revision: before.revision, expected_state_hash: before.state_hash,
+        target_horizon: at(100),
+      }, jointOptions);
+      assert.equal(committed.version, worldSimulationOffscreenMixedFieldProjectileVersion);
+      assert.equal(committed.committed, true);
+      assert.equal(committed.elapsed_ms, 50);
+      assert.equal(committed.reached_simulation_time, at(elapsed));
+      assert.equal(committed.automatic_replay_allowed, false);
+      assert.deepEqual(committed.scene_ids, ["annex", "room"]);
+      const after = await getWorldSimulationState(sid, jointOptions);
+      const history = await getWorldSimulationHistory(sid, jointOptions);
+      assert.equal(after.revision, index + 1);
+      assert.equal(history.turns.length, index + 1);
+      assert.equal(after.state.simulation_time, at(elapsed));
+      for (const sceneId of ["annex", "room"])
+        assert.equal(after.state.scenes[sceneId].simulation_time, at(elapsed));
+      assert.equal(after.state.ability_fields.field_e3.remaining_ms, 100 - elapsed);
+      assert.equal(after.state.ability_fields.field_e3.active, index === 0);
+      assert.equal(after.state.projectiles.annex_projectile.age_ms, elapsed);
+      assert.equal(after.state.projectiles.annex_projectile.active, index === 0);
+      assert.deepEqual(after.state.memories, initial.memories);
+      assert.deepEqual(after.state.motivational_goal_history,
+        initial.motivational_goal_history);
+      assert.deepEqual(after.state.event_queue, []);
+      const turn = history.turns.at(-1);
+      assert.equal(turn.event.type, "offscreen_mixed_field_projectile_step");
+      assert.equal(turn.previous_state_hash, before.state_hash);
+      assert.equal(turn.next_state_hash, after.state_hash);
+      assert.deepEqual(turn.selected_action_intents, []);
+      assert.deepEqual(turn.knowledge_transitions, []);
+      assert.ok(turn.chronological_mutation_queue.queue_hash);
+      assert.ok(turn.chronological_mutation_execution.execution_hash);
+      assert.equal(turn.state_transitions.filter(t =>
+        t.field === "simulation_time").length, 3);
+      const ticks = turn.action_outcomes.filter(x => x.result === "ability_field_tick");
+      const contacts = turn.action_outcomes.filter(x => x.result === "projectile_hit_character");
+      assert.equal(ticks.length, 1);
+      assert.equal(ticks[0].target, "aria");
+      assert.equal(ticks[0].scene_id, "room");
+      assert.ok(ticks[0].damage_applied > 0);
+      assert.equal(contacts.length, index);
+      assert.equal(turn.causal_timeline.entries.filter(x =>
+        x.kind === "ability_field_tick").length, 1);
+      assert.equal(turn.causal_timeline.entries.filter(x =>
+        x.kind === "projectile_resolution").length, index);
+      if (index === 0) {
+        assert.equal(after.state.projectiles.annex_projectile.position.x, 1.5);
+        assert.equal(after.state.characters.visitor.physical_state.health_current, 100);
+        assert.equal(after.state.characters.aria.physical_state.health_current, 99);
+      } else {
+        assert.equal(after.state.projectiles.annex_projectile.termination_reason,
+          "character_contact");
+        assert.equal(contacts[0].target, "visitor");
+        assert.equal(contacts[0].scene_id, "annex");
+        assert.ok(contacts[0].damage_applied > 0);
+        assert.equal(after.state.characters.visitor.physical_state.health_current, 90);
+        assert.equal(after.state.characters.aria.physical_state.health_current, 98);
+      }
+      const saved = await durable();
+      await assert.rejects(runWorldSimulationOffscreenMixedFieldProjectileStep({
+        world_simulation_session_id: sid,
+        expected_revision: before.revision, expected_state_hash: before.state_hash,
+      }, jointOptions), { code: "C6F_MIXED_PHYSICAL_STEP_STALE" });
+      assert.deepEqual(await durable(), saved,
+        "mixed-source injury cannot be replayed from an older World revision");
+      assert.deepEqual(await getWorldSimulationHistory(sid, jointOptions), history);
+      before = after;
+    }
+    for (let n = 0; n < 2; n++) {
+      const fieldResult = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: fieldSession.world_simulation_session_id,
+        max_turns: 1, target_horizon: at(100),
+      }, fieldOptions);
+      assert.equal(fieldResult.committed_physical_step_count, 1);
+    }
+    const shotResult = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: shotSession.world_simulation_session_id,
+      max_turns: 1, target_horizon: at(100),
+    }, shotOptions);
+    assert.equal(shotResult.committed_physical_step_count, 1);
+    const [fieldRef, shotRef] = await Promise.all([
+      getWorldSimulationState(fieldSession.world_simulation_session_id, fieldOptions),
+      getWorldSimulationState(shotSession.world_simulation_session_id, shotOptions),
+    ]);
+    assert.deepEqual(before.state.characters.aria.physical_state,
+      fieldRef.state.characters.aria.physical_state,
+      "independent damage field must match canonical single-scene Body history");
+    assert.deepEqual(before.state.ability_fields.field_e3,
+      fieldRef.state.ability_fields.field_e3);
+    assert.deepEqual(before.state.characters.visitor.physical_state,
+      shotRef.state.characters.visitor.physical_state,
+      "independent projectile must match canonical single-scene injury");
+    assert.deepEqual(before.state.projectiles.annex_projectile,
+      shotRef.state.projectiles.annex_projectile);
+    assert.deepEqual(initial, sourceCopy);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+for (const mode of [
+  "queued", "acoustic", "overlap", "obstacle", "extra-effect",
+  "field-dps", "projectile-damage", "scene-id", "wrong-owner",
+]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-mixed-reject-" + mode + "-" + process.pid + "-" + Date.now());
+  const options = { fixtureRoot: root };
+  try {
+    const initial = c6fMixedIndependentFieldProjectileWorld();
+    if (mode === "queued") initial.event_queue = [{ event_id: "c6f-waiting" }];
+    if (mode === "acoustic") initial.sound_events = [{
+      schema_version: "cc6b-communication-acoustic-bridge-v1",
+      sound_id: "c6f-unheard", scene_id: "annex",
+    }];
+    if (mode === "overlap")
+      initial.scenes.annex.entity_positions.aria = { x: 4, y: 4 };
+    if (mode === "obstacle")
+      initial.scenes.annex.obstacles = [{ obstacle_id: "unresolved-cover" }];
+    if (mode === "extra-effect")
+      initial.ability_fields.field_e3.effect.teleport = true;
+    if (mode === "field-dps")
+      initial.ability_fields.field_e3.effect.damage_per_second = 10000;
+    if (mode === "projectile-damage")
+      initial.projectiles.annex_projectile.base_damage = 10000;
+    if (mode === "scene-id") initial.scenes.annex.scene_id = "room";
+    if (mode === "wrong-owner")
+      initial.projectiles.annex_projectile.owner = "keeper";
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-F mixed independent process guard",
+      seed: mode, initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const prior = await getWorldSimulationState(sid, options);
+    const paths = worldSimulationStatePaths(sid, options);
+    const bytesBefore = await Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]);
+    const denied = await runWorldSimulationOffscreenMixedFieldProjectileStep({
+      world_simulation_session_id: sid,
+      expected_revision: prior.revision, expected_state_hash: prior.state_hash,
+    }, options);
+    assert.equal(denied.committed, false);
+    assert.equal(denied.automatic_replay_allowed, false);
+    assert.equal(denied.blocked_reason, {
+      queued: "queued_event_precedes_physical_step",
+      acoustic: "listener_acoustic_ingress_pending",
+      overlap: "cross_scene_character_identity_overlap",
+      obstacle: "scene_geometry_or_clock_unresolved",
+      "extra-effect": "mixed_physical_profile_outside_slice",
+      "field-dps": "mixed_physical_profile_outside_slice",
+      "projectile-damage": "mixed_physical_profile_outside_slice",
+      "scene-id": "scene_geometry_or_clock_unresolved",
+      "wrong-owner": "independent_process_owner_not_resident",
+    }[mode]);
+    assert.deepEqual(await getWorldSimulationState(sid, options), prior);
+    assert.deepEqual(await Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]), bytesBefore);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+console.log("CB-C6-F independent cross-scene damaging field and projectile physical frontiers passed.");
+
