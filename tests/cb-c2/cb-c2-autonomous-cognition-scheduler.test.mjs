@@ -19,6 +19,7 @@ import { runWorldSimulationCommittedActorSpeechListenerClarification } from "../
 import { runWorldSimulationCommittedReplySpeakerCognition } from "../../server/src/world-simulation-committed-reply-speaker-ingress-service.mjs";
 import { runWorldSimulationCommittedReplySpeakerLexicalMeaning } from "../../server/src/world-simulation-committed-reply-speaker-lexical-meaning-service.mjs";
 import { runWorldSimulationCommittedReplySubjectiveMemory } from "../../server/src/world-simulation-committed-reply-subjective-memory-service.mjs";
+import { runWorldSimulationCommittedReplyMemoryRecall } from "../../server/src/world-simulation-committed-reply-memory-recall-service.mjs";
 import { assertWorldSimulationCommittedAcousticSource } from "../../server/src/world-simulation-native-committed-source-service.mjs";
 import { buildCharacterCommunicationActionCandidate } from "../../server/src/character-communication-foundation-service.mjs";
 import { nativeImplementationIntentionActivationCapability } from "../../server/src/world-simulation-goal-implementation-intention-activation-service.mjs";
@@ -1396,6 +1397,106 @@ try {
     prior_world_history_preserved:true,one_subjective_memory_added:true,
     source_turn_hash_verified:true,other_character_memory_unchanged:true,
     replay_rejected:true,world_truth_claimed:false,belief_revised:false,
+  }));
+
+  // The next private cognition invocation sees committed personal memory,
+  // but neither the World engine nor accessibility forces the Brain to recall.
+  const recallInput={
+    world_simulation_session_id:acousticSid,
+    observer:character,
+    memory_turn_id:memoryTurn.turn_id,
+    memory_id:newestMemory.memory_id,
+    expected_revision:afterMemorySnapshot.revision,
+    expected_state_hash:afterMemorySnapshot.state_hash,
+  };
+  let recallPrompts=0,rememberedViews=0;
+  const declineRecall=await runWorldSimulationCommittedReplyMemoryRecall(
+    recallInput,{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+      recallPrompts++;
+      assert.equal(packet.character,character);
+      assert.ok(packet.cognition.subjective_dialogue_recall_opportunity);
+      assert.equal(packet.boundaries.memory_content_exposed,false);
+      assert.equal(JSON.stringify(packet).includes(interpretedPhrase),false);
+      return {decision:"decline"};
+    }});
+  assert.equal(recallPrompts,1);
+  assert.equal(declineRecall.status,"character_declined_recall");
+  assert.equal(declineRecall.recalled_content_count,0);
+
+  const consideredRecall=await runWorldSimulationCommittedReplyMemoryRecall(
+    recallInput,{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+      assert.equal(packet.character,character);
+      if(packet.cognition?.subjective_dialogue_recall_opportunity){
+        recallPrompts++;
+        assert.equal(packet.boundaries.world_truth_authority,false);
+        assert.equal(JSON.stringify(packet).includes(interpretedPhrase),false);
+        return {decision:"attempt_recall"};
+      }
+      rememberedViews++;
+      const recovered=packet.cognition.recovered_subjective_dialogue_fragment;
+      assert.equal(recovered.fragment,interpretedPhrase);
+      assert.equal(recovered.possibly_incorrect,true);
+      assert.equal(recovered.subjective_not_world_truth,true);
+      assert.equal(recovered.speaker_identity_not_proven,true);
+      assert.equal(packet.boundaries.no_belief_adoption_authority,true);
+      assert.equal(packet.boundaries.no_public_action_authority,true);
+      return {decision:"consider_uncertain"};
+    }});
+  assert.equal(recallPrompts,2);
+  assert.equal(rememberedViews,1);
+  assert.equal(consideredRecall.status,"private_uncertain_memory_considered");
+  assert.equal(consideredRecall.retrieval_attempted,true);
+  assert.equal(consideredRecall.recall_kernel,"phase63c");
+  assert.equal(consideredRecall.source_chain_verified,true);
+  assert.equal(consideredRecall.recalled_content_count,1);
+  assert.equal(consideredRecall.belief_adopted,false);
+  assert.equal(consideredRecall.public_action_performed,false);
+  assert.equal(consideredRecall.world_mutation_performed,false);
+  const ignoredRecall=await runWorldSimulationCommittedReplyMemoryRecall(
+    recallInput,{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>
+      packet.cognition?.subjective_dialogue_recall_opportunity
+        ? {decision:"attempt_recall"}:{decision:"ignore"}});
+  assert.equal(ignoredRecall.status,"private_memory_ignored");
+
+  for(const fault of ["other_character","unknown_memory","stale_world","runtime_forgery"]){
+    const bad={...recallInput};
+    if(fault==="other_character")bad.observer=inquiryAlly;
+    if(fault==="unknown_memory")bad.memory_id="not_a_committed_memory";
+    if(fault==="stale_world")bad.expected_revision+=1;
+    let brainCalls=0;
+    const faultOptions={
+      fixtureRoot:goalFixtureRoot,
+      characterBrain:async ()=>{
+        brainCalls++;
+        return {decision:"attempt_recall"};
+      },
+    };
+    if(fault==="runtime_forgery")faultOptions.characterRuntimeManager={
+      runCharacterTurn:async ({brain_input,characterBrain})=>
+        characterBrain({...brain_input,character:inquiryAlly}),
+    };
+    await assert.rejects(
+      runWorldSimulationCommittedReplyMemoryRecall(bad,faultOptions),
+      error=>error?.code===({
+        other_character:"WORLD_REPLY_RECALL_SOURCE_INVALID",
+        unknown_memory:"WORLD_REPLY_RECALL_SOURCE_INVALID",
+        stale_world:"WORLD_REPLY_RECALL_STALE",
+        runtime_forgery:"WORLD_REPLY_RECALL_BRAIN_PACKET_INVALID",
+      })[fault]);
+    assert.equal(brainCalls,0);
+  }
+  const afterMemoryRecall=await getWorldSimulationState(
+    acousticSid,{fixtureRoot:goalFixtureRoot});
+  const historyAfterMemoryRecall=await getWorldSimulationHistory(
+    acousticSid,{fixtureRoot:goalFixtureRoot});
+  assert.equal(afterMemoryRecall.state_hash,afterMemorySnapshot.state_hash);
+  assert.deepEqual(historyAfterMemoryRecall.turns,afterMemoryHistory.turns);
+  console.log(JSON.stringify({
+    scenario:"world_original_speaker_committed_memory_source_pinned_recall",
+    phase63b_candidates_checked:true,phase63c_source_fragment_materialized:true,
+    recall_decline_prevents_recovery:true,brain_considers_or_ignores:true,
+    source_content_hidden_until_recovered:true,other_character_blocked:true,
+    history_unchanged:true,belief_adopted:false,public_action_performed:false,
   }));
 
   // Negative control: a genuine source hearing opportunity is insufficient
