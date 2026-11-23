@@ -6200,4 +6200,164 @@ for (const mode of [
   }
 }
 console.log("CB-C6-F independent damaging fields across two World scenes passed.");
+// C6-F post-direct gate: ordinary offscreen batches must preserve the exact
+// accepted damaging-field result, but may not turn a refusal into a time jump.
+for (const budget of [0, 1, 2, 32]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-batch-damage-" + budget + "-" + process.pid + "-" + Date.now());
+  const batchOptions = { fixtureRoot: path.join(root, "batch"),
+    characterBrain: async () => assert.fail("physical-only injury may not call Brain") };
+  const directOptions = { fixtureRoot: path.join(root, "direct") };
+  try {
+    const initial = c6fIndependentDamagingFields();
+    const [batchSession, directSession] = await Promise.all([
+      beginWorldSimulationSession({
+        simulation_label: "C6-F canonical dual-scene field injury batch",
+        seed: "dual-scene-damage", initial_world_state: initial,
+      }, batchOptions),
+      beginWorldSimulationSession({
+        simulation_label: "C6-F direct dual-scene field injury reference",
+        seed: "dual-scene-damage", initial_world_state: d1Clone(initial),
+      }, directOptions),
+    ]);
+    const sid = batchSession.world_simulation_session_id;
+    const reference = directSession.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, batchOptions);
+    const at = ms => new Date(Date.parse(initial.simulation_time) + ms).toISOString();
+    const paths = worldSimulationStatePaths(sid, batchOptions);
+    const readBytes = () => Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]);
+    const bytesBefore = await readBytes();
+    const result = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid,
+      max_turns: budget, target_horizon: at(100),
+    }, batchOptions);
+    const committed = Math.min(2, budget);
+    for (let i = 0; i < committed; i++) {
+      const latest = await getWorldSimulationState(reference, directOptions);
+      const direct = await runWorldSimulationOffscreenMultiSceneFieldDamageStep({
+        world_simulation_session_id: reference,
+        expected_revision: latest.revision,
+        expected_state_hash: latest.state_hash,
+        target_horizon: at(100),
+      }, directOptions);
+      assert.equal(direct.committed, true);
+    }
+    const [after, directAfter] = await Promise.all([
+      getWorldSimulationState(sid, batchOptions),
+      getWorldSimulationState(reference, directOptions),
+    ]);
+    const history = await getWorldSimulationHistory(sid, batchOptions);
+    assert.equal(result.committed_turn_count, committed);
+    assert.equal(result.committed_physical_step_count, committed);
+    assert.equal(result.attempted_turn_count, committed);
+    assert.equal(result.state_reconciliation_required, false);
+    assert.equal(result.automatic_replay_allowed, false);
+    assert.equal(result.reached_simulation_time, at(committed * 50));
+    assert.equal(after.revision, before.revision + committed);
+    assert.equal(history.turns.length, committed);
+    assert.deepEqual(after.state, directAfter.state,
+      "canonical batch and direct World-owned injury path must share the same objective state");
+    assert.deepEqual(after.state.memories, initial.memories);
+    assert.deepEqual(after.state.motivational_goal_history,
+      initial.motivational_goal_history);
+    assert.deepEqual(after.state.event_queue, []);
+    assert.equal(after.state.characters.aria.physical_state.health_current,
+      100 - committed);
+    assert.equal(after.state.characters.remote.physical_state.health_current,
+      100 - committed);
+    if (committed < 2) {
+      assert.equal(result.pending_scene_plan.active_scene_count, 2);
+      assert.equal(result.pending_scene_plan.multi_scene_atomic_execution_authorized, false);
+    }
+    for (let i = 0; i < history.turns.length; i++) {
+      const turn = history.turns[i];
+      assert.equal(turn.event.type, "offscreen_multiscene_ability_field_damage_step");
+      assert.equal(turn.previous_state_hash, i === 0
+        ? before.state_hash : history.turns[i - 1].next_state_hash);
+      assert.equal(turn.revision_from, before.revision + i);
+      assert.equal(turn.revision_to, before.revision + i + 1);
+      assert.deepEqual(turn.selected_action_intents, []);
+      assert.deepEqual(turn.knowledge_transitions, []);
+      const hits = turn.action_outcomes.filter(item =>
+        item.result === "ability_field_tick");
+      assert.equal(hits.length, 2);
+      assert.deepEqual(hits.map(item => item.target), ["remote", "aria"]);
+      assert.ok(hits.every(item => item.damage_applied === 1));
+      assert.equal(turn.causal_timeline.entries.filter(item =>
+        item.kind === "ability_field_tick").length, 2);
+      assert.equal(turn.state_transitions.filter(t =>
+        t.field === "simulation_time").length, 3);
+      assert.ok(turn.chronological_mutation_queue.queue_hash);
+      assert.ok(turn.chronological_mutation_execution.execution_hash);
+    }
+    if (committed) assert.equal(history.turns.at(-1).next_state_hash,
+      after.state_hash);
+    if (committed === 0) assert.deepEqual(await readBytes(), bytesBefore);
+    if (committed === 2) {
+      const settled = await readBytes();
+      const idle = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid, max_turns: 32,
+        target_horizon: at(200),
+      }, batchOptions);
+      assert.equal(idle.committed_turn_count, 0);
+      assert.equal(idle.target_horizon_claimed, false);
+      assert.deepEqual(await readBytes(), settled,
+        "resolved injuries cannot be replayed or healed by unowned time");
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+for (const mode of [
+  "one-harmful", "unknown-effect", "overlap", "projectile", "acoustic", "scene-mismatch",
+]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-batch-damage-reject-" + mode + "-" + process.pid + "-" + Date.now());
+  const options = { fixtureRoot: root,
+    characterBrain: async () => assert.fail("blocked physical batch cannot invoke Brain") };
+  try {
+    const initial = c6fIndependentDamagingFields();
+    if (mode === "one-harmful") initial.ability_fields.field_e3.effect.damage_per_second = 0;
+    if (mode === "unknown-effect") initial.ability_fields.annex_field.effect.teleport = true;
+    if (mode === "overlap") initial.scenes.annex.entity_positions.aria = { x: 1, y: 1 };
+    if (mode === "projectile")
+      initial.projectiles = {
+        projectile_e3: d1Clone(e3PersistentProcessWorld().projectiles.projectile_e3),
+      };
+    if (mode === "acoustic") initial.sound_events = [{
+      schema_version: "cc6b-communication-acoustic-bridge-v1",
+      sound_id: "c6f-pending-listener", scene_id: "annex", active: true,
+    }];
+    if (mode === "scene-mismatch") initial.scenes.annex.scene_id = "room";
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-F mixed-scene injury batch denial",
+      seed: mode, initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const prior = await getWorldSimulationState(sid, options);
+    const paths = worldSimulationStatePaths(sid, options);
+    const oldBytes = await Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]);
+    const blocked = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: 32,
+    }, options);
+    assert.equal(blocked.committed_turn_count, 0);
+    assert.equal(blocked.committed_physical_step_count, 0);
+    assert.equal(blocked.physical_step_blocked_reason, mode === "acoustic"
+      ? "physical_step_acoustic_ingress_pending"
+      : "physical_step_scene_scope_unresolved");
+    assert.equal(blocked.state_reconciliation_required, false);
+    assert.equal(blocked.automatic_replay_allowed, false);
+    assert.deepEqual(await getWorldSimulationState(sid, options), prior);
+    assert.deepEqual(await Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]), oldBytes);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+console.log("CB-C6-F canonical batch independent two-scene field injury and fail-closed guards passed.");
 
