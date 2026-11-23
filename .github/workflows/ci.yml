@@ -101,6 +101,8 @@ jobs:
       - run: npm ci
       - name: Install pinned Pi sidecar dependencies
         run: npm ci --prefix scripts/pi-runtime --ignore-scripts --no-audit --no-fund
+      - name: Verify Pi protected-release inventory and real runner
+        run: node scripts/pi-runtime/release-preflight.mjs
       - name: Verify real Pi sidecar readiness
         run: node scripts/pi-runtime/runner.mjs status
       - name: Verify Pi SDK and durable MCP integration

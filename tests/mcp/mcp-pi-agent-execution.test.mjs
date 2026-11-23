@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import path from "node:path";
+import os from "node:os";
+import { inspectPiRelease, verifyPinnedRuntime } from "../../scripts/pi-runtime/release-preflight.mjs";
 import {
   PI_PACKAGE_NAME,
   PI_REQUIRED_NODE_VERSION,
@@ -170,4 +174,68 @@ test("Sidecar probe rejects arbitrary runner failure details and malformed outpu
     assert.equal(actual.reason, stdout.includes('"reason":"pi_runtime_probe_failed"') && stdout.length < 70_000
       ? "pi_runtime_probe_failed" : "sidecar_probe_failed");
   }
+});
+
+const releasePin = "1.5.0";
+const releaseStatus = JSON.stringify({
+  ok: true, package_name: PI_PACKAGE_NAME, package_version: releasePin,
+  node_version: "24.18.0", capabilities: Object.fromEntries([
+    "createAgentSession", "DefaultResourceLoader", "createCodemodeExtension",
+    "createToolSearchExtension", "createMcpExtension", "SessionManager",
+  ].map(name => [name, true])),
+});
+
+async function releaseFixture(t) {
+  const root = await mkdtemp(path.join(os.tmpdir(), "pi-release-preflight-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const node = path.join(root, "node_modules", "@earendil-works", "pi-coding-agent");
+  await mkdir(node, { recursive: true });
+  await writeFile(path.join(root, "package.json"), JSON.stringify({ dependencies: { [PI_PACKAGE_NAME]: releasePin } }));
+  await writeFile(path.join(root, "package-lock.json"), JSON.stringify({ packages: {
+    "": { dependencies: { [PI_PACKAGE_NAME]: releasePin } },
+    ["node_modules/" + PI_PACKAGE_NAME]: { version: releasePin },
+  } }));
+  await writeFile(path.join(node, "package.json"), JSON.stringify({ name: PI_PACKAGE_NAME, version: releasePin }));
+  await writeFile(path.join(root, "runner.mjs"), "// synthetic runner; never executed\n");
+  return { root, node };
+}
+const releaseOptions = root => ({ root, nodeVersion: "24.18.0",
+  runProbe: async () => ({ stdout: releaseStatus }) });
+
+test("Release preflight rejects incompatible Node and missing dependency", async t => {
+  const { root, node } = await releaseFixture(t);
+  assert.equal((await inspectPiRelease({ ...releaseOptions(root), nodeVersion: "22.18.0" })).reason,
+    "PI_RELEASE_NODE_INCOMPATIBLE");
+  await rm(path.join(node, "package.json"));
+  assert.equal((await inspectPiRelease(releaseOptions(root))).reason, "PI_RELEASE_DEPENDENCY_UNAVAILABLE");
+});
+
+test("Release preflight pins manifest, lock, and installed package", async t => {
+  const { root, node } = await releaseFixture(t);
+  assert.equal((await inspectPiRelease(releaseOptions(root))).ok, true);
+  const bad = verifyPinnedRuntime({ dependencies: { [PI_PACKAGE_NAME]: "^1.5.0" } }, {}, {});
+  assert.equal(bad.reason, "PI_RELEASE_VERSION_NOT_PINNED");
+  await writeFile(path.join(node, "package.json"), JSON.stringify({ name: PI_PACKAGE_NAME, version: "1.0.4" }));
+  assert.equal((await inspectPiRelease(releaseOptions(root))).reason, "PI_RELEASE_INSTALLED_VERSION_MISMATCH");
+});
+
+test("Release preflight bounds structured runner errors and redacts stderr", async t => {
+  const { root } = await releaseFixture(t);
+  const error = Object.assign(new Error("unpublished"), { code: 1,
+    stdout: '{"ok":false,"reason":"pi_runtime_probe_failed","detail":"ERR_MODULE_NOT_FOUND"}\n',
+    stderr: "private path and secret" });
+  const output = await inspectPiRelease({ ...releaseOptions(root), runProbe: async () => { throw error; } });
+  assert.equal(output.reason, "PI_RELEASE_RUNNER_FAILED");
+  assert.equal(output.detail, "ERR_MODULE_NOT_FOUND");
+  assert.equal(output.exit_code, 1);
+  assert.equal(JSON.stringify(output).includes("private"), false);
+});
+
+test("Release preflight rejects Pi SDK with missing factory exports", async t => {
+  const { root } = await releaseFixture(t);
+  const payload = JSON.parse(releaseStatus);
+  payload.capabilities.SessionManager = false;
+  const output = await inspectPiRelease({ ...releaseOptions(root),
+    runProbe: async () => ({ stdout: JSON.stringify(payload) }) });
+  assert.equal(output.reason, "PI_RELEASE_RUNNER_UNREADY");
 });
