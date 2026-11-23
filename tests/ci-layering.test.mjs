@@ -43,6 +43,7 @@ assert.match(sidecar, /ubuntu-latest/u);
 assert.match(sidecar, /windows-latest/u);
 assert.match(sidecar, /node-version: 24/u);
 assert.match(sidecar, /npm ci --prefix scripts\/pi-runtime --ignore-scripts/u);
+assert.match(sidecar, /node scripts\/pi-runtime\/release-preflight\.mjs/u);
 assert.match(sidecar, /node scripts\/pi-runtime\/runner\.mjs status/u);
 assert.match(sidecar, /node --test tests\/mcp\/mcp-pi-agent-execution\.test\.mjs/u);
 assert.match(sidecar, /node --test tests\/mcp\/mcp-pi-codemode-bridge\.test\.mjs/u);
