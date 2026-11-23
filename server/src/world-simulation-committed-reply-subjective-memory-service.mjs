@@ -254,6 +254,7 @@ export async function runWorldSimulationCommittedReplySubjectiveMemory(
   let preview=copy(before.state);
   if(!record(preview.memories))preview.memories={};
   preview.memories[character]=copy(memoryTransitions[0].to);
+  const memoryPreview=copy(preview);
   const transitions=memoryTransitions.map(item=>({...item,time_ms:0}));
   let subjectiveClaim=null, beliefResolution=null, beliefRevision=null;
   let adoption=null;
@@ -332,17 +333,51 @@ export async function runWorldSimulationCommittedReplySubjectiveMemory(
       };
     }
   }
-  const queue=buildWorldSimulationChronologicalMutationQueue({
+  // Phase66A's authoritative executor requires an exact source-turn scoped
+  // revision queue. Commit one resulting World snapshot atomically, but stage
+  // independently attested memory, claim, and belief queues in causal order.
+  const memoryQueue=buildWorldSimulationChronologicalMutationQueue({
     turn_id:turnId,world_state_hash:before.state_hash,
-    state_transitions:transitions,elapsed_ms:2,
+    state_transitions:memoryTransitions,elapsed_ms:0,
   });
-  const applied=executeWorldSimulationChronologicalMutationQueue({
-    world_state:before.state,preview_world_state:preview,
-    queue,scene_id:sourceMeta.scene_id,
+  const memoryExecution=executeWorldSimulationChronologicalMutationQueue({
+    world_state:before.state,preview_world_state:memoryPreview,
+    queue:memoryQueue,scene_id:sourceMeta.scene_id,
   });
-  if(hashAgentRunValue(applied.next_world_state)!==hashAgentRunValue(preview))
+  let finalState=memoryExecution.next_world_state;
+  let claimQueue=null,claimExecution=null,revisionQueue=null,revisionExecution=null;
+  if(adoption){
+    claimQueue=buildWorldSimulationChronologicalMutationQueue({
+      turn_id:`${turnId}:subjective_claim`,
+      world_state_hash:hashAgentRunValue(finalState),
+      state_transitions:subjectiveClaim.result.state_transitions,elapsed_ms:0,
+    });
+    claimExecution=executeWorldSimulationChronologicalMutationQueue({
+      world_state:finalState,
+      preview_world_state:subjectiveClaim.result.preview_world_state,
+      queue:claimQueue,scene_id:sourceMeta.scene_id,
+    });
+    finalState=claimExecution.next_world_state;
+    revisionQueue=buildWorldSimulationChronologicalMutationQueue({
+      turn_id:`${turnId}:subjective_belief_revision`,
+      world_state_hash:hashAgentRunValue(finalState),
+      state_transitions:beliefRevision.result.state_transitions,elapsed_ms:0,
+    });
+    revisionExecution=executeWorldSimulationChronologicalMutationQueue({
+      world_state:finalState,
+      preview_world_state:beliefRevision.result.preview_world_state,
+      queue:revisionQueue,scene_id:sourceMeta.scene_id,
+    });
+    finalState=revisionExecution.next_world_state;
+    adoption={
+      ...adoption,
+      phase65a_queue_hash:claimQueue.queue_hash,
+      phase66a_queue_hash:revisionQueue.queue_hash,
+    };
+  }
+  if(hashAgentRunValue(finalState)!==hashAgentRunValue(preview))
     reject("WORLD_REPLY_MEMORY_QUEUE_DIVERGED",
-      "Authoritative mutation executor and Phase63A preview disagree.");
+      "Phase63A/65A/66A source-scoped queues diverged from the staged World.");
   const fresh=await getWorldSimulationState(sessionId,options);
   exactCas(input,fresh);
   const marker={
@@ -355,27 +390,29 @@ export async function runWorldSimulationCommittedReplySubjectiveMemory(
     interpreted_content_hash:hashAgentRunValue(subjectiveMeaning),
     interpretation_status:acceptedMeaning.interpretation_status,
     phase63a_result_hash:formed.audit.result_hash,
-    mutation_queue_hash:queue.queue_hash,
+    mutation_queue_hash:memoryQueue.queue_hash,
     ...(adoption ? {claim_adoption:adoption} : {}),
   };
   const committed=await commitWorldSimulationTurn(sessionId,{
     expected_revision:before.revision,expected_state_hash:before.state_hash,
-    turn_id:turnId,next_world_state:applied.next_world_state,event:null,
+    turn_id:turnId,next_world_state:finalState,event:null,
     selected_action_intents:[],action_outcomes:[],state_transitions:transitions,
     subjective_memory_formation:formed,
-    subjective_memory_mutation_queue:queue,
-    subjective_memory_mutation_execution:applied.execution,
+    subjective_memory_mutation_queue:memoryQueue,
+    subjective_memory_mutation_execution:memoryExecution.execution,
     ...(subjectiveClaim ? {
       subjective_claim_projection:subjectiveClaim,
-      subjective_claim_mutation_queue:queue,
-      subjective_claim_mutation_execution:applied.execution,
+      subjective_claim_mutation_queue:claimQueue,
+      subjective_claim_mutation_execution:claimExecution.execution,
       subjective_belief_resolution:beliefResolution,
       subjective_belief_revision_projection:beliefRevision,
-      subjective_belief_revision_mutation_queue:queue,
-      subjective_belief_revision_mutation_execution:applied.execution,
+      subjective_belief_revision_mutation_queue:revisionQueue,
+      subjective_belief_revision_mutation_execution:revisionExecution.execution,
     } : {}),
-    chronological_mutation_queue:queue,
-    chronological_mutation_execution:applied.execution,
+    ...(adoption ? {} : {
+      chronological_mutation_queue:memoryQueue,
+      chronological_mutation_execution:memoryExecution.execution,
+    }),
     autonomous_reply_subjective_memory_encoding:marker,
   },options);
   return Object.freeze({
