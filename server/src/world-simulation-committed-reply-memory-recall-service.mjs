@@ -2,6 +2,8 @@ import { hashAgentRunValue } from "./agent-run-service.mjs";
 import {
   getWorldSimulationHistory, getWorldSimulationState,
 } from "./world-simulation-state-service.mjs";
+import { assertWorldSimulationCommittedAcousticSource }
+  from "./world-simulation-native-committed-source-service.mjs";
 import { projectWorldSimulationConsciousCognitionAdmission }
   from "./world-simulation-autonomous-cognition-scheduler-service.mjs";
 import { queryWorldSimulationMemoryAccessibility }
@@ -128,7 +130,7 @@ function verifyMemoryLineage(input,snapshot,history) {
       !==meta.interpreted_content_hash)
     reject("WORLD_REPLY_RECALL_MEMORY_INVALID",
       "Only the exact prior-turn, source-pinned, possibly mistaken personal memory can be retrieved.");
-  return {memory:memories[0], memories:list};
+  return {memory:memories[0], memories:list,reply,admission:admission[0]};
 }
 
 /**
@@ -159,7 +161,27 @@ export async function runWorldSimulationCommittedReplyMemoryRecall(
   if(!projectWorldSimulationConsciousCognitionAdmission(snapshot.state,observer).admitted)
     reject("WORLD_REPLY_RECALL_ASLEEP",
       "Only the awake original speaker may attempt recall.");
-  const {memory,memories}=verifyMemoryLineage(input,snapshot,history);
+  const {memory,memories,reply,admission}=verifyMemoryLineage(input,snapshot,history);
+  const meta=history.turns.at(-1).autonomous_reply_subjective_memory_encoding;
+  const sourceProof=await assertWorldSimulationCommittedAcousticSource({
+    session_id:sessionId,
+    source_turn_id:reply.turn_id,
+    source_turn_hash:meta.source_turn_hash,
+    source_action_id:meta.source_action_id,
+    source_character:meta.source_character,
+    observer,
+    observer_increment_ref:meta.observer_increment_ref,
+    release_time_ms:admission.release_time_ms,
+    expected_source_receipt_bundle_hash:
+      reply.subjective_choice_commitment_receipts?.receipt_bundle_hash,
+    expected_source_revision_to:reply.revision_to,
+    expected_source_next_state_hash:reply.next_state_hash,
+    expected_current_revision:snapshot.revision,
+    expected_current_state_hash:snapshot.state_hash,
+  },options);
+  if(sourceProof.status!=="committed_source_verified_without_retraction")
+    reject("WORLD_REPLY_RECALL_ACOUSTIC_SOURCE_INVALID",
+      "A historical source-linked memory needs canonical CC7AF acoustic proof.");
   const invocation=await brainChoice({
     character:observer,
     cognition:{subjective_dialogue_recall_opportunity:{
