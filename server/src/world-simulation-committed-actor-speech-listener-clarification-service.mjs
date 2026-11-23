@@ -83,6 +83,16 @@ function sceneFor(world, listener, sourceActor, sourceScene) {
   if (scenes.length!==1)
     reject("WORLD_LISTENER_REPLY_SCENE_UNRESOLVED",
       "The current listener and source actor must share the source scene.");
+  // Acoustic detection alone does not identify a speaker. The first slice
+  // is intentionally limited to a two-character scene: in a group, filtering
+  // the action menu to the engine-known source actor would leak identity.
+  const positions=record(scenes[0][1].entity_positions);
+  const presentCharacters=Object.entries(positions).filter(([name,point])=>
+    exact(world.characters,name)
+    && point && Number.isFinite(point.x) && Number.isFinite(point.y));
+  if(presentCharacters.length!==2)
+    reject("WORLD_LISTENER_REPLY_MULTIPARTY_UNSUPPORTED",
+      "Nonlexical hearing cannot identify which of several visible characters spoke.");
   return scenes[0][0];
 }
 async function chooseWithBrain(packet, input, options) {
