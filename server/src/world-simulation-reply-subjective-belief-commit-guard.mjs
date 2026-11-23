@@ -36,7 +36,7 @@ export function assertWorldSimulationReplySubjectiveBeliefCommit(input) {
     return;
   }
   if(adoption.decision!=="propose_and_adopt_if_unopposed"
-    || Object.keys(adoption).length!==10
+    || Object.keys(adoption).length!==9
     || !Object.values(adoption).every(value=>typeof value==="string"&&value.trim())
     || !Array.isArray(payload.state_transitions)
     || payload.state_transitions.length!==5
