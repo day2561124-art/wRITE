@@ -199,7 +199,7 @@ export async function getWorldSimulationHistory(sessionId, options = {}) {
 // nested evidence grows. Hashes and causal lineage are computed from values,
 // not the storage formatting. A final newline keeps CLI inspection usable.
 function encodeWorldSimulationHistory(history) {
-  return JSON.stringify(history) + "\\n";
+  return JSON.stringify(history) + "\n";
 }
 
 function arrayTurns(history) {
