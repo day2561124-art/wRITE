@@ -4,6 +4,7 @@ import { runWorldSimulationOffscreenPhysicalStep } from "./world-simulation-offs
 import { runWorldSimulationOffscreenMultiSceneFieldStep, runWorldSimulationOffscreenMultiSceneFieldDamageStep } from "./world-simulation-offscreen-multiscene-field-step-service.mjs";
 import { runWorldSimulationOffscreenDualProjectileContact } from "./world-simulation-offscreen-dual-projectile-contact-service.mjs";
 import { runWorldSimulationOffscreenStaggeredProjectileStep } from "./world-simulation-offscreen-staggered-projectile-step-service.mjs";
+import { runWorldSimulationOffscreenMixedFieldProjectileStep } from "./world-simulation-offscreen-mixed-field-projectile-service.mjs";
 import {
   projectWorldSimulationOffscreenBreakpoint,
 } from "./world-simulation-offscreen-breakpoint-service.mjs";
@@ -238,6 +239,14 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
               const staggered = await runWorldSimulationOffscreenStaggeredProjectileStep(
                 physicalInput, physicalOnlyOptions);
               if (staggered.committed === true) result = staggered;
+            } else if (dualContact.blocked_reason === "active_ability_fields_not_yet_supported") {
+              // The first separately accepted mixed owner admits exactly
+              // one damaging field and one independently traveling projectile
+              // in distinct scenes. No other field/projectile combination may
+              // bypass the canonical scope refusal or CAS validation.
+              const mixed = await runWorldSimulationOffscreenMixedFieldProjectileStep(
+                physicalInput, physicalOnlyOptions);
+              if (mixed.committed === true) result = mixed;
             }
           }
         }

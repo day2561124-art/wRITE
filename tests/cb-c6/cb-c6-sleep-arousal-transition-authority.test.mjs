@@ -7435,4 +7435,206 @@ for (const mode of [
   }
 }
 console.log("CB-C6-F independent cross-scene damaging field and projectile physical frontiers passed.");
+// C6-F: canonical offscreen batch must reproduce the independently certified
+// mixed physical World owner, including resume after a single field-first
+// frontier. No additional Brain/goal/memory event is invented by the batch.
+for (const budget of [0, 1, 2, 32]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-batch-mixed-field-shot-" + budget + "-" + process.pid + "-" + Date.now());
+  const batchOptions = { fixtureRoot: path.join(root, "batch"),
+    characterBrain: async () => assert.fail("physical-only mixed World batch cannot call Brain") };
+  const directOptions = { fixtureRoot: path.join(root, "direct") };
+  try {
+    const initial = c6fMixedIndependentFieldProjectileWorld();
+    const [session, reference] = await Promise.all([
+      beginWorldSimulationSession({
+        simulation_label: "C6-F canonical mixed field and projectile batch",
+        seed: "mixed-field-shot-batch", initial_world_state: initial,
+      }, batchOptions),
+      beginWorldSimulationSession({
+        simulation_label: "C6-F direct independent mixed reference",
+        seed: "mixed-field-shot-batch", initial_world_state: d1Clone(initial),
+      }, directOptions),
+    ]);
+    const sid = session.world_simulation_session_id;
+    const directSid = reference.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, batchOptions);
+    const at = ms => new Date(Date.parse(initial.simulation_time) + ms).toISOString();
+    const paths = worldSimulationStatePaths(sid, batchOptions);
+    const durable = () => Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]);
+    const initialBytes = await durable();
+    const result = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid,
+      max_turns: budget, target_horizon: at(100),
+    }, batchOptions);
+    const count = Math.min(2, budget);
+    assert.equal(result.committed_turn_count, count);
+    assert.equal(result.committed_physical_step_count, count);
+    assert.equal(result.attempted_turn_count, count);
+    assert.equal(result.reached_simulation_time, at(count * 50));
+    assert.equal(result.target_horizon_claimed, count === 2);
+    assert.equal(result.automatic_replay_allowed, false);
+    assert.equal(result.state_reconciliation_required, false);
+    assert.equal(result.wall_clock_catch_up_used, false);
+    let after = await getWorldSimulationState(sid, batchOptions);
+    assert.equal(after.revision, before.revision + count);
+    assert.equal(after.state.simulation_time, at(count * 50));
+    assert.deepEqual(after.state.memories, initial.memories);
+    assert.deepEqual(after.state.motivational_goal_history,
+      initial.motivational_goal_history);
+    assert.deepEqual(after.state.event_queue, []);
+    for (let i = 0; i < count; i++) {
+      const directBefore = await getWorldSimulationState(directSid, directOptions);
+      const directStep = await runWorldSimulationOffscreenMixedFieldProjectileStep({
+        world_simulation_session_id: directSid,
+        expected_revision: directBefore.revision,
+        expected_state_hash: directBefore.state_hash,
+        target_horizon: at(100),
+      }, directOptions);
+      assert.equal(directStep.committed, true);
+    }
+    let directAfter = await getWorldSimulationState(directSid, directOptions);
+    assert.deepEqual(after.state, directAfter.state,
+      "canonical mixed batch and direct World physics must match objective state exactly");
+    const history = await getWorldSimulationHistory(sid, batchOptions);
+    assert.equal(history.turns.length, count);
+    for (let i = 0; i < count; i++) {
+      const turn = history.turns[i];
+      assert.equal(turn.event.type, "offscreen_mixed_field_projectile_step");
+      assert.equal(turn.revision_from, before.revision + i);
+      assert.equal(turn.revision_to, before.revision + i + 1);
+      assert.equal(turn.previous_state_hash, i === 0
+        ? before.state_hash : history.turns[i - 1].next_state_hash);
+      assert.deepEqual(turn.selected_action_intents, []);
+      assert.deepEqual(turn.knowledge_transitions, []);
+      assert.ok(turn.chronological_mutation_queue.queue_hash);
+      assert.ok(turn.chronological_mutation_execution.execution_hash);
+      assert.equal(turn.state_transitions.filter(t =>
+        t.field === "simulation_time").length, 3);
+      const ticks = turn.action_outcomes.filter(o => o.result === "ability_field_tick");
+      const hits = turn.action_outcomes.filter(o => o.result === "projectile_hit_character");
+      assert.equal(ticks.length, 1);
+      assert.equal(ticks[0].target, "aria");
+      assert.equal(ticks[0].scene_id, "room");
+      assert.equal(hits.length, i);
+      if (i === 1) {
+        assert.equal(hits[0].target, "visitor");
+        assert.equal(hits[0].scene_id, "annex");
+      }
+    }
+    if (count) assert.equal(history.turns.at(-1).next_state_hash, after.state_hash);
+    if (!count) {
+      assert.deepEqual(await durable(), initialBytes);
+      assert.equal(result.pending_scene_plan.active_scene_count, 2);
+      assert.equal(result.pending_scene_plan.multi_scene_atomic_execution_authorized, false);
+    }
+    if (count === 1) {
+      assert.equal(after.state.projectiles.annex_projectile.active, true);
+      assert.equal(after.state.projectiles.annex_projectile.position.x, 1.5);
+      assert.equal(after.state.characters.visitor.physical_state.health_current, 100);
+      const secondBatch = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid, max_turns: 1,
+        target_horizon: at(100),
+      }, batchOptions);
+      assert.equal(secondBatch.committed_turn_count, 1);
+      assert.equal(secondBatch.committed_physical_step_count, 1);
+      assert.equal(secondBatch.reached_simulation_time, at(100));
+      const directBefore = await getWorldSimulationState(directSid, directOptions);
+      const directStep = await runWorldSimulationOffscreenMixedFieldProjectileStep({
+        world_simulation_session_id: directSid,
+        expected_revision: directBefore.revision,
+        expected_state_hash: directBefore.state_hash, target_horizon: at(100),
+      }, directOptions);
+      assert.equal(directStep.committed, true);
+      after = await getWorldSimulationState(sid, batchOptions);
+      directAfter = await getWorldSimulationState(directSid, directOptions);
+      assert.deepEqual(after.state, directAfter.state);
+      const continued = await getWorldSimulationHistory(sid, batchOptions);
+      assert.equal(continued.turns.length, 2);
+      assert.equal(continued.turns[1].previous_state_hash,
+        continued.turns[0].next_state_hash);
+    }
+    if (count >= 1) {
+      if (count > 1 || budget === 1) {
+        assert.equal(after.state.simulation_time, at(100));
+        assert.equal(after.state.characters.aria.physical_state.health_current, 98);
+        assert.equal(after.state.characters.visitor.physical_state.health_current, 90);
+        assert.equal(after.state.ability_fields.field_e3.active, false);
+        assert.equal(after.state.projectiles.annex_projectile.active, false);
+        for (const sceneId of ["annex", "room"])
+          assert.equal(after.state.scenes[sceneId].simulation_time, at(100));
+        const bytesAtRest = await durable();
+        const idle = await runWorldSimulationOffscreenEventBatch({
+          world_simulation_session_id: sid, max_turns: 32,
+          target_horizon: at(150),
+        }, batchOptions);
+        assert.equal(idle.committed_turn_count, 0);
+        assert.equal(idle.target_horizon_claimed, false);
+        assert.deepEqual(await durable(), bytesAtRest);
+      }
+    }
+    assert.deepEqual(await getWorldSimulationHistory(sid, batchOptions),
+      await getWorldSimulationHistory(sid, batchOptions));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+for (const mode of [
+  "acoustic", "overlap", "obstacle", "extra-effect",
+  "field-dps", "projectile-damage", "scene-id", "wrong-owner",
+]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-batch-mixed-refuse-" + mode + "-" + process.pid + "-" + Date.now());
+  const options = { fixtureRoot: root,
+    characterBrain: async () => assert.fail("blocked mixed World may not call Brain") };
+  try {
+    const initial = c6fMixedIndependentFieldProjectileWorld();
+    if (mode === "acoustic") initial.sound_events = [{
+      schema_version: "cc6b-communication-acoustic-bridge-v1",
+      sound_id: "c6f-unheard", scene_id: "annex",
+    }];
+    if (mode === "overlap")
+      initial.scenes.annex.entity_positions.aria = { x: 4, y: 4 };
+    if (mode === "obstacle")
+      initial.scenes.annex.obstacles = [{ obstacle_id: "unknown-wall" }];
+    if (mode === "extra-effect")
+      initial.ability_fields.field_e3.effect.teleport = true;
+    if (mode === "field-dps")
+      initial.ability_fields.field_e3.effect.damage_per_second = 1000;
+    if (mode === "projectile-damage")
+      initial.projectiles.annex_projectile.base_damage = 1000;
+    if (mode === "scene-id") initial.scenes.annex.scene_id = "room";
+    if (mode === "wrong-owner")
+      initial.projectiles.annex_projectile.owner = "keeper";
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-F mixed batch safety refusal",
+      seed: mode, initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, options);
+    const paths = worldSimulationStatePaths(sid, options);
+    const oldBytes = await Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]);
+    const refused = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: 32,
+    }, options);
+    assert.equal(refused.committed_turn_count, 0);
+    assert.equal(refused.committed_physical_step_count, 0);
+    assert.equal(refused.automatic_replay_allowed, false);
+    assert.equal(refused.state_reconciliation_required, false);
+    assert.ok(refused.physical_step_blocked_reason === null
+      || typeof refused.physical_step_blocked_reason === "string",
+      "unsafe mixed scene must not fabricate an admitted physical commit");
+    assert.deepEqual(await getWorldSimulationState(sid, options), before);
+    assert.deepEqual(await Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]), oldBytes);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+console.log("CB-C6-F canonical mixed field/projectile two-frontier batch and refusal passed.");
 
