@@ -7637,4 +7637,138 @@ for (const mode of [
   }
 }
 console.log("CB-C6-F canonical mixed field/projectile two-frontier batch and refusal passed.");
+// C6-F: one resident is struck by a 100ms ability-field tick and a same-ms
+// projectile contact. This is the EXISTING one-scene canonical owner, not a
+// new mixed-physics writer. Check the lethal threshold, the provenance of
+// BOTH injuries, the ordered Body mutation chain, and durable replay defense.
+for (const startingHp of [12, 4, 1]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-same-scene-lethal-tie-" + startingHp + "-" + process.pid + "-" + Date.now());
+  const options = { fixtureRoot: root,
+    characterBrain: async () => assert.fail("same-scene physical collision must not call Brain") };
+  try {
+    const initial = e7MixedWorld("tie");
+    initial.characters.aria.physical_state.health_current = startingHp;
+    initial.characters.aria.physical_state.health_max = 100;
+    initial.characters.aria.physical_state.injuries = [];
+    initial.characters.aria.physical_state.incapacitated = false;
+    initial.characters.aria.physical_state.immobilized = false;
+    initial.characters.aria.physical_state.movement_multiplier = 1;
+    initial.characters.aria.physical_state.combat_multiplier = 1;
+    const original = d1Clone(initial);
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-F same-scene lethal projectile/field tie",
+      seed: "same-scene-lethal-" + startingHp,
+      initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const initialSnapshot = await getWorldSimulationState(sid, options);
+    const at = new Date(Date.parse(initial.simulation_time) + 100).toISOString();
+    const paths = worldSimulationStatePaths(sid, options);
+    const durable = () => Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]);
+    const priorBytes = await durable();
+    const deniedEarly = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: 32,
+      target_horizon: new Date(Date.parse(initial.simulation_time) + 99).toISOString(),
+    }, options);
+    assert.equal(deniedEarly.committed_turn_count, 0);
+    assert.deepEqual(await durable(), priorBytes);
+
+    const committed = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: 1, target_horizon: at,
+    }, options);
+    assert.equal(committed.committed_physical_step_count, 1);
+    assert.equal(committed.committed_turn_count, 1);
+    assert.equal(committed.reached_simulation_time, at);
+    assert.equal(committed.target_horizon_claimed, true);
+    assert.equal(committed.automatic_replay_allowed, false);
+    assert.equal(committed.state_reconciliation_required, false);
+    const after = await getWorldSimulationState(sid, options);
+    const history = await getWorldSimulationHistory(sid, options);
+    assert.equal(after.revision, initialSnapshot.revision + 1);
+    assert.equal(history.turns.length, 1);
+    assert.equal(history.turns[0].previous_state_hash, initialSnapshot.state_hash);
+    assert.equal(history.turns[0].next_state_hash, after.state_hash);
+    const turn = history.turns[0];
+    assert.deepEqual(turn.selected_action_intents, []);
+    assert.deepEqual(turn.knowledge_transitions, []);
+    assert.ok(turn.chronological_mutation_queue.queue_hash);
+    assert.ok(turn.chronological_mutation_execution.execution_hash);
+    const direct = await e4Resolve(initial, at);
+    assert.equal(direct.next_world_state.simulation_time, at);
+    assert.deepEqual(after.state.characters.aria.physical_state,
+      direct.next_world_state.characters.aria.physical_state,
+      "one-scene Native physical Body must match immutable direct adjudication");
+    assert.deepEqual(after.state.ability_fields, direct.next_world_state.ability_fields);
+    assert.deepEqual(after.state.projectiles, direct.next_world_state.projectiles);
+
+    const impacts = turn.action_outcomes.filter(item =>
+      item.target === "aria" && [
+        "ability_field_tick", "projectile_hit_character",
+      ].includes(item.result));
+    assert.equal(impacts.length, 2);
+    assert.deepEqual(impacts.map(item => item.result).sort(), [
+      "ability_field_tick", "projectile_hit_character",
+    ]);
+    assert.equal(impacts.find(item =>
+      item.result === "ability_field_tick").damage_applied, 2);
+    assert.equal(impacts.find(item =>
+      item.result === "projectile_hit_character").damage_applied, 10);
+    assert.equal(impacts.find(item =>
+      item.result === "ability_field_tick").time_ms, 100);
+    const injury = after.state.characters.aria.physical_state;
+    assert.equal(injury.health_current, Math.max(0, startingHp - 12));
+    assert.equal(injury.incapacitated, true);
+    assert.equal(injury.immobilized, true);
+    assert.equal(injury.injuries.length, 2,
+      "same-time impacts must not overwrite the earlier source-specific injury");
+    assert.deepEqual(injury.injuries.map(x => x.source).sort(),
+      ["field_e3", "projectile_e3"]);
+    assert.equal(new Set(injury.injuries.map(x => x.injury_id)).size, 2);
+    assert.deepEqual(injury.injuries.map(x => x.damage).sort((a,b) => a-b), [2,10]);
+    const healthChain = turn.state_transitions.filter(item =>
+      item.entity === "aria" && item.field === "physical_state.health_current");
+    assert.ok(healthChain.length >= 1 && healthChain.length <= 2);
+    assert.equal(healthChain[0].from, startingHp);
+    assert.equal(healthChain.at(-1).to, injury.health_current);
+    for (let i = 1; i < healthChain.length; i++)
+      assert.equal(healthChain[i].from, healthChain[i - 1].to);
+    const injuryChain = turn.state_transitions.filter(item =>
+      item.entity === "aria" && item.field === "physical_state.injuries");
+    assert.equal(injuryChain.length, 2);
+    assert.deepEqual(injuryChain[0].from, []);
+    assert.deepEqual(injuryChain[1].from, injuryChain[0].to);
+    assert.deepEqual(injuryChain[1].to, injury.injuries);
+    assert.ok(turn.immutable_causal_evaluators.audit_count >= 2,
+      "both physical injury sources need independent immutable evaluator evidence");
+    assert.deepEqual(after.state.memories, original.memories);
+    assert.deepEqual(after.state.motivational_goal_history,
+      original.motivational_goal_history);
+    assert.deepEqual(after.state.event_queue, []);
+
+    const saved = await durable();
+    await assert.rejects(runWorldSimulationOffscreenPhysicalStep({
+      world_simulation_session_id: sid,
+      expected_revision: initialSnapshot.revision,
+      expected_state_hash: initialSnapshot.state_hash,
+      target_horizon: at,
+    }, options), { code: "C6E_PHYSICAL_STEP_STALE" });
+    assert.deepEqual(await durable(), saved,
+      "stale impact may not subtract health or append another injury");
+    const idle = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: 32,
+      target_horizon: new Date(Date.parse(at) + 100).toISOString(),
+    }, options);
+    assert.equal(idle.committed_turn_count, 0);
+    assert.deepEqual(await durable(), saved);
+    assert.deepEqual(await getWorldSimulationHistory(sid, options), history,
+      "the decoded durable injury provenance is stable after replay refusal");
+    assert.deepEqual(initial, original);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+console.log("CB-C6-F same-scene lethal field/projectile tie, injury provenance, CAS replay guard passed.");
 
