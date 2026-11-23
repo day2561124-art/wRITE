@@ -5640,7 +5640,8 @@ import {
 
 function c6fTwoHarmlessFieldScenes() {
   const state = e4FieldWorld();
-  state.ability_fields.field_e3.remaining_ms = 50;
+  state.ability_fields.field_e3.remaining_ms = 100;
+  state.ability_fields.field_e3.tick_ms = 50;
   state.scenes.annex = {
     ...d1Clone(state.scenes.room),
     scene_id: "annex", simulation_time: state.simulation_time,
@@ -5661,6 +5662,7 @@ function c6fTwoHarmlessFieldScenes() {
     ...d1Clone(state.ability_fields.field_e3),
     field_id: "annex_field", scene_id: "annex",
     center: { x: 4, y: 4 }, owner: "remote", remaining_ms: 100,
+    tick_ms: 50,
   };
   return state;
 }
@@ -5721,8 +5723,9 @@ for (const reverse of [false, true]) {
       assert.equal(after.state.simulation_time, at(elapsed));
       assert.equal(after.state.scenes.room.simulation_time, at(elapsed));
       assert.equal(after.state.scenes.annex.simulation_time, at(elapsed));
-      assert.equal(after.state.ability_fields.field_e3.remaining_ms, 0);
-      assert.equal(after.state.ability_fields.field_e3.active, false);
+      assert.equal(after.state.ability_fields.field_e3.remaining_ms,
+        index === 0 ? 50 : 0);
+      assert.equal(after.state.ability_fields.field_e3.active, index === 0);
       assert.equal(after.state.ability_fields.annex_field.remaining_ms,
         index === 0 ? 50 : 0);
       assert.equal(after.state.ability_fields.annex_field.active, index === 0);
@@ -5747,8 +5750,7 @@ for (const reverse of [false, true]) {
       assert.equal(turn.pure_proposal_producers.audit_count, 2);
       assert.equal(turn.state_transitions.filter(t =>
         t.field === "simulation_time").length, 3);
-      const expectedFields = index === 0
-        ? ["annex_field", "field_e3"] : ["annex_field"];
+      const expectedFields = ["annex_field", "field_e3"];
       assert.deepEqual(turn.state_transitions.filter(t =>
         t.field === "ability_field_state").map(t => t.entity).sort(),
         expectedFields);
