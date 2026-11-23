@@ -252,6 +252,7 @@ import {
 } from "./world-simulation-counterfactual-linked-experience-reuse-outcome-selected-action-outcome-evidence-service.mjs";
 import {
   buildWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeEvidence,
+  isolateWorldSimulationPhase82AHistoryForTurn,
 } from "./world-simulation-counterfactual-linked-experience-longitudinal-reuse-outcome-evidence-service.mjs";
 import {
   buildWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeVariation,
@@ -11894,6 +11895,14 @@ export async function resolveWorldSimulationTurn(
         postOutcomeSubjectivePerceptionProjection,
     });
 
+  // The committed World history used by all nested Phase82A/B/C/D checks is
+  // one detached, deeply frozen JSON snapshot for *this* resolution only.
+  // All six callers still rebuild/verify the complete prior-Q lineage.
+  // No validation verdict, projection hash, or state is memoized.
+  const counterfactualLinkedExperienceLongitudinalHistorySnapshot =
+    isolateWorldSimulationPhase82AHistoryForTurn(
+      counterfactualLinkedExperienceReuseOutcomeCanonicalHistory ?? [],
+    );
   // Phase82A stops the single-case reuse loop from recursively cloning itself.
   // It assembles the current canonical Phase81Q subjective outcome together with
   // prior committed Phase81Q outcomes that share the same character and root
@@ -11907,7 +11916,7 @@ export async function resolveWorldSimulationTurn(
       turn_id: preparedTurn.turn_id,
       state_revision: snapshot.revision,
       world_state_hash: snapshot.state_hash,
-      world_history: counterfactualLinkedExperienceReuseOutcomeCanonicalHistory ?? [],
+      world_history: counterfactualLinkedExperienceLongitudinalHistorySnapshot,
       current_phase81q_outcome_evidence:
         counterfactualLinkedExperienceReuseOutcomeSelectedActionOutcomeEvidence,
       counterfactual_linked_experience_reuse_outcome_selected_action_lineage:
@@ -11934,7 +11943,7 @@ export async function resolveWorldSimulationTurn(
       turn_id: preparedTurn.turn_id,
       state_revision: snapshot.revision,
       world_state_hash: snapshot.state_hash,
-      world_history: counterfactualLinkedExperienceReuseOutcomeCanonicalHistory ?? [],
+      world_history: counterfactualLinkedExperienceLongitudinalHistorySnapshot,
       longitudinal_reuse_outcome_evidence:
         counterfactualLinkedExperienceLongitudinalReuseOutcomeEvidence,
       current_phase81q_outcome_evidence:
@@ -11962,7 +11971,7 @@ export async function resolveWorldSimulationTurn(
       turn_id: preparedTurn.turn_id,
       state_revision: snapshot.revision,
       world_state_hash: snapshot.state_hash,
-      world_history: counterfactualLinkedExperienceReuseOutcomeCanonicalHistory ?? [],
+      world_history: counterfactualLinkedExperienceLongitudinalHistorySnapshot,
       longitudinal_reuse_outcome_evidence:
         counterfactualLinkedExperienceLongitudinalReuseOutcomeEvidence,
       longitudinal_reuse_outcome_variation:
@@ -12005,7 +12014,7 @@ export async function resolveWorldSimulationTurn(
       turn_id: preparedTurn.turn_id,
       state_revision: snapshot.revision,
       world_state_hash: snapshot.state_hash,
-      world_history: counterfactualLinkedExperienceReuseOutcomeCanonicalHistory ?? [],
+      world_history: counterfactualLinkedExperienceLongitudinalHistorySnapshot,
       longitudinal_reuse_outcome_evidence:
         counterfactualLinkedExperienceLongitudinalReuseOutcomeEvidence,
       longitudinal_reuse_outcome_variation:
@@ -12040,7 +12049,7 @@ export async function resolveWorldSimulationTurn(
       turn_id: preparedTurn.turn_id,
       state_revision: snapshot.revision,
       world_state_hash: snapshot.state_hash,
-      world_history: counterfactualLinkedExperienceReuseOutcomeCanonicalHistory ?? [],
+      world_history: counterfactualLinkedExperienceLongitudinalHistorySnapshot,
       longitudinal_reuse_outcome_evidence:
         counterfactualLinkedExperienceLongitudinalReuseOutcomeEvidence,
       longitudinal_reuse_outcome_variation:
@@ -12085,7 +12094,7 @@ export async function resolveWorldSimulationTurn(
       turn_id: preparedTurn.turn_id,
       state_revision: snapshot.revision,
       world_state_hash: snapshot.state_hash,
-      world_history: counterfactualLinkedExperienceReuseOutcomeCanonicalHistory ?? [],
+      world_history: counterfactualLinkedExperienceLongitudinalHistorySnapshot,
       longitudinal_reuse_outcome_evidence:
         counterfactualLinkedExperienceLongitudinalReuseOutcomeEvidence,
       longitudinal_reuse_outcome_variation:
