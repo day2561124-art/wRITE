@@ -113,6 +113,7 @@ export async function runWorldSimulationOffscreenMultiSceneFieldStep(input = {},
       || Object.keys(effect).some(key => key !== "damage_per_second")
       || !canonicalTimestamp(scene.simulation_time)
       || scene.simulation_time !== state.simulation_time
+      || scene.scene_id !== field.scene_id
       || typeof field.scene_id !== "string"
       || !Object.hasOwn(object(state.scenes), field.scene_id);
   })) return blocked("nonharmful_field_lifecycle_authority_required");
