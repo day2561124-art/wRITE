@@ -1060,14 +1060,25 @@ function resolveStationaryFieldOnlySharedFrontiers(
       || JSON.stringify(object(snapshotScene.entity_positions))
         !== JSON.stringify(object(nextScene.entity_positions)))
     return false;
-  const active = () => Object.values(object(nextWorldState.ability_fields))
-    .filter(item => item?.active === true && item.scene_id === input.scene_id);
-  if (active().length < 2 || !Number.isFinite(elapsedMs) || elapsedMs <= 0) return false;
+  const allActive = () => Object.values(object(nextWorldState.ability_fields))
+    .filter(item => item?.active === true);
+  const active = () => allActive().filter(item => item.scene_id === input.scene_id);
+  // This is the separately accepted C6-F two-damaging-field slice, not a
+  // replacement for general stationary, passive or multiscene field physics.
+  if (allActive().length !== 2 || active().length !== 2
+      || !Number.isSafeInteger(elapsedMs) || elapsedMs <= 0)
+    return false;
   const rules = object(input.world_state.world_rules ?? input.world_state.rules);
   const tickFor = field => positiveNumber(
     field.tick_ms ?? object(field.effect).tick_ms,
     positiveNumber(rules.ability_field_tick_ms, 100),
   );
+  if (active().some(field =>
+    !Number.isSafeInteger(field.remaining_ms) || field.remaining_ms <= 0
+      || !Number.isSafeInteger(tickFor(field)) || tickFor(field) <= 0
+      || !Number.isFinite(object(field.effect).damage_per_second)
+      || object(field.effect).damage_per_second <= 0))
+    return false;
   const earliest = Math.min(...active().map(field =>
     Math.min(positiveNumber(field.remaining_ms, Infinity), tickFor(field))));
   if (!(earliest > 0) || elapsedMs <= earliest + 1e-9) return false;
