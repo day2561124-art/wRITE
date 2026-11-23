@@ -965,6 +965,7 @@ function resolveAbilityFields(input, newFields, nextWorldState, snapshotScene, n
         const insideMs = nonNegativeNumber(exposureQuery.result.inside_ms, 0);
         if (insideMs <= 0 || dps <= 0) continue;
         const rawDamage = dps * insideMs / 1000;
+        const contactTimeMs = tickEndMs + nonNegativeNumber(input.field_time_offset_ms, 0);
         const impact = applyWorldSimulationCombatImpact({
           world_state: input.world_state,
           next_world_state: nextWorldState,
@@ -976,7 +977,7 @@ function resolveAbilityFields(input, newFields, nextWorldState, snapshotScene, n
           source: fieldId,
           ignore_armor: effect.ignore_armor === true,
           state_transitions: transitions,
-          time_ms: tickEndMs,
+          time_ms: contactTimeMs,
           source_layer: "continuous_physics",
         });
         if (impact.evaluator_audit) array(input.immutable_causal_evaluator_audits).push(impact.evaluator_audit);
@@ -1080,20 +1081,26 @@ function resolveStationaryFieldOnlySharedFrontiers(
     const frontierOutcomes = [];
     const frontierResolutions = [];
     resolveAbilityFields(
-      input, [], nextWorldState, snapshotScene, nextScene, delta,
+      { ...input, field_time_offset_ms: elapsed }, [],
+      nextWorldState, snapshotScene, nextScene, delta,
       frontierTransitions, frontierOutcomes, frontierResolutions,
     );
-    // Each immutable evaluator receives its local bounded interval. Published
-    // World mutations and contact times use this single-turn absolute offset.
-    const moveTime = value => {
+    // Damage evaluator audits already carry absolute hit times. Only lifecycle
+    // proposals and public outcome/response envelopes need the slice offset.
+    const publishTransition = item => {
+      if (item.field === "ability_field_state" && Number.isFinite(item.time_ms))
+        item.time_ms += elapsed;
+      return item;
+    };
+    const publishOutcome = value => {
       if (Number.isFinite(value.time_ms)) value.time_ms += elapsed;
       if (Number.isFinite(value.tick_start_ms)) value.tick_start_ms += elapsed;
       if (Number.isFinite(value.tick_end_ms)) value.tick_end_ms += elapsed;
       return value;
     };
-    transitions.push(...frontierTransitions.map(moveTime));
-    outcomes.push(...frontierOutcomes.map(moveTime));
-    resolutions.push(...frontierResolutions.map(moveTime));
+    transitions.push(...frontierTransitions.map(publishTransition));
+    outcomes.push(...frontierOutcomes.map(publishOutcome));
+    resolutions.push(...frontierResolutions.map(publishOutcome));
     elapsed += delta;
   }
   return true;
