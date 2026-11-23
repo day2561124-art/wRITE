@@ -1093,11 +1093,16 @@ try {
   // Negative control: a genuine source hearing opportunity is insufficient
   // to force a public reply. A Brain decline, forged action and Runtime
   // attempt to replace the Brain decision must all leave World unchanged.
-  for(const replyFault of ["decline","forged_action","runtime_override","runtime_substitution"]){
+  for(const replyFault of ["decline","forged_action","runtime_override","runtime_substitution","ambiguous_scene"]){
+    const guardedReplyWorld=structuredClone(acousticWorld);
+    if(replyFault==="ambiguous_scene"){
+      guardedReplyWorld.characters["路過同伴"]={known:[]};
+      guardedReplyWorld.scenes[actionScene].entity_positions["路過同伴"]={x:3,y:1};
+    }
     const guardedReplySession=await beginWorldSimulationSession({
       source_text:"authenticated listener clarification guard "+replyFault,
-      characters:Object.keys(acousticWorld.characters),
-      initial_world_state:acousticWorld,
+      characters:Object.keys(guardedReplyWorld.characters),
+      initial_world_state:guardedReplyWorld,
     },{fixtureRoot:goalFixtureRoot});
     const guardedReplySid=guardedReplySession.world_simulation_session_id;
     const groundedSource=await runWorldSimulationActorInitiatedSpeech({
@@ -1157,6 +1162,9 @@ try {
     if(replyFault==="forged_action")
       await assert.rejects(guardedReplyCall(),
         error=>error?.code==="WORLD_LISTENER_REPLY_ACTION_NOT_AVAILABLE");
+    else if(replyFault==="ambiguous_scene")
+      await assert.rejects(guardedReplyCall(),
+        error=>error?.code==="WORLD_LISTENER_REPLY_MULTIPARTY_UNSUPPORTED");
     else if(replyFault==="runtime_substitution")
       await assert.rejects(guardedReplyCall(),
         error=>error?.code==="WORLD_LISTENER_REPLY_BRAIN_IDENTITY_INVALID");
@@ -1173,7 +1181,8 @@ try {
     assert.equal(guardedAfter.revision,guardedSourceSnapshot.revision);
     assert.equal(guardedAfter.state_hash,guardedSourceSnapshot.state_hash);
     assert.deepEqual(guardedHistoryAfter.turns,guardedSourceHistory.turns);
-    assert.equal(replyBrainChoices,replyFault==="runtime_substitution"?0:1,
+    assert.equal(replyBrainChoices,
+      ["runtime_substitution","ambiguous_scene"].includes(replyFault)?0:1,
       "A substituted identity must be rejected before the listener Brain executes.");
     console.log(JSON.stringify({
       scenario:"world_listener_causal_clarification_negative",
