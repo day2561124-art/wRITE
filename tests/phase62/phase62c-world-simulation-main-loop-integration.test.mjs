@@ -2484,6 +2484,26 @@ try {
   assert.equal(history.turns[0].causal_resolution_id, "resolve-evt-001");
   assert.equal(history.turns[0].previous_state_hash, initialStateHash);
   assert.equal(history.turns[0].next_state_hash, stateAfterFirstTurn.state_hash);
+  // Disk JSON parsing gives each reader a detached snapshot; caller mutation
+  // cannot corrupt the authoritative World state/history or a later read.
+  const detachedState = await getWorldSimulationState(session.world_simulation_session_id, options);
+  const detachedHistory = await getWorldSimulationHistory(session.world_simulation_session_id, options);
+  assert.notStrictEqual(detachedState, stateAfterFirstTurn);
+  assert.notStrictEqual(detachedHistory, history);
+  detachedState.state.scenes["training-room-a"].entity_positions["伊萊亞斯・諾爾"].x = 999;
+  detachedState.revision = -1;
+  detachedState.state_hash = "forged";
+  detachedHistory.turns[0].turn_id = "forged";
+  detachedHistory.turns.push({ turn_id: "phantom" });
+  const freshState = await getWorldSimulationState(session.world_simulation_session_id, options);
+  const freshHistory = await getWorldSimulationHistory(session.world_simulation_session_id, options);
+  assert.equal(freshState.revision, 1);
+  assert.equal(freshState.state_hash, stateAfterFirstTurn.state_hash);
+  assert.equal(freshState.state.scenes["training-room-a"].entity_positions["伊萊亞斯・諾爾"].x, 2);
+  assert.equal(freshHistory.turns.length, 1);
+  assert.equal(freshHistory.turns[0].turn_id, history.turns[0].turn_id);
+  assert.notStrictEqual(freshState.state, detachedState.state);
+  assert.notStrictEqual(freshHistory.turns, detachedHistory.turns);
   const persistedCurrentMindProjection =
     history.turns[0].committed_character_current_mind_projection;
   assert.equal(

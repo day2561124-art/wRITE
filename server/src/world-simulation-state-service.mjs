@@ -175,7 +175,9 @@ export async function getWorldSimulationState(sessionId, options = {}) {
   if (envelope.world_simulation_session_id !== sessionId) {
     throw new Error("World simulation state lineage does not match the session.");
   }
-  return cloneJson(envelope);
+  // readJson has already created a fresh, caller-owned object from disk.
+  // A second JSON round-trip neither isolates it further nor strengthens CAS.
+  return envelope;
 }
 
 export async function getWorldSimulationHistory(sessionId, options = {}) {
@@ -187,7 +189,8 @@ export async function getWorldSimulationHistory(sessionId, options = {}) {
   if (history.world_simulation_session_id !== sessionId) {
     throw new Error("World simulation history lineage does not match the session.");
   }
-  return cloneJson(history);
+  // This parsed snapshot shares no mutable references with the persisted file.
+  return history;
 }
 
 
