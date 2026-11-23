@@ -28,6 +28,7 @@ import {
   assertWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeEvidence,
   buildWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeEvidence,
   buildWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeEvidenceContract,
+  isolateWorldSimulationPhase82AHistoryForTurn,
   worldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeEvidenceVersion,
 } from "../../server/src/world-simulation-counterfactual-linked-experience-longitudinal-reuse-outcome-evidence-service.mjs";
 import {
@@ -534,6 +535,61 @@ assert.doesNotThrow(() =>
     },
   ));
 
+// The turn-local Phase82A snapshot must retain *all* canonical prior-Q
+// revalidation while avoiding repeated deep JSON cloning in nested phases.
+// It is private, deeply frozen and detached from the source World history.
+assert.strictEqual(isolateWorldSimulationPhase82AHistoryForTurn(history1), history1);
+const mutableOriginal = clone(history2);
+const scopedHistory = isolateWorldSimulationPhase82AHistoryForTurn(mutableOriginal);
+assert.notStrictEqual(scopedHistory, mutableOriginal);
+assert.ok(Object.isFrozen(scopedHistory));
+assert.ok(Object.isFrozen(scopedHistory.turns));
+assert.ok(Object.isFrozen(scopedHistory.turns[1]));
+assert.ok(Object.isFrozen(scopedHistory.turns[1]
+  .counterfactual_linked_experience_reuse_outcome_selected_action_outcome_evidence));
+const sourceAtIsolation = hashAgentRunValue(scopedHistory);
+const scopedInputs = {
+  world_simulation_session_id: sessionId,
+  turn_id: secondTurnId,
+  state_revision: secondRevision,
+  world_state_hash: secondWorldStateHash,
+  world_history: scopedHistory,
+  current_phase81q_outcome_evidence: second.phase81Q,
+  counterfactual_linked_experience_reuse_outcome_selected_action_lineage: second.phase81P,
+  subjective_choice_commitment_receipts: second.choices,
+  counterfactual_linked_experience_reuse_outcome_reentry_projections: [second.phase81N],
+  counterfactual_linked_experience_reuse_outcome_deliberation_projections: [second.phase81O],
+  post_outcome_subjective_perception_projection: second.outcome,
+};
+for (let i = 0; i < 3; i += 1) {
+  const rechecked = buildWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeEvidence(
+    scopedInputs,
+  );
+  assert.equal(rechecked.projection_hash, longitudinal.projection_hash);
+  assert.equal(rechecked.audit.prior_phase81q_projection_count_verified,
+    longitudinal.audit.prior_phase81q_projection_count_verified);
+}
+assert.equal(hashAgentRunValue(scopedHistory), sourceAtIsolation);
+assert.throws(() => { scopedHistory.turns[1].turn_id = "forged"; }, TypeError);
+// A later mutation to caller-owned data cannot alter the turn-local snapshot.
+mutableOriginal.turns[1].turn_id = "forged_after_isolation";
+assert.notEqual(hashAgentRunValue(mutableOriginal), sourceAtIsolation);
+assert.equal(hashAgentRunValue(scopedHistory), sourceAtIsolation);
+assert.equal(
+  buildWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeEvidence(scopedInputs)
+    .projection_hash,
+  longitudinal.projection_hash,
+);
+// A forged copy is not tagged as isolated and must be revalidated and rejected.
+const invalidDetachedHistory = clone(scopedHistory);
+invalidDetachedHistory.turns[1]
+  .counterfactual_linked_experience_reuse_outcome_selected_action_outcome_evidence
+  .evidence_records[0].selected_action_subjective_experience.perceived_result = "forged";
+assert.throws(() =>
+  buildWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeEvidence({
+    ...scopedInputs, world_history: invalidDetachedHistory,
+  }),
+);
 // A locally re-hashed historical Phase81Q record cannot become longitudinal
 // evidence if it no longer matches that turn's canonical Phase76A experience.
 const forgedHistory = clone(history2);
