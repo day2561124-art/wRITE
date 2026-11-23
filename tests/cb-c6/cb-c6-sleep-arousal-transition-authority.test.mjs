@@ -5569,6 +5569,9 @@ function c6fTwoActiveScenes() {
       assert.equal(result.committed_physical_step_count, 0);
       if (budget) assert.equal(result.physical_step_blocked_reason,
         "physical_step_scene_scope_unresolved");
+      assert.deepEqual(result.pending_scene_plan, plan,
+        "real World batch must expose its confirmed pending multi-scene plan");
+      assert.equal(result.pending_scene_plan.multi_scene_atomic_execution_authorized, false);
       assert.equal(result.reached_simulation_time, before.state.simulation_time);
       assert.equal(result.state_reconciliation_required, false);
       assert.equal(result.automatic_replay_allowed, false);
@@ -5580,4 +5583,54 @@ function c6fTwoActiveScenes() {
   }
 }
 console.log("CB-C6-F read-only per-scene physical frontier and multi-active-scene guard passed.");
+// A real persisted acoustic hold must report the cross-scene schedule WITHOUT
+// consuming a listener opportunity or letting a caller treat it as a write permit.
+{
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-multiscene-acoustic-report-" + process.pid + "-" + Date.now());
+  const options = {
+    fixtureRoot: root,
+    characterBrain: async () => assert.fail("pending acoustic ingress cannot trigger physical-only Brain"),
+  };
+  try {
+    const initial = c6fTwoActiveScenes();
+    initial.sound_events = [{
+      schema_version: "cc6b-communication-acoustic-bridge-v1",
+      kind: "communication_speech_signal", scene_id: "annex",
+      sound_id: "c6f-cross-scene-listener-pending", active: true,
+    }];
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-F blocked acoustic cross-scene reporting",
+      seed: "c6f-pending-acoustic", initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, options);
+    const paths = worldSimulationStatePaths(sid, options);
+    const durable = () => Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]);
+    const bytesBefore = await durable();
+    for (const max_turns of [0, 1, 32]) {
+      const actual = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid, max_turns,
+      }, options);
+      assert.equal(actual.committed_turn_count, 0);
+      assert.equal(actual.attempted_turn_count, max_turns ? 1 : 0);
+      if (max_turns) assert.equal(actual.physical_step_blocked_reason,
+        "physical_step_acoustic_ingress_pending");
+      assert.equal(actual.pending_scene_plan.admission_status,
+        "listener_acoustic_ingress_pending");
+      assert.equal(actual.pending_scene_plan.active_scene_count, 2);
+      assert.equal(actual.pending_scene_plan.multi_scene_atomic_execution_authorized, false);
+      assert.equal(actual.automatic_replay_allowed, false);
+      assert.equal(actual.reached_simulation_time, before.state.simulation_time);
+      assert.equal(actual.state_reconciliation_required, false);
+      assert.deepEqual(await getWorldSimulationState(sid, options), before);
+      assert.deepEqual(await durable(), bytesBefore);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+console.log("CB-C6-F Native batch reports multi-scene pending evidence without write authority passed.");
 
