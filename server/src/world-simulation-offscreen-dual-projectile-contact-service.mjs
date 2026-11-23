@@ -94,15 +94,14 @@ export async function runWorldSimulationOffscreenDualProjectileContact(
     return blocked("listener_acoustic_ingress_pending");
   if (plan.active_scene_count !== 2 || !plan.earliest_breakpoint_confirmed)
     return blocked("two_active_scene_projectile_authority_required");
-  const delta = plan.global_breakpoint?.delta_ms;
-  if (!Number.isSafeInteger(delta) || delta <= 0
-    || plan.global_breakpoint?.kind !== "projectile_character")
-    return blocked("positive_integer_simultaneous_character_contact_required");
-
   const activeFields = Object.values(object(state.ability_fields))
     .filter(field => field?.active === true);
   if (activeFields.length)
     return blocked("active_ability_fields_not_yet_supported");
+  const delta = plan.global_breakpoint?.delta_ms;
+  if (!Number.isSafeInteger(delta) || delta <= 0
+    || plan.global_breakpoint?.kind !== "projectile_character")
+    return blocked("positive_integer_simultaneous_character_contact_required");
   const projectiles = Object.entries(object(state.projectiles))
     .filter(([, projectile]) => projectile?.active === true);
   if (projectiles.length !== 2 || plan.scenes.some(scene =>
