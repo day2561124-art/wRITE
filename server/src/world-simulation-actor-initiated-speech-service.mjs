@@ -3,6 +3,8 @@ import { assertWorldSimulationSession } from "./world-simulation-session-service
 import { getWorldSimulationState, commitWorldSimulationTurn } from "./world-simulation-state-service.mjs";
 import { scheduleWorldSimulationAutonomousCognitionOpportunities } from "./world-simulation-loop-service.mjs";
 import { projectWorldSimulationConsciousCognitionAdmission } from "./world-simulation-autonomous-cognition-scheduler-service.mjs";
+import { projectWorldSimulationSubjectiveBeliefsForCharacter }
+  from "./world-simulation-subjective-belief-character-projection-service.mjs";
 import {
   buildWorldSimulationGoalImplementationIntentionActivationResolverView,
   buildWorldSimulationNativeImplementationIntentionActivationView,
@@ -170,6 +172,17 @@ export async function runWorldSimulationActorInitiatedSpeech(input = {}, options
     session_id:sessionId,actor,revision:before.revision,
     state_hash:before.state_hash,opportunity_id:opportunities[0].opportunity_id,
   }).slice(0,24);
+  // Match the native World loop's Phase66C prior-turn, same-character belief
+  // read. The Brain may consider a belief, but it never becomes causal fact or
+  // expands the World-owned speech action catalog.
+  const subjectiveBeliefProjection=projectWorldSimulationSubjectiveBeliefsForCharacter({
+    world_state:state,character:actor,current_turn_id:turnId,
+  });
+  const subjectiveBeliefs={
+    belief_source:subjectiveBeliefProjection.character_view.source,
+    beliefs:clone(subjectiveBeliefProjection.character_view.beliefs),
+    beliefs_truncated:subjectiveBeliefProjection.character_view.beliefs_truncated,
+  };
   const context=clone(exactCharacterValue(scene.observable_by,actor)??{});
   const resolverView=buildWorldSimulationGoalImplementationIntentionActivationResolverView({
     world_state:state,character:actor,current_turn_id:turnId,
@@ -189,11 +202,15 @@ export async function runWorldSimulationActorInitiatedSpeech(input = {}, options
         present:true, trigger_kinds:clone(opportunities[0].trigger_kinds),
       },
       implementation_intention_activation:clone(activationView),
+      subjective_cognition:clone(subjectiveBeliefs),
     },
     boundaries:{
       external_world_event_present:false,
       actor_initiated_speech_choice_stage:"plan_cue_activation",
       world_truth_exposed:false, action_selection_requested:false,
+      subjective_beliefs_from_prior_committed_turn_only:true,
+      belief_is_not_world_truth:true,
+      same_turn_belief_feedback_allowed:false,
     },
   },actor,sessionId,options,before);
   if (object(activation).action_id !== undefined)
@@ -216,6 +233,7 @@ export async function runWorldSimulationActorInitiatedSpeech(input = {}, options
         advisory_only:true,selected_action_authority:false,
       },
       current_goal:exactCharacterValue(state.characters,actor)?.current_goal??null,
+      subjective_cognition:clone(subjectiveBeliefs),
     },
     current_action:exactCharacterValue(state.characters,actor)?.current_action??null,
   },{...options,run_id:sessionId,source:"cb_c4_actor_initiated_speech"});
@@ -267,6 +285,7 @@ export async function runWorldSimulationActorInitiatedSpeech(input = {}, options
         implementation_intentions:clone(guidance.implementation_intention_guidance),
         advisory_only:true,selected_action_authority:false,
       },
+      subjective_cognition:clone(subjectiveBeliefs),
     },
     candidate_action_intents:clone(menu),
     boundaries:{
@@ -274,6 +293,10 @@ export async function runWorldSimulationActorInitiatedSpeech(input = {}, options
       actor_initiated_speech_choice_stage:"action_choice",
       action_choice_owner:"character_brain",
       causal_result_owner:"world_simulation_causal_rule_engine",
+      subjective_beliefs_from_prior_committed_turn_only:true,
+      belief_is_not_world_truth:true,
+      belief_can_expand_action_catalog:false,
+      same_turn_belief_feedback_allowed:false,
     },
   };
   const response=await invokeBrain(actionDecisionPacket,actor,sessionId,options,before);
