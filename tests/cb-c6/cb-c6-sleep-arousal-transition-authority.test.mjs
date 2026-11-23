@@ -5409,4 +5409,175 @@ async function c6fNativePassiveScenePreservation() {
 }
 await c6fNativePassiveScenePreservation();
 console.log("CB-C6-F positive active-scene/passive-scene isolation, two-step Native parity passed.");
+import {
+  projectWorldSimulationOffscreenSceneBreakpointPlan,
+  worldSimulationOffscreenSceneBreakpointPlanVersion,
+} from "../../server/src/world-simulation-offscreen-scene-breakpoint-plan-service.mjs";
+
+function c6fTwoActiveScenes() {
+  const initial = e7MixedWorld("field-first");
+  initial.scenes.annex = {
+    ...d1Clone(initial.scenes.room), scene_id: "annex",
+    entity_positions: { remote: { x: 4, y: 4 } },
+  };
+  initial.characters.remote = {
+    known: ["private-annex-knowledge"], current_goal: "stay at home",
+    physical_state: { health_current: 90, health_max: 90 },
+  };
+  initial.memories.remote = [{
+    memory_id: "c6f-prior-remote-memory",
+    content: "prior factual encounter", source: { kind: "existing_fixture" },
+  }];
+  initial.ability_fields.annex_field = {
+    ...d1Clone(initial.ability_fields.field_e3),
+    field_id: "annex_field", scene_id: "annex",
+    center: { x: 4, y: 4 }, remaining_ms: 100,
+  };
+  return initial;
+}
+{
+  const input = c6fTwoActiveScenes();
+  const inputBefore = d1Clone(input);
+  const plan = projectWorldSimulationOffscreenSceneBreakpointPlan({
+    world_state: input,
+  });
+  assert.equal(plan.version, worldSimulationOffscreenSceneBreakpointPlanVersion);
+  assert.equal(plan.authority, "world_read_only_cross_scene_schedule_evidence");
+  assert.equal(plan.active_scene_count, 2);
+  assert.deepEqual(plan.scenes.map(x => x.scene_id), ["annex", "room"]);
+  assert.equal(plan.global_breakpoint.kind, "ability_field_expiration");
+  assert.equal(plan.global_breakpoint.delta_ms, 50);
+  assert.equal(plan.earliest_breakpoint_confirmed, true);
+  assert.equal(plan.admission_status, "atomic_multiscene_physical_executor_not_verified");
+  assert.equal(plan.multi_scene_atomic_execution_authorized, false);
+  const annex = plan.scenes[0];
+  const room = plan.scenes[1];
+  assert.deepEqual(annex.active_field_ids, ["annex_field"]);
+  assert.deepEqual(annex.active_projectile_ids, []);
+  assert.equal(annex.next_breakpoint.delta_ms, 100);
+  assert.equal(annex.breakpoint_due_at_global_frontier, false);
+  assert.equal(annex.future_or_unresolved_at_global_frontier, true);
+  assert.equal(annex.global_frontier_delta_ms, 50);
+  assert.deepEqual(room.active_field_ids, ["field_e3"]);
+  assert.deepEqual(room.active_projectile_ids, ["projectile_e3"]);
+  assert.equal(room.next_breakpoint.delta_ms, 50);
+  assert.equal(room.breakpoint_due_at_global_frontier, true);
+  assert.equal(room.global_frontier_delta_ms, 50);
+  assert.equal(plan.world_time_advanced, false);
+  assert.equal(plan.brain_invoked, false);
+  assert.equal(plan.subjective_memory_created, false);
+  assert.equal(plan.physical_effect_adjudicated, false);
+  assert.deepEqual(input, inputBefore, "read-only cross-scene planning cannot change the World");
+  assert.deepEqual(projectWorldSimulationOffscreenSceneBreakpointPlan({ world_state: input }), plan);
+  const reordered = d1Clone(input);
+  reordered.ability_fields = {
+    annex_field: d1Clone(input.ability_fields.annex_field),
+    field_e3: d1Clone(input.ability_fields.field_e3),
+  };
+  reordered.scenes = {
+    annex: d1Clone(input.scenes.annex),
+    room: d1Clone(input.scenes.room),
+  };
+  assert.deepEqual(projectWorldSimulationOffscreenSceneBreakpointPlan({
+    world_state: reordered,
+  }), plan, "scene plan must not depend on the input object-map order");
+
+  const horizon = new Date(Date.parse(input.simulation_time) + 50).toISOString();
+  const scopedHorizon = projectWorldSimulationOffscreenSceneBreakpointPlan({
+    world_state: input, target_horizon: horizon,
+  });
+  assert.equal(scopedHorizon.global_breakpoint.delta_ms, 50);
+  assert.equal(scopedHorizon.scenes[0].next_breakpoint, null,
+    "a later annex event must not be presented as due before the horizon");
+  assert.equal(scopedHorizon.scenes[0].future_or_unresolved_at_global_frontier, true);
+  assert.equal(scopedHorizon.scenes[1].breakpoint_due_at_global_frontier, true);
+
+  const withQueue = d1Clone(input);
+  withQueue.event_queue = [{
+    event_id: "c6f-queued-next", scene_id: "room", participants: ["keeper"],
+  }];
+  assert.equal(projectWorldSimulationOffscreenSceneBreakpointPlan({
+    world_state: withQueue,
+  }).admission_status, "queued_event_precedes_physical_step");
+  const withAcoustics = d1Clone(input);
+  withAcoustics.sound_events = [{
+    schema_version: "cc6b-communication-acoustic-bridge-v1",
+    sound_id: "c6f-pending", scene_id: "annex",
+  }];
+  assert.equal(projectWorldSimulationOffscreenSceneBreakpointPlan({
+    world_state: withAcoustics,
+  }).admission_status, "listener_acoustic_ingress_pending");
+
+  const unresolved = d1Clone(input);
+  delete unresolved.projectiles.projectile_e3.velocity_mps;
+  const unresolvedPlan = projectWorldSimulationOffscreenSceneBreakpointPlan({
+    world_state: unresolved,
+  });
+  assert.equal(unresolvedPlan.earliest_breakpoint_confirmed, false);
+  assert.equal(unresolvedPlan.admission_status, "unresolved_physical_authority");
+  assert.equal(unresolvedPlan.unresolved_processes.length, 1);
+
+  const missing = d1Clone(input);
+  missing.ability_fields.annex_field.scene_id = "lost";
+  const missingPlan = projectWorldSimulationOffscreenSceneBreakpointPlan({
+    world_state: missing,
+  });
+  assert.deepEqual(missingPlan.missing_scene_ids, ["lost"]);
+  assert.equal(missingPlan.earliest_breakpoint_confirmed, false);
+  assert.equal(missingPlan.admission_status, "unresolved_physical_authority");
+
+  const oneActive = d1Clone(input);
+  oneActive.ability_fields.annex_field.active = false;
+  const singlePlan = projectWorldSimulationOffscreenSceneBreakpointPlan({
+    world_state: oneActive,
+  });
+  assert.equal(singlePlan.active_scene_count, 1);
+  assert.deepEqual(singlePlan.scenes.map(x => x.scene_id), ["room"]);
+  assert.equal(singlePlan.admission_status, "single_active_scene_existing_owner_required");
+}
+{
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-multiscene-plan-guard-" + process.pid + "-" + Date.now());
+  const options = {
+    fixtureRoot: root,
+    characterBrain: async () => assert.fail("physical-only multi-scene planning cannot call Brain"),
+  };
+  try {
+    const state = c6fTwoActiveScenes();
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-F two-active-scene read-only planning",
+      seed: "c6f-two-active-scene-plan", initial_world_state: state,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, options);
+    const paths = worldSimulationStatePaths(sid, options);
+    const durable = () => Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]);
+    const original = await durable();
+    for (const budget of [0, 1, 32]) {
+      const plan = projectWorldSimulationOffscreenSceneBreakpointPlan({
+        world_state: (await getWorldSimulationState(sid, options)).state,
+      });
+      assert.equal(plan.active_scene_count, 2);
+      assert.equal(plan.global_breakpoint.delta_ms, 50);
+      const result = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid, max_turns: budget,
+      }, options);
+      assert.equal(result.attempted_turn_count, budget ? 1 : 0);
+      assert.equal(result.committed_turn_count, 0);
+      assert.equal(result.committed_physical_step_count, 0);
+      if (budget) assert.equal(result.physical_step_blocked_reason,
+        "physical_step_scene_scope_unresolved");
+      assert.equal(result.reached_simulation_time, before.state.simulation_time);
+      assert.equal(result.state_reconciliation_required, false);
+      assert.equal(result.automatic_replay_allowed, false);
+      assert.deepEqual(await getWorldSimulationState(sid, options), before);
+      assert.deepEqual(await durable(), original);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+console.log("CB-C6-F read-only per-scene physical frontier and multi-active-scene guard passed.");
 
