@@ -351,6 +351,7 @@ try {
   // Keep the exact allowlist, rather than allowing arbitrary new native callers.
   assert.deepEqual(nativeRunnerRefs.sort(), [
     "server/src/world-simulation-actor-initiated-speech-service.mjs",
+    "server/src/world-simulation-committed-actor-speech-listener-clarification-service.mjs",
     "server/src/world-simulation-loop-service.mjs",
     "server/src/world-simulation-neural-service.mjs",
   ]);
