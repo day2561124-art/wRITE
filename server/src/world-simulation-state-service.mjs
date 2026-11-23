@@ -424,6 +424,54 @@ export async function commitWorldSimulationTurn(
             stale.code = "WORLD_SIMULATION_STALE_STATE_HASH";
             throw stale;
           }
+          if (input.autonomous_reply_subjective_memory_encoding != null) {
+            const meta = input.autonomous_reply_subjective_memory_encoding;
+            const oldWorld = cloneJson(current.state);
+            const newWorld = cloneJson(nextWorldState);
+            const oldMemories = isObject(oldWorld.memories) ? oldWorld.memories : {};
+            const newMemories = isObject(newWorld.memories) ? newWorld.memories : {};
+            const oldList = Array.isArray(oldMemories[meta.character])
+              ? oldMemories[meta.character] : [];
+            const newList = Array.isArray(newMemories[meta.character])
+              ? newMemories[meta.character] : [];
+            const latest = newList.at(-1);
+            delete oldWorld.memories;
+            delete newWorld.memories;
+            const priorEntries = cloneJson(oldMemories);
+            const nextEntries = cloneJson(newMemories);
+            delete priorEntries[meta.character];
+            delete nextEntries[meta.character];
+            if (hashAgentRunValue(oldWorld) !== hashAgentRunValue(newWorld)
+              || hashAgentRunValue(priorEntries) !== hashAgentRunValue(nextEntries)
+              || newList.length !== oldList.length + 1
+              || hashAgentRunValue(newList.slice(0,-1)) !== hashAgentRunValue(oldList)
+              || latest?.memory_id !== meta.memory_id
+              || hashAgentRunValue(latest) !== meta.memory_hash
+              || latest?.memory_type !== "episodic_direct_perception"
+              || latest?.source?.kind !== "direct_perception"
+              || latest?.source?.sense !== "auditory"
+              || latest?.content?.kind !== "subjective_spoken_reply_interpretation"
+              || hashAgentRunValue(latest?.content?.interpreted_content)
+                !== meta.interpreted_content_hash
+              || latest?.content?.interpretation_status !== meta.interpretation_status
+              || latest?.content?.source_utterance_verified !== false
+              || latest?.content?.world_truth_claimed !== false
+              || latest?.subjective_memory_not_world_truth !== true
+              || latest?.possibly_incorrect !== true
+              || latest?.internal_provenance?.turn_id !== turnId
+              || latest?.formation_stage !== "encoded_unconsolidated"
+              || input.state_transitions[0].to == null
+              || hashAgentRunValue(input.state_transitions[0].to)
+                !== hashAgentRunValue(newList)
+              || hashAgentRunValue(input.state_transitions[0].from)
+                !== hashAgentRunValue(Array.isArray(oldMemories[meta.character])
+                  ? oldList : null)) {
+              const error = new Error(
+                "Reply encoding must append one uncertain private memory, with no other World changes.");
+              error.code = "WORLD_REPLY_MEMORY_STATE_MUTATION_INVALID";
+              throw error;
+            }
+          }
           const now = new Date().toISOString();
           assertWorldSimulationSleepArousalCommitAuthority({
             world_state: current.state,
@@ -485,6 +533,41 @@ export async function commitWorldSimulationTurn(
               const error = new Error(
                 "Listener clarification requires the exact immediately prior committed acoustic source.");
               error.code = "WORLD_LISTENER_REPLY_SOURCE_COMMIT_INVALID";
+              throw error;
+            }
+          }
+          if (input.autonomous_reply_subjective_memory_encoding != null) {
+            const meta = input.autonomous_reply_subjective_memory_encoding;
+            const prior = arrayTurns(history).at(-1);
+            const lineage = prior?.autonomous_listener_clarification_reply;
+            const admissions = prior?.communication_observer_increment_admissions;
+            if (!prior || prior.turn_id !== meta.source_turn_id
+              || prior.revision_to !== meta.source_revision_to
+              || hashAgentRunValue(prior) !== meta.source_turn_hash
+              || prior.event !== null
+              || lineage?.version !== "world-listener-clarification-causal-reply-v1"
+              || lineage.character !== meta.source_character
+              || lineage.action_id !== meta.source_action_id
+              || lineage.scene_id !== meta.scene_id
+              || lineage.source_character !== meta.character
+              || !Array.isArray(admissions)
+              || admissions.filter(item =>
+                item?.observer === meta.character
+                && item?.admission_status === "heard_acoustic_cues_only"
+                && item?.audit?.source_action_id === meta.source_action_id
+                && item?.audit?.source_speaker === meta.source_character
+                && item?.observer_increment?.increment_ref
+                  === meta.observer_increment_ref).length !== 1
+              || (input.subjective_memory_formation?.result?.character_updates ?? [])
+                .filter(item => item?.character === meta.character
+                  && item?.created_memory_count === 1
+                  && item?.memory_records?.length === 1
+                  && item.memory_records[0].memory_id === meta.memory_id
+                  && hashAgentRunValue(item.memory_records[0]) === meta.memory_hash)
+                .length !== 1) {
+              const error = new Error(
+                "Subjective memory must retain one exact prior committed acoustic reply source.");
+              error.code = "WORLD_REPLY_MEMORY_SOURCE_COMMIT_INVALID";
               throw error;
             }
           }
