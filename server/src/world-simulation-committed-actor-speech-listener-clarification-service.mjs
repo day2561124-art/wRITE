@@ -323,6 +323,9 @@ export async function runWorldSimulationCommittedActorSpeechListenerClarificatio
   if(outcome.length!==1)
     reject("WORLD_LISTENER_REPLY_CAUSAL_SPEECH_MISSING",
       "A listener reply requires one real World speech outcome.");
+  if(array(causal.knowledge_transitions).length)
+    reject("WORLD_LISTENER_REPLY_BELIEF_WRITE_UNSUPPORTED",
+      "Nonlexical hearing and a clarification request cannot authorize a belief or fact update.");
   const critic=await runWorldSimulationNativeCapability("world_consistency_critic",{
     state_transitions:array(causal.state_transitions),
     object_holders:array(causal.object_holders),
