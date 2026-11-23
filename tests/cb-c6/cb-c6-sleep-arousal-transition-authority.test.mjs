@@ -5779,7 +5779,7 @@ for (const reverse of [false, true]) {
     await rm(root, { recursive: true, force: true });
   }
 }
-for (const mode of ["queued", "acoustic", "harmful", "projectile", "missing-scene"]) {
+for (const mode of ["queued", "acoustic", "harmful", "projectile", "missing-scene", "mismatched-scene"]) {
   const root = path.join(projectRoot, "tests", ".tmp",
     "c6-f-atomic-refuse-" + mode + "-" + process.pid + "-" + Date.now());
   const options = { fixtureRoot: root };
@@ -5801,6 +5801,7 @@ for (const mode of ["queued", "acoustic", "harmful", "projectile", "missing-scen
     }
     if (mode === "missing-scene")
       initial.ability_fields.annex_field.scene_id = "lost";
+    if (mode === "mismatched-scene") initial.scenes.annex.scene_id = "room";
     const session = await beginWorldSimulationSession({
       simulation_label: "C6-F bounded multiscene unsafe authority",
       seed: mode, initial_world_state: initial,
@@ -5825,6 +5826,7 @@ for (const mode of ["queued", "acoustic", "harmful", "projectile", "missing-scen
       harmful: "nonharmful_field_lifecycle_authority_required",
       projectile: "active_projectile_not_yet_supported",
       "missing-scene": "unresolved_physical_authority",
+      "mismatched-scene": "nonharmful_field_lifecycle_authority_required",
     }[mode]);
     assert.deepEqual(await getWorldSimulationState(sid, options), before);
     assert.deepEqual(await bytes(), original);
@@ -5925,7 +5927,7 @@ for (const budget of [0, 1, 2, 32]) {
     await rm(root, { recursive: true, force: true });
   }
 }
-for (const mode of ["harmful", "projectile", "acoustic"]) {
+for (const mode of ["harmful", "projectile", "acoustic", "mismatched-scene"]) {
   const root = path.join(projectRoot, "tests", ".tmp",
     "c6-f-batch-two-scene-guard-" + mode + "-" + process.pid + "-" + Date.now());
   const options = { fixtureRoot: root,
@@ -5941,6 +5943,7 @@ for (const mode of ["harmful", "projectile", "acoustic"]) {
           projectile_id: "another", scene_id: "annex",
         },
       };
+    if (mode === "mismatched-scene") initial.scenes.annex.scene_id = "room";
     if (mode === "acoustic") initial.sound_events = [{
       schema_version: "cc6b-communication-acoustic-bridge-v1",
       sound_id: "c6f-pending-acoustic", scene_id: "annex",
