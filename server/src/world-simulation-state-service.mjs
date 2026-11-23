@@ -24,6 +24,9 @@ import {
 import {
   assertWorldSimulationSleepArousalCommitAuthority,
 } from "./world-simulation-body-sleep-arousal-service.mjs";
+import {
+  assertWorldSimulationReplySubjectiveBeliefCommit,
+} from "./world-simulation-reply-subjective-belief-commit-guard.mjs";
 
 export const worldSimulationStateVersion = "phase62c-world-state-v1";
 
@@ -388,7 +391,15 @@ export async function commitWorldSimulationTurn(
       || input.subjective_memory_mutation_queue?.queue_hash !== meta.mutation_queue_hash
       || input.chronological_mutation_queue?.queue_hash !== meta.mutation_queue_hash
       || !Array.isArray(input.state_transitions)
-      || input.state_transitions.length !== 1
+      || input.state_transitions.length !== (meta.claim_adoption ? 5 : 1)
+      || (meta.claim_adoption != null && (
+        meta.claim_adoption.decision !== "propose_and_adopt_if_unopposed"
+        || typeof meta.claim_adoption.claim_event_id !== "string"
+        || typeof meta.claim_adoption.revision_event_id !== "string"
+        || input.subjective_claim_projection?.result?.claim_events_created?.length !== 1
+        || input.subjective_belief_resolution?.result?.decisions?.length !== 1
+        || input.subjective_belief_revision_projection?.result?.revision_events_created?.length !== 1
+      ))
       || input.state_transitions[0]?.field !== "memories." + meta.character) {
       const error = new Error(
         "Private subjective reply memory needs an exact Phase63A World-only transaction.");
@@ -435,6 +446,25 @@ export async function commitWorldSimulationTurn(
             const newList = Array.isArray(newMemories[meta.character])
               ? newMemories[meta.character] : [];
             const latest = newList.at(-1);
+            assertWorldSimulationReplySubjectiveBeliefCommit({
+              previous_world_state:current.state,
+              next_world_state:nextWorldState,
+              turn_id:turnId,
+              commit:input,
+              metadata:meta,
+              world_state_hash:current.state_hash,
+            });
+            if (meta.claim_adoption != null) {
+              for (const field of [
+                "subjective_claim_events",
+                "subjective_claim_history",
+                "subjective_belief_revision_events",
+                "subjective_belief_revision_history",
+              ]) {
+                delete oldWorld[field];
+                delete newWorld[field];
+              }
+            }
             delete oldWorld.memories;
             delete newWorld.memories;
             const priorEntries = cloneJson(oldMemories);
