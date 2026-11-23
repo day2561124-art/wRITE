@@ -955,8 +955,8 @@ function resolveAbilityFields(input, newFields, nextWorldState, snapshotScene, n
           profile,
           center,
           radius_m: radius,
-          start_ms: tickStartMs,
-          end_ms: tickEndMs,
+          start_ms: tickStartMs + nonNegativeNumber(input.field_sampling_offset_ms, 0),
+          end_ms: tickEndMs + nonNegativeNumber(input.field_sampling_offset_ms, 0),
           character,
           field_id: fieldId,
         });
@@ -1040,25 +1040,39 @@ function resolveAbilityFields(input, newFields, nextWorldState, snapshotScene, n
 
 
 /**
- * A stationary, field-only long interval must not manufacture a different
- * injury chain merely because the caller supplied one large elapsed_ms.
- * The accepted Native offscreen writer resolves every shared earliest field
- * frontier as a separate canonical turn. Mirror only that narrow chronology
- * for the continuous-physics preview; moving bodies, active projectiles and
- * action-bearing turns keep their existing owner and are NOT generalized here.
+ * Two pre-existing damaging fields must share their earliest causal frontier.
+ * This includes one bounded moving actor: later field hits must not be
+ * applied before earlier hits when deriving incapacitation and the trajectory.
+ * Native offscreen remains the sole World writer; this is a private physics
+ * preview for either a stationary field-only turn or one isolated movement.
+ * Any projectile, other action type, newly spawned field or complex scene
+ * remains on its existing authority path, not a general-purpose time solver.
  */
-function resolveStationaryFieldOnlySharedFrontiers(
+function resolveSupportedDualFieldSharedFrontiers(
   input, newFields, nextWorldState, snapshotScene, nextScene,
   elapsedMs, transitions, outcomes, resolutions,
 ) {
-  if (newFields.length
-      || Array.isArray(input.selected_action_intents) && input.selected_action_intents.length
-      || Array.isArray(input.resolved_action_outcomes) && input.resolved_action_outcomes.length
-      || Object.keys(object(input.actor_trajectories)).length
+  const selected = array(input.selected_action_intents);
+  const resolved = array(input.resolved_action_outcomes);
+  const trajectories = object(input.actor_trajectories);
+  const stationary = selected.length === 0 && resolved.length === 0
+    && Object.keys(trajectories).length === 0
+    && JSON.stringify(object(snapshotScene.entity_positions))
+      === JSON.stringify(object(nextScene.entity_positions));
+  const mover = String(selected[0]?.character ?? "").trim();
+  const movement = object(selected[0]?.candidate?.movement);
+  const movementOnly = selected.length === 1 && mover
+    && Object.keys(movement).length > 0
+    && ["attack", "defense", "ability", "projectile"].every(key =>
+      !Object.keys(object(selected[0]?.candidate?.[key])).length)
+    && resolved.some(item => item?.actor === mover
+      && ["movement_completed", "movement_interrupted"].includes(item?.result))
+    && resolved.every(item => item?.actor === mover
+      && ["movement_completed", "movement_interrupted"].includes(item?.result))
+    && Object.keys(trajectories).every(actor => actor === mover);
+  if (newFields.length || (!stationary && !movementOnly)
       || Object.values(object(input.world_state.projectiles)).some(item => item?.active === true)
-      || Object.values(object(nextWorldState.projectiles)).some(item => item?.active === true)
-      || JSON.stringify(object(snapshotScene.entity_positions))
-        !== JSON.stringify(object(nextScene.entity_positions)))
+      || Object.values(object(nextWorldState.projectiles)).some(item => item?.active === true))
     return false;
   const allActive = () => Object.values(object(nextWorldState.ability_fields))
     .filter(item => item?.active === true);
@@ -1081,7 +1095,8 @@ function resolveStationaryFieldOnlySharedFrontiers(
     return false;
   const earliest = Math.min(...active().map(field =>
     Math.min(positiveNumber(field.remaining_ms, Infinity), tickFor(field))));
-  if (!(earliest > 0) || elapsedMs <= earliest + 1e-9) return false;
+  if (!(earliest > 0) || elapsedMs <= earliest + 1e-9
+      || Math.ceil(elapsedMs / earliest) > 1024) return false;
   let elapsed = 0;
   while (elapsed < elapsedMs - 1e-9) {
     const ongoing = active();
@@ -1094,7 +1109,7 @@ function resolveStationaryFieldOnlySharedFrontiers(
     const frontierOutcomes = [];
     const frontierResolutions = [];
     resolveAbilityFields(
-      { ...input, field_time_offset_ms: elapsed }, [],
+      { ...input, field_time_offset_ms: elapsed, field_sampling_offset_ms: elapsed }, [],
       nextWorldState, snapshotScene, nextScene, delta,
       frontierTransitions, frontierOutcomes, frontierResolutions,
     );
@@ -1257,7 +1272,7 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
   const fieldInput = { ...input, world_state: snapshot, scene_id: sceneId,
     immutable_causal_evaluator_audits: immutableCausalEvaluatorAudits,
     immutable_causal_query_audits: immutableCausalQueryAudits };
-  if (!resolveStationaryFieldOnlySharedFrontiers(
+  if (!resolveSupportedDualFieldSharedFrontiers(
     fieldInput, spawnedFields, nextWorldState, snapshotScene, nextScene,
     elapsedMs, transitions, outcomes, abilityResolutions,
   )) {

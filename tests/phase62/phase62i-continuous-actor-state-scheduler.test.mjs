@@ -268,6 +268,83 @@ try {
   assert.equal(movementRateChange.time_ms, 100);
   assert.ok(secondTimeline.entries.some((item) => item.kind === "movement_completion_refined" && item.actor === fieldMover));
 
+
+  // C6-F: a later slow-field hit may not be applied before an earlier fast
+  // overlapping-field hit when determining when a moving actor collapses.
+  // At 100ms: slow 0.5 + fast 5 = 5.5 damage, so 0.5 HP remains.
+  // At 200ms: slow's next 0.5 HP crosses zero. A field-ID batch ordering
+  // incorrectly applies a 200ms slow hit before the 100ms fast hit, stopping
+  // the moving actor at 100ms despite the actual 200ms lethal frontier.
+  const overlapWorld = structuredClone(initialWorldState);
+  overlapWorld.event_queue = [{
+    event_id: "evt-field-ticks-refine-movement",
+    scene_id: fieldScene,
+    participants: [fieldMover],
+  }];
+  overlapWorld.characters[fieldMover].physical_state = {
+    health_current: 6, health_max: 100,
+    injuries: [], movement_multiplier: 1, combat_multiplier: 1,
+    incapacitated: false, immobilized: false,
+  };
+  const slow = structuredClone(overlapWorld.ability_fields["persistent-field-i"]);
+  slow.field_id = "a-slow-moving-field";
+  slow.tick_ms = 200;
+  slow.remaining_ms = 200;
+  slow.effect.damage_per_second = 5;
+  slow.effect.damage_type = "slow-moving-field";
+  const fast = structuredClone(slow);
+  fast.field_id = "z-fast-moving-field";
+  fast.tick_ms = 100;
+  fast.remaining_ms = 100;
+  fast.effect.damage_per_second = 50;
+  fast.effect.damage_type = "fast-moving-field";
+  overlapWorld.ability_fields = {
+    "a-slow-moving-field": slow, "z-fast-moving-field": fast,
+  };
+  const overlapRoot = structuredClone(overlapWorld);
+  const overlapSession = await beginWorldSimulationSession({
+    source_text: "CB-C6-F moving actor overlapping fields causal order",
+    characters: Object.keys(overlapWorld.characters),
+    initial_world_state: overlapWorld,
+  }, options);
+  const overlapId = overlapSession.world_simulation_session_id;
+  await runWorldSimulationTurn({
+    world_simulation_session_id: overlapId,
+  }, { ...options, characterBrain });
+  const moved = await getWorldSimulationState(overlapId, options);
+  const movedHistory = await getWorldSimulationHistory(overlapId, options);
+  assert.equal(moved.revision, 1);
+  assert.equal(movedHistory.turns.length, 1);
+  const fieldHits = movedHistory.turns[0].action_outcomes.filter(item =>
+    item.result === "ability_field_tick" && item.target === fieldMover);
+  assert.deepEqual(fieldHits.map(item => [
+    item.ability_field_id, item.time_ms, item.damage_applied,
+  ]), [
+    ["a-slow-moving-field", 100, 0.5],
+    ["z-fast-moving-field", 100, 5],
+    ["a-slow-moving-field", 200, 0.5],
+  ], "overlapping fields must share causal frontiers rather than field-ID tick batches");
+  assert.deepEqual(fieldHits.map(item => [item.health_before, item.health_after]), [
+    [6, 5.5], [5.5, 0.5], [0.5, 0],
+  ]);
+  assert.equal(moved.state.characters[fieldMover].physical_state.health_current, 0);
+  assert.equal(moved.state.characters[fieldMover].physical_state.incapacitated, true);
+  const overlapTrajectory = movedHistory.turns[0].causal_timeline.actor_trajectories[fieldMover];
+  assert.equal(overlapTrajectory.interrupted, true);
+  assert.equal(overlapTrajectory.interrupted_at_ms, 200,
+    "later injury cannot preempt movement retroactively at an earlier timestamp");
+  assert.ok(overlapTrajectory.final_position.x > 0.4
+    && overlapTrajectory.final_position.x <= 0.8,
+    "World must stop the mover at the actual 200ms causal position, not at the fast field's 100ms tick");
+  assert.deepEqual(moved.state.scenes[fieldScene].entity_positions[fieldMover],
+    overlapTrajectory.final_position);
+  assert.deepEqual(moved.state.characters[fieldMover].physical_state.injuries.map(item => item.source), [
+    "a-slow-moving-field", "z-fast-moving-field", "a-slow-moving-field",
+  ]);
+  assert.deepEqual(moved.state.ability_fields["a-slow-moving-field"].remaining_ms, 0);
+  assert.deepEqual(moved.state.ability_fields["z-fast-moving-field"].remaining_ms, 0);
+  assert.deepEqual(overlapWorld, overlapRoot, "the overlap fixture is immutable");
+
   console.log(JSON.stringify({
     actor_state_scheduler_version: worldSimulationActorStateSchedulerVersion,
     committed_revision: state.revision,
