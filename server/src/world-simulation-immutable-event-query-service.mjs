@@ -436,8 +436,11 @@ function timeInsideStaticCircle(profile, center, radius, startMs, endMs) {
     const r2 = (-qb + root) / (2 * qa);
     const enter = Math.max(0, Math.min(r1, r2));
     const exit = Math.min(1, Math.max(r1, r2));
+    // Zero-length contact at the start/end or a tangent is not exposure
+    // across the whole tick. The overlap of [enter, exit] with [0, 1]
+    // already covers all strictly positive durations (including full
+    // interior crossing). Stationary edge occupancy is handled above.
     if (exit > enter) insideMs += durationMs * (exit - enter);
-    else if (qc <= 0) insideMs += durationMs;
   }
   return insideMs;
 }

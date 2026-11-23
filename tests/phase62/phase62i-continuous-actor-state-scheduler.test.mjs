@@ -345,6 +345,107 @@ try {
   assert.deepEqual(moved.state.ability_fields["z-fast-moving-field"].remaining_ms, 0);
   assert.deepEqual(overlapWorld, overlapRoot, "the overlap fixture is immutable");
 
+  // C6-F: a moving target enters and exits two partially overlapping circles.
+  // Integer 125ms sampling and binary-exact .5m boundaries make these precise:
+  // A: x=.5..1.5 => t=125..375, B: x=1..2 => t=250..500.
+  // Only positive-length interior exposure may inflict damage. In particular,
+  // x=1.5 at t=375 is the *exit* of A, not a full extra A tick.
+  for (const startingHp of [1000, 5]) {
+    const crossing = structuredClone(initialWorldState);
+    crossing.event_queue = [{
+      event_id: "evt-field-ticks-refine-movement",
+      scene_id: fieldScene, participants: [fieldMover],
+    }];
+    crossing.characters[fieldMover].physical_state = {
+      health_current: startingHp, health_max: 1000,
+      injuries: [], movement_multiplier: 1, combat_multiplier: 1,
+      incapacitated: false, immobilized: false,
+    };
+    const first = structuredClone(crossing.ability_fields["persistent-field-i"]);
+    first.field_id = "a-entry-exit-field";
+    first.center = { x: 1, y: 1 };
+    first.radius_m = 0.5;
+    first.remaining_ms = 1000;
+    first.tick_ms = 125;
+    first.effect = {
+      damage_per_second: 16, damage_type: "entry_exit_a",
+      penetration: 0, ignore_armor: true,
+    };
+    const second = structuredClone(first);
+    second.field_id = "z-overlapping-exit-field";
+    second.center = { x: 1.5, y: 1 };
+    second.effect = { ...first.effect, damage_type: "entry_exit_b" };
+    crossing.ability_fields = {
+      "a-entry-exit-field": first,
+      "z-overlapping-exit-field": second,
+    };
+    const fixtureBefore = structuredClone(crossing);
+    const crossingSession = await beginWorldSimulationSession({
+      source_text: "CB-C6-F moving entry/exit shared field boundaries",
+      characters: Object.keys(crossing.characters),
+      initial_world_state: crossing,
+    }, options);
+    const crossingId = crossingSession.world_simulation_session_id;
+    await runWorldSimulationTurn({
+      world_simulation_session_id: crossingId,
+    }, { ...options, characterBrain });
+    const crossingState = await getWorldSimulationState(crossingId, options);
+    const crossingHistory = await getWorldSimulationHistory(crossingId, options);
+    assert.equal(crossingState.revision, 1);
+    assert.equal(crossingHistory.turns.length, 1);
+    const turn = crossingHistory.turns[0];
+    const fieldTicks = turn.action_outcomes.filter(item =>
+      item.result === "ability_field_tick" && item.target === fieldMover);
+    const hitEvidence = fieldTicks.map(item => [
+      item.ability_field_id, item.time_ms,
+      Number(item.inside_ms.toFixed(6)),
+      Number(item.damage_applied.toFixed(6)),
+    ]);
+    const expectedFirstHits = [
+      ["a-entry-exit-field", 250, 125, 2],
+      ["a-entry-exit-field", 375, 125, 2],
+      ["z-overlapping-exit-field", 375, 125, 2],
+    ];
+    assert.deepEqual(hitEvidence.slice(0, 3), expectedFirstHits,
+      "the first two overlapping circle boundaries must have exact exposed windows");
+    const body = crossingState.state.characters[fieldMover].physical_state;
+    const trajectory = turn.causal_timeline.actor_trajectories[fieldMover];
+    if (startingHp === 1000) {
+      assert.deepEqual(hitEvidence, [
+        ...expectedFirstHits,
+        ["z-overlapping-exit-field", 500, 125, 2],
+      ], "leaving each circle at the tick boundary must never add an extra injury");
+      assert.equal(body.health_current, 992);
+      assert.equal(body.injuries.length, 4);
+      assert.deepEqual(body.injuries.map(item => item.source),
+        ["a-entry-exit-field", "a-entry-exit-field",
+          "z-overlapping-exit-field", "z-overlapping-exit-field"]);
+      assert.equal(trajectory.interrupted, false);
+      assert.deepEqual(crossingState.state.scenes[fieldScene].entity_positions[fieldMover],
+        { x: 4, y: 1 });
+    } else {
+      assert.deepEqual(fieldTicks.slice(0, 3).map(item => [
+        item.health_before, item.health_after,
+      ]), [[5, 3], [3, 1], [1, 0]]);
+      assert.equal(body.health_current, 0);
+      assert.equal(body.incapacitated, true);
+      assert.equal(body.immobilized, true);
+      assert.equal(trajectory.interrupted, true);
+      assert.equal(trajectory.interrupted_at_ms, 375);
+      assert.deepEqual(trajectory.final_position, { x: 1.5, y: 1 },
+        "incapacitation at the overlap boundary stops movement at the causal location");
+      assert.deepEqual(crossingState.state.scenes[fieldScene].entity_positions[fieldMover],
+        trajectory.final_position);
+      assert.ok(fieldTicks.length > 3,
+        "later field exposure continues after the body becomes immobile");
+    }
+    assert.equal(crossingState.state.ability_fields["a-entry-exit-field"].remaining_ms, 0);
+    assert.equal(crossingState.state.ability_fields["z-overlapping-exit-field"].remaining_ms, 0);
+    assert.equal(new Set(body.injuries.map(item => item.injury_id)).size,
+      body.injuries.length, "committed injury identities must remain unique");
+    assert.deepEqual(crossing, fixtureBefore, "source World state must stay immutable");
+  }
+
   console.log(JSON.stringify({
     actor_state_scheduler_version: worldSimulationActorStateSchedulerVersion,
     committed_revision: state.revision,
