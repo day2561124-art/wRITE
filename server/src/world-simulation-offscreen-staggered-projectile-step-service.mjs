@@ -139,7 +139,7 @@ export async function runWorldSimulationOffscreenStaggeredProjectileStep(
       if (!Object.hasOwn(object(state.characters), name)) continue;
       if (residentScene.has(name))
         return blocked("cross_scene_character_identity_overlap");
-      residentScene.set(name, scene.scene_id);
+      residentScene.set(name, sceneId);
     }
   }
   for (const [id, projectile] of projectiles) {
