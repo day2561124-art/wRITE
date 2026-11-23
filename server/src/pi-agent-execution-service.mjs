@@ -30,6 +30,22 @@ export function isPiNodeVersionCompatible(value) {
   return true;
 }
 
+function parseRunnerFailure(stdout) {
+  if (typeof stdout !== "string" || Buffer.byteLength(stdout, "utf8") > MAX_OUTPUT_BYTES) return null;
+  let payload;
+  try {
+    payload = JSON.parse(stdout.trim());
+  } catch {
+    return null;
+  }
+  if (payload?.ok !== false || payload?.reason !== "pi_runtime_probe_failed") return null;
+  const detail = typeof payload.detail === "string"
+    && /^(?:ERR_[A-Z0-9_]{1,60}|MODULE_NOT_FOUND|ENOENT|SyntaxError|TypeError|ReferenceError)$/u.test(payload.detail)
+    ? payload.detail
+    : null;
+  return { detail };
+}
+
 function boundedProbeFailure(error) {
   if (error?.code === "ENOENT") {
     return {
@@ -39,9 +55,11 @@ function boundedProbeFailure(error) {
       timed_out: false,
     };
   }
+  const runnerFailure = parseRunnerFailure(error?.stdout);
   return {
     ok: false,
-    reason: "sidecar_probe_failed",
+    reason: runnerFailure ? "pi_runtime_probe_failed" : "sidecar_probe_failed",
+    ...(runnerFailure?.detail ? { detail: runnerFailure.detail } : {}),
     exit_code: Number.isInteger(error?.code) ? error.code : null,
     timed_out: error?.killed === true,
   };
@@ -50,8 +68,9 @@ function boundedProbeFailure(error) {
 export async function probePiSidecar(options = {}) {
   const nodeExecutable = options.nodeExecutable ?? process.execPath;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const execute = options.execute ?? execFileAsync;
   try {
-    const { stdout } = await execFileAsync(
+    const { stdout } = await execute(
       nodeExecutable,
       [runnerPath, "status"],
       {
