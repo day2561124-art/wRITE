@@ -726,6 +726,9 @@ function movementPlans(worldState, scene, selectedActionIntents) {
   for (const selected of selectedActionIntents) {
     const candidate = object(selected?.candidate);
     if (!isObject(candidate.movement)) continue;
+    // Refused locomotion must not reserve a destination and thereby block
+    // another capable actor's independent movement in the same World turn.
+    if (actorMovementSpeed(worldState, selected.character) <= 0) continue;
     const start = positionFor(scene, selected.character);
     if (!start) continue;
     const destination = movementDestination(candidate, start);
