@@ -4288,6 +4288,11 @@ for (const [x, budget, ceiling] of [
       assert.equal(result.committed_turn_count, count);
       assert.equal(result.committed_physical_step_count, count);
       assert.equal(result.reached_simulation_time, before.state.simulation_time);
+      assert.equal(result.requested_target_horizon, horizon);
+      assert.equal(result.target_horizon_claimed,
+        horizon !== null && horizon === before.state.simulation_time);
+      assert.equal(result.state_reconciliation_required, false);
+      assert.equal(result.automatic_replay_allowed, false);
       if (budget === 0) {
         assert.equal(result.pending_breakpoint.kind, "projectile_character");
         assert.equal(result.pending_breakpoint.delta_ms, 0);
@@ -4423,6 +4428,12 @@ for (const [mode, reason] of [
       assert.equal(result.attempted_turn_count, reason === null ? 0 : 1);
       assert.equal(result.committed_turn_count, 0);
       if (reason !== null) assert.equal(result.physical_step_blocked_reason, reason);
+      if (mode === "queue") {
+        assert.equal(result.status, "target_horizon_reached");
+        assert.equal(result.pending_event_id, "e14-pending");
+      }
+      assert.equal(result.state_reconciliation_required, false);
+      assert.equal(result.automatic_replay_allowed, false);
       assert.deepEqual(await getWorldSimulationState(sid, options), before);
       assert.deepEqual(await bytes(), original);
     });
