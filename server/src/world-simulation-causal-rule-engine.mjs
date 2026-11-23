@@ -301,7 +301,12 @@ function actorMovementSpeed(worldState, actor) {
     positiveNumber(rules.default_movement_speed_mps, 1.4),
   );
   const physical = object(character.physical_state);
-  if (physical.immobilized === true || character.immobilized === true) return 0;
+  // Body authority is not a single flag. Imported/older snapshots may carry
+  // incapacitation or unconsciousness without the redundant immobilized bit.
+  // A subsequent World turn must not restart locomotion for such an actor.
+  if (physical.immobilized === true || character.immobilized === true
+      || physical.incapacitated === true || character.incapacitated === true
+      || physical.unconscious === true || character.unconscious === true) return 0;
   const injuryMultiplier = finiteNumber(
     physical.movement_multiplier ?? object(character.injury).movement_multiplier,
     1,
