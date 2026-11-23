@@ -4910,7 +4910,7 @@ async function c6fNativeAcousticReentry(mode) {
     assert.equal(emitted.length, 1);
     for (let i = 0; i < history.turns.length; i++) {
       assert.equal(history.turns[i].previous_state_hash,
-        i ? history.turns[i - 1].next_state_hash : session.state_hash);
+        i ? history.turns[i - 1].next_state_hash : session.world_state_hash);
       if (i === history.turns.length - 1)
         assert.equal(history.turns[i].next_state_hash, final.state_hash);
     }
