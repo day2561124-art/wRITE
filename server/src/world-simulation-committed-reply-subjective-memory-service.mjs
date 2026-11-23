@@ -321,7 +321,7 @@ export async function runWorldSimulationCommittedReplySubjectiveMemory(
       const revisionEvent=beliefRevision.result.revision_events_created[0];
       adoption={
         decision:choice.decision,
-        proposition_hash:hashAgentRunValue(choice.proposition),
+        proposition_hash:hashAgentRunValue({character,proposition:choice.proposition}),
         claim_event_id:claimEvent.claim_event_id,
         claim_event_hash:claimEvent.claim_event_hash,
         revision_event_id:revisionEvent.belief_revision_event_id,
