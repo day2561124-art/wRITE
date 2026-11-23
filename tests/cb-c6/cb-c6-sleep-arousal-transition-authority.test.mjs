@@ -6670,6 +6670,8 @@ for (const budget of [0, 1, 32]) {
     assert.deepEqual(after.state.motivational_goal_history,
       initial.motivational_goal_history);
     assert.deepEqual(after.state.event_queue, []);
+    assert.deepEqual(await getWorldSimulationHistory(sid, batchOptions), history,
+      "projectile-impact provenance must survive repeated decoded World History reads");
     if (count === 0) {
       assert.equal(result.pending_scene_plan.active_scene_count, 2);
       assert.equal(result.pending_scene_plan.multi_scene_atomic_execution_authorized, false);
