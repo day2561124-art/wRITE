@@ -1088,6 +1088,97 @@ try {
     source_transcript_leaked:false,belief_verified:false,replay_blocked:true,
   }));
 
+  // Negative control: a genuine source hearing opportunity is insufficient
+  // to force a public reply. A Brain decline, forged action and Runtime
+  // attempt to replace the Brain decision must all leave World unchanged.
+  for(const replyFault of ["decline","forged_action","runtime_override","runtime_substitution"]){
+    const guardedReplySession=await beginWorldSimulationSession({
+      source_text:"authenticated listener clarification guard "+replyFault,
+      characters:Object.keys(acousticWorld.characters),
+      initial_world_state:acousticWorld,
+    },{fixtureRoot:goalFixtureRoot});
+    const guardedReplySid=guardedReplySession.world_simulation_session_id;
+    const groundedSource=await runWorldSimulationActorInitiatedSpeech({
+      world_simulation_session_id:guardedReplySid,
+      character,runtime_context_by_character:planCue,
+    },{fixtureRoot:goalFixtureRoot,characterBrain:async packet=>{
+      if(packet.cognition?.implementation_intention_activation){
+        const activation=packet.cognition.implementation_intention_activation;
+        return {
+          plan_activation_context_token:activation.context_token,
+          activated_plan_tokens:[activation.plans[0].plan_token],
+        };
+      }
+      return {action_id:acousticCandidate.action_id};
+    }});
+    assert.equal(groundedSource.committed,true);
+    const guardedSourceSnapshot=await getWorldSimulationState(
+      guardedReplySid,{fixtureRoot:goalFixtureRoot});
+    const guardedSourceHistory=await getWorldSimulationHistory(
+      guardedReplySid,{fixtureRoot:goalFixtureRoot});
+    let replyBrainChoices=0;
+    const replyOptions={
+      fixtureRoot:goalFixtureRoot,
+      characterBrain:async packet=>{
+        if(!packet.cognition?.clarification_opportunity)
+          return {private_reaction:"noticed nonlexical speech"};
+        replyBrainChoices++;
+        return {action_id:replyFault==="forged_action"
+          ? "fake_listener_action_not_in_world"
+          : "reject_all"};
+      },
+    };
+    if(replyFault==="runtime_override") {
+      replyOptions.characterRuntimeManager={
+        runCharacterTurn:async ({brain_input,characterBrain})=>{
+          await characterBrain(brain_input);
+          // This is the Runtime's fabricated action, not the Brain's result.
+          return {action_id:clarificationCandidate.action_id};
+        },
+      };
+    }
+    if(replyFault==="runtime_substitution"){
+      replyOptions.characterRuntimeManager={
+        runCharacterTurn:async ({brain_input,characterBrain})=>
+          characterBrain(brain_input.cognition?.clarification_opportunity
+            ? {...brain_input,character:"fake_listener"}
+            : brain_input),
+      };
+    }
+    const guardedReplyCall=()=>runWorldSimulationCommittedActorSpeechListenerClarification({
+      world_simulation_session_id:guardedReplySid,
+      observer:inquiryAlly,
+      source_turn_id:guardedSourceHistory.turns.at(-1).turn_id,
+      expected_revision:guardedSourceSnapshot.revision,
+      expected_state_hash:guardedSourceSnapshot.state_hash,
+    },replyOptions);
+    if(replyFault==="forged_action")
+      await assert.rejects(guardedReplyCall(),
+        error=>error?.code==="WORLD_LISTENER_REPLY_ACTION_NOT_AVAILABLE");
+    else if(replyFault==="runtime_substitution")
+      await assert.rejects(guardedReplyCall(),
+        error=>error?.code==="WORLD_LISTENER_REPLY_BRAIN_IDENTITY_INVALID");
+    else{
+      const declined=await guardedReplyCall();
+      assert.equal(declined.committed,false);
+      assert.equal(declined.public_reply_emitted,false);
+      assert.equal(declined.status,"listener_declined_clarification");
+    }
+    const guardedAfter=await getWorldSimulationState(
+      guardedReplySid,{fixtureRoot:goalFixtureRoot});
+    const guardedHistoryAfter=await getWorldSimulationHistory(
+      guardedReplySid,{fixtureRoot:goalFixtureRoot});
+    assert.equal(guardedAfter.revision,guardedSourceSnapshot.revision);
+    assert.equal(guardedAfter.state_hash,guardedSourceSnapshot.state_hash);
+    assert.deepEqual(guardedHistoryAfter.turns,guardedSourceHistory.turns);
+    assert.equal(replyBrainChoices,1);
+    console.log(JSON.stringify({
+      scenario:"world_listener_causal_clarification_negative",
+      fault:replyFault,brain_choices:replyBrainChoices,
+      world_unchanged:true,public_reply:false,
+    }));
+  }
+
   // An actor can decline a real plan cue and a genuine available action.
   // Absence of choice must not create a dummy external World turn.
   for(const behavior of ["decline","foreign_action"]){
