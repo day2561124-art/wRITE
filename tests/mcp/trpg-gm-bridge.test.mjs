@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {loadTRPGGMBridge,trpgPublicToolDefinition,trpgGatewayFailureCode,isTRPGTransportTrusted,createWorkbenchTransportBoundary} from '../../server/src/mcp-trpg-gm-bridge.mjs';
+import path from 'node:path';
+import {loadTRPGGMBridge,trpgPublicToolDefinition,trpgGatewayFailureCode,isTRPGTransportTrusted,createWorkbenchTransportBoundary,resolveTRPGAdapterModule} from '../../server/src/mcp-trpg-gm-bridge.mjs';
+await assert.rejects(resolveTRPGAdapterModule('workbench-security.js',{taskAuthorizationRoot:path.resolve('WriterWorkbench-PiMaintenance-v3','grants')}),/PROTECTED_TRPG_ADAPTER_REQUIRED/u);
+await assert.rejects(resolveTRPGAdapterModule('workbench-security.js',{dist:'relative/adapter/dist'}),/INVALID_TRPG_ADAPTER_DIST/u);
 const name='trpg.gm.get_round_context',write='trpg.gm.commit_round_result';
 let calls=0,disabled=0;
 const tool=(n=name)=>({name:n,description:'synthetic',risk:n===write?'high-risk-write':'read',annotations:{readOnlyHint:n!==write},inputSchema:{type:'object',properties:{},additionalProperties:false},handler:async args=>{calls++;return {content:[{type:'text',text:JSON.stringify(args)}]};}});

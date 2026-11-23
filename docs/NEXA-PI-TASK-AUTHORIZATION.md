@@ -6,6 +6,8 @@
 
 以派送帳號啟動 MCP 與 durable worker，將註冊結果的 `task_authorization_root` 設為 `NEXA_PI_TASK_AUTHORIZATION_ROOT`，並設定 `NEXA_PI_REQUIRE_TASK_AUTHORIZATION=1`。發布程式、依賴、Git 設定與 Journal 須放在其他一般登入身分無法變更的位置。派送帳號用 AppContainer 執行工作區程式及測試。啟用強制授權後，開發 MCP 寫入透過 Pi 派送，診斷 fallback 保留唯讀查詢。
 
+專用派送環境須透過 `NEXA_TRPG_ADAPTER_DIST` 設定受保護的 TRPG adapter 發布路徑。MCP 連線仍使用既有 OAuth 驗證，驗證端只需取得相應的即時驗證資料。部署前請確認 adapter 程式與依賴的 ACL，並用已簽發、已撤銷和缺少授權的連線驗證結果。
+
 從舊版升級前，先等待已派送的維護結束，並按維護規程停用舊版 scoped 排程。用同名排程註冊新版，保留舊授權、腳本和收據目錄。操作員在新版重發仍需要的任務授權，並視歷史恢復需求授予派送帳號舊收據目錄的唯讀權限。驗收需分別以派送帳號與一般登入帳號確認收件匣及排程權限。
 
 工作台先用既有 Workstream 和 Workspace 流程建立作用中的獨立工作區。授權操作員在已設定相同授權目錄的提升權限終端執行 `node scripts/manage-pi-task-authorization.mjs issue task.json`。`task.json` 提供 `goal`、`workspace_id`、`capabilities` 陣列，以及 UTC epoch 毫秒的 `expires_at_ms`。主機由工作區登錄資料解析工作流身分。授權記錄的 `task_authorization_id` 會寫入關聯 Pi 執行紀錄。
