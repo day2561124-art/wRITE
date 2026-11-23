@@ -5833,4 +5833,145 @@ for (const mode of ["queued", "acoustic", "harmful", "projectile", "missing-scen
   }
 }
 console.log("CB-C6-F two-scene nonharmful field atomic commit, CAS and guard regression passed.");
+// C6-F: exercise the actual canonical bounded batch, not just the direct
+// two-scene field owner. The two independent field clocks share ONE World
+// timeline and one atomic history entry for each 50ms breakpoint.
+for (const budget of [0, 1, 2, 32]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-batch-two-scene-fields-" + budget + "-" + process.pid + "-" + Date.now());
+  const options = { fixtureRoot: root,
+    characterBrain: async () => assert.fail("offscreen physical field steps never invoke Brain") };
+  try {
+    const initial = c6fTwoHarmlessFieldScenes();
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-F canonical two-scene physical batch",
+      seed: "batch-two-harmless-fields",
+      initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, options);
+    const at = ms => new Date(Date.parse(before.state.simulation_time) + ms).toISOString();
+    const paths = worldSimulationStatePaths(sid, options);
+    const bytes = () => Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]);
+    const priorBytes = await bytes();
+    const result = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid,
+      max_turns: budget,
+      target_horizon: at(100),
+    }, options);
+    const commits = Math.min(budget, 2);
+    const elapsed = commits * 50;
+    assert.equal(result.committed_turn_count, commits);
+    assert.equal(result.committed_physical_step_count, commits);
+    assert.equal(result.attempted_turn_count, commits);
+    assert.equal(result.reached_simulation_time, at(elapsed));
+    assert.equal(result.target_horizon_claimed, elapsed === 100);
+    assert.equal(result.state_reconciliation_required, false);
+    assert.equal(result.automatic_replay_allowed, false);
+    assert.equal(result.wall_clock_catch_up_used, false);
+    const after = await getWorldSimulationState(sid, options);
+    const history = await getWorldSimulationHistory(sid, options);
+    assert.equal(after.revision, before.revision + commits);
+    assert.equal(history.turns.length, commits);
+    assert.equal(after.state.simulation_time, at(elapsed));
+    for (const sceneId of ["annex", "room"])
+      assert.equal(after.state.scenes[sceneId].simulation_time,
+        commits ? at(elapsed) : initial.simulation_time);
+    for (const fieldId of ["field_e3", "annex_field"]) {
+      assert.equal(after.state.ability_fields[fieldId].remaining_ms, 100 - elapsed);
+      assert.equal(after.state.ability_fields[fieldId].active, elapsed < 100);
+    }
+    assert.deepEqual(after.state.memories, initial.memories);
+    assert.deepEqual(after.state.characters, initial.characters);
+    assert.deepEqual(after.state.motivational_goal_history,
+      initial.motivational_goal_history);
+    assert.deepEqual(after.state.event_queue, []);
+    if (commits < 2) {
+      assert.equal(result.pending_scene_plan.active_scene_count, 2);
+      assert.equal(result.pending_scene_plan.multi_scene_atomic_execution_authorized, false,
+        "read-only plan alone never grants mutation authority");
+    }
+    for (let i = 0; i < history.turns.length; i++) {
+      const turn = history.turns[i];
+      assert.equal(turn.event.type, "offscreen_multiscene_ability_field_step");
+      assert.equal(turn.revision_from, before.revision + i);
+      assert.equal(turn.revision_to, before.revision + i + 1);
+      assert.equal(turn.previous_state_hash, i
+        ? history.turns[i - 1].next_state_hash : before.state_hash);
+      assert.ok(turn.chronological_mutation_queue.queue_hash);
+      assert.ok(turn.chronological_mutation_execution.execution_hash);
+      assert.equal(turn.state_transitions.filter(t =>
+        t.field === "ability_field_state").length, 2);
+      assert.equal(turn.state_transitions.filter(t =>
+        t.field === "simulation_time").length, 3);
+      assert.deepEqual(turn.selected_action_intents, []);
+      assert.deepEqual(turn.action_outcomes, []);
+    }
+    if (commits > 0) assert.equal(history.turns.at(-1).next_state_hash, after.state_hash);
+    if (commits === 0) assert.deepEqual(await bytes(), priorBytes);
+    if (commits === 2) {
+      const settled = await bytes();
+      const idle = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid, max_turns: 32,
+        target_horizon: at(150),
+      }, options);
+      assert.equal(idle.committed_turn_count, 0);
+      assert.equal(idle.target_horizon_claimed, false);
+      assert.deepEqual(await bytes(), settled, "no phantom extra World time after field expiry");
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+for (const mode of ["harmful", "projectile", "acoustic"]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-batch-two-scene-guard-" + mode + "-" + process.pid + "-" + Date.now());
+  const options = { fixtureRoot: root,
+    characterBrain: async () => assert.fail("physical-only rejected batch must not call Brain") };
+  try {
+    const initial = c6fTwoHarmlessFieldScenes();
+    if (mode === "harmful")
+      initial.ability_fields.annex_field.effect.damage_per_second = 1;
+    if (mode === "projectile")
+      initial.projectiles = {
+        another: {
+          ...d1Clone(e3PersistentProcessWorld().projectiles.projectile_e3),
+          projectile_id: "another", scene_id: "annex",
+        },
+      };
+    if (mode === "acoustic") initial.sound_events = [{
+      schema_version: "cc6b-communication-acoustic-bridge-v1",
+      sound_id: "c6f-pending-acoustic", scene_id: "annex",
+    }];
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-F unsupported canonical multi-scene mixed batch",
+      seed: mode, initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, options);
+    const paths = worldSimulationStatePaths(sid, options);
+    const priorBytes = await Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]);
+    const result = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: 32,
+    }, options);
+    assert.equal(result.committed_turn_count, 0);
+    assert.equal(result.physical_step_blocked_reason,
+      mode === "acoustic"
+        ? "physical_step_acoustic_ingress_pending"
+        : "physical_step_scene_scope_unresolved");
+    assert.equal(result.automatic_replay_allowed, false);
+    assert.equal(result.state_reconciliation_required, false);
+    assert.deepEqual(await getWorldSimulationState(sid, options), before);
+    assert.deepEqual(await Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]), priorBytes);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+console.log("CB-C6-F canonical bounded batch atomically advances two safe field scenes and keeps unsupported mixes blocked.");
 
