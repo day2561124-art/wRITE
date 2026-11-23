@@ -5,6 +5,7 @@ import {
   PI_REQUIRED_NODE_VERSION,
   getPiRuntimeStatus,
   isPiNodeVersionCompatible,
+  probePiSidecar,
 } from "../../server/src/pi-agent-execution-service.mjs";
 
 test("Pi Node compatibility gate is exact and forward-compatible", () => {
@@ -134,4 +135,39 @@ test("Installed Pi matches the pinned runtime and executes SDK to MCP with durab
   assert(result.checks.includes("real_stdio_mcp"));
   assert(result.checks.includes("session_disk_restore"));
   assert(result.mcp_calls >= 6);
+});
+
+test("Sidecar probe preserves allowlisted runner failure codes without exposing stderr", async () => {
+  const error = Object.assign(new Error("runner exited"), {
+    code: 1,
+    killed: false,
+    stdout: '{"ok":false,"reason":"pi_runtime_probe_failed","detail":"ERR_MODULE_NOT_FOUND"}\\n',
+    stderr: "private diagnostic not to expose",
+  });
+  const probe = await probePiSidecar({ execute: async () => { throw error; } });
+  assert.deepEqual(probe, {
+    ok: false,
+    reason: "pi_runtime_probe_failed",
+    detail: "ERR_MODULE_NOT_FOUND",
+    exit_code: 1,
+    timed_out: false,
+  });
+  assert.equal(JSON.stringify(probe).includes("private diagnostic"), false);
+});
+
+test("Sidecar probe rejects arbitrary runner failure details and malformed output", async () => {
+  for (const stdout of [
+    '{"ok":false,"reason":"pi_runtime_probe_failed","detail":"PRIVATE_TOKEN"}',
+    '{"ok":false,"reason":"invented_reason","detail":"ERR_MODULE_NOT_FOUND"}',
+    "not-json",
+    "x".repeat(70_000),
+  ]) {
+    const error = Object.assign(new Error("runner exited"), { code: 1, killed: false, stdout });
+    const actual = await probePiSidecar({ execute: async () => { throw error; } });
+    assert.equal(actual.ok, false);
+    assert.equal(actual.exit_code, 1);
+    assert.equal(actual.detail, undefined);
+    assert.equal(actual.reason, stdout.includes('"reason":"pi_runtime_probe_failed"') && stdout.length < 70_000
+      ? "pi_runtime_probe_failed" : "sidecar_probe_failed");
+  }
 });
