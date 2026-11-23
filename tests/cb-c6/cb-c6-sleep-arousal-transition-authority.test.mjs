@@ -6077,8 +6077,8 @@ for (const reverse of [false, true]) {
     assert.equal(zeroBudget.attempted_turn_count, 0);
     assert.equal(zeroBudget.automatic_replay_allowed, false);
     assert.equal((await getWorldSimulationState(jointSid, jointOptions)).revision, 0);
-    assert.equal(neverAuto.physical_step_blocked_reason,
-      "physical_step_scene_scope_unresolved");
+    assert.equal(zeroBudget.pending_scene_plan.active_scene_count, 2);
+    assert.equal(zeroBudget.pending_scene_plan.multi_scene_atomic_execution_authorized, false);
     for (const [index, elapsed] of [50, 100].entries()) {
       const jointly = await runWorldSimulationOffscreenMultiSceneFieldDamageStep({
         world_simulation_session_id: jointSid,
