@@ -4439,3 +4439,142 @@ for (const [mode, reason] of [
     });
 }
 console.log("CB-C6-E14 bounded batch contact budgets, mixed effects, lineage and unsupported authority passed.");
+// C6-F candidate: actual foreground queued turns versus the reduced-fidelity
+// bounded queue runner, followed by read-only awake-actor cognition reentry.
+// This does not claim parity for unimplemented slow processes.
+async function c6fNativeQueuedReentry(mode) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-queued-" + mode + "-" + process.pid + "-" + Date.now());
+  const options = { fixtureRoot: root };
+  try {
+    const { state: initial, context } = d1Fixture("asleep");
+    const first = initial.event_queue[0];
+    const eventIds = [first.event_id, "c6f-second", "c6f-third"];
+    initial.event_queue = eventIds.map((eventId, index) => {
+      const event = d1Clone(first);
+      event.event_id = eventId;
+      if (index > 0) delete event.sleep_arousal_transition;
+      return event;
+    });
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-F paired queued World reentry",
+      seed: "c6f-queued-paired", initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const runtime = createWorldSimulationCharacterRuntimeManager({
+      identityResolver: async name => ({
+        entity_id: "c6f_character_" + name, canonical_name: name,
+        identity_source: "c6f_fixture", formal: true,
+      }),
+    });
+    let brainCalls = 0;
+    const turnOptions = {
+      ...options, characterRuntimeManager: runtime,
+      characterBrain: async () => {
+        brainCalls++;
+        return { action_id: "bounded-rest" };
+      },
+    };
+    const invokeDirect = async event_id => {
+      const result = await runWorldSimulationTurn({
+        world_simulation_session_id: sid, event_id,
+      }, turnOptions);
+      assert.equal(result.committed, true);
+    };
+    if (mode === "foreground") {
+      await invokeDirect(eventIds[0]);
+    } else {
+      const firstBatch = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid, max_turns: 1,
+      }, turnOptions);
+      assert.equal(firstBatch.committed_turn_count, 1);
+      assert.equal(firstBatch.pending_event_id, eventIds[1]);
+      assert.equal(firstBatch.automatic_replay_allowed, false);
+      assert.equal(firstBatch.wall_clock_catch_up_used, false);
+    }
+
+    const afterWake = await getWorldSimulationState(sid, options);
+    assert.equal(afterWake.revision, 1);
+    assert.equal(afterWake.state.characters.aria.physical_state.sleep_arousal.condition, "awake");
+    assert.deepEqual(afterWake.state.characters.aria.physical_state.injuries,
+      initial.characters.aria.physical_state.injuries);
+    assert.equal(afterWake.state.characters.aria.physical_state.incapacitated, true);
+    assert.deepEqual(afterWake.state.memories.aria, initial.memories.aria);
+    const wakingStatePaths = worldSimulationStatePaths(sid, options);
+    const durable = () => Promise.all([
+      readFile(wakingStatePaths.state, "utf8"),
+      readFile(wakingStatePaths.history, "utf8"),
+    ]);
+    const wakingBytes = await durable();
+    const wakeProjection = await scheduleWorldSimulationAutonomousCognitionOpportunities({
+      world_simulation_session_id: sid,
+      runtime_context_by_character: context,
+    }, options);
+    const wakingAria = wakeProjection.scheduler_projection.opportunities
+      .find(item => item.character === "aria");
+    assert.ok(wakingAria, "committed wake admits the original deferred concern");
+    assert.ok(wakingAria.goal_refs.length > 0);
+    assert.ok(wakingAria.plan_refs.length > 0);
+    assert.ok(wakingAria.trigger_kinds.includes("unresolved_question"));
+    assert.deepEqual(await durable(), wakingBytes,
+      "foreground admission alone may not create memories, intentions or World turns");
+
+    if (mode === "foreground") {
+      await invokeDirect(eventIds[1]);
+      await invokeDirect(eventIds[2]);
+    } else {
+      const resumed = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid, max_turns: 2,
+      }, turnOptions);
+      assert.equal(resumed.committed_turn_count, 2);
+      assert.equal(resumed.pending_event_count, 0);
+      assert.equal(resumed.automatic_replay_allowed, false);
+    }
+    const after = await getWorldSimulationState(sid, options);
+    const history = await getWorldSimulationHistory(sid, options);
+    assert.equal(after.revision, 3);
+    assert.equal(history.turns.length, 3);
+    assert.deepEqual(history.turns.map(turn => turn.event.event_id), eventIds);
+    assert.deepEqual(after.state.event_queue, []);
+    assert.equal(Date.parse(after.state.simulation_time)
+      - Date.parse(initial.simulation_time), 1500);
+    const finalBytes = await durable();
+    const reentry = await scheduleWorldSimulationAutonomousCognitionOpportunities({
+      world_simulation_session_id: sid,
+      runtime_context_by_character: context,
+    }, options);
+    assert.deepEqual(await durable(), finalBytes);
+    const reentryAria = reentry.scheduler_projection.opportunities
+      .find(item => item.character === "aria");
+    assert.ok(reentryAria, "post-batch foreground reentry retains admitted concern");
+    assert.equal(reentryAria.opportunity_id, wakingAria.opportunity_id);
+    assert.deepEqual(after.state.memories.aria, initial.memories.aria);
+    assert.deepEqual(after.state.motivational_goal_history,
+      initial.motivational_goal_history);
+    assert.deepEqual(after.state.motivational_goal_events,
+      initial.motivational_goal_events);
+    assert.ok(brainCalls > 0, "both modes execute real queued World turns");
+    return {
+      simulation_time: after.state.simulation_time,
+      aria_physical_state: after.state.characters.aria.physical_state,
+      memories: after.state.memories,
+      motivational_goal_history: after.state.motivational_goal_history,
+      motivational_goal_events: after.state.motivational_goal_events,
+      event_queue: after.state.event_queue,
+      event_ids: history.turns.map(turn => turn.event.event_id),
+      wake_opportunity_id: wakingAria.opportunity_id,
+      reentry_opportunity_id: reentryAria.opportunity_id,
+      reentry_goal_refs: reentryAria.goal_refs,
+      reentry_plan_refs: reentryAria.plan_refs,
+      reentry_trigger_kinds: reentryAria.trigger_kinds,
+    };
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+const c6fForeground = await c6fNativeQueuedReentry("foreground");
+const c6fOffscreen = await c6fNativeQueuedReentry("offscreen");
+assert.deepEqual(c6fOffscreen, c6fForeground,
+  "same committed queued chronology preserves physical, memory, goal and reentry projections");
+console.log("CB-C6-F candidate paired Native queued reentry and no fabricated autobiography passed.");
+
