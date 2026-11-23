@@ -4,6 +4,9 @@ import { runWorldSimulationOffscreenPhysicalStep } from "./world-simulation-offs
 import {
   projectWorldSimulationOffscreenBreakpoint,
 } from "./world-simulation-offscreen-breakpoint-service.mjs";
+import {
+  projectWorldSimulationOffscreenSceneBreakpointPlan,
+} from "./world-simulation-offscreen-scene-breakpoint-plan-service.mjs";
 
 export const worldSimulationOffscreenEventBatchVersion =
   "cb-c6e14-offscreen-event-batch-v7";
@@ -55,6 +58,7 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
   let pendingPhysicalStepReason = null;
   let pendingBreakpoint = null;
   let pendingUnresolvedProcesses = [];
+  let pendingScenePlan = null;
   const report = (status, blockedReason = null) => {
     const confirmed = stateReadVerified
       && snapshot.revision === initial.revision + completed.length
@@ -85,6 +89,9 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
         ? { ...pendingBreakpoint } : null,
       pending_breakpoint_confirmed: confirmed && pendingBreakpoint !== null
         && pendingUnresolvedProcesses.length === 0,
+      // Engine-private read-only evidence. This never authorizes the blocked
+      // multi-active-scene writer or leaks into a Character Brain packet.
+      ...(confirmed && pendingScenePlan ? { pending_scene_plan: pendingScenePlan } : {}),
       unresolved_process_count: confirmed ? pendingUnresolvedProcesses.length : null,
       unresolved_processes: confirmed ? pendingUnresolvedProcesses.map(item => ({ ...item })) : null,
       requested_target_horizon: target,
@@ -102,6 +109,15 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
     });
     pendingBreakpoint = discovery.breakpoint;
     pendingUnresolvedProcesses = discovery.unresolved_processes;
+    const activeScenes = new Set([
+      ...Object.values(snapshot.state.ability_fields ?? {}),
+      ...Object.values(snapshot.state.projectiles ?? {}),
+    ].filter(item => item?.active === true)
+      .map(item => String(item.scene_id ?? "")));
+    pendingScenePlan = activeScenes.size > 1
+      ? projectWorldSimulationOffscreenSceneBreakpointPlan({
+        world_state: snapshot.state, target_horizon: target,
+      }) : null;
     if (pendingUnresolvedProcesses.length)
       return report("slow_process_authority_unresolved",
         "offscreen_slow_process_authority_unresolved");
@@ -129,6 +145,7 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
       pendingPhysicalStepReason = null;
       pendingBreakpoint = null;
       pendingUnresolvedProcesses = [];
+      pendingScenePlan = null;
       let eventId = event?.event_id ?? event?.id ?? null;
       let result;
       const executionKind = event ? "queued_event" : "physical_process_step";
