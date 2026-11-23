@@ -6618,4 +6618,159 @@ for (const mode of [
   }
 }
 console.log("CB-C6-F dual-scene simultaneous projectile contact atomic and fail-closed regression passed.");
+// C6-F: confirm ordinary World offscreen batches reach the previously
+// accepted dual-projectile atomic owner only after canonical scope refusal.
+for (const budget of [0, 1, 32]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-batch-dual-projectile-" + budget + "-" + process.pid + "-" + Date.now());
+  const batchOptions = { fixtureRoot: path.join(root, "batch"),
+    characterBrain: async () => assert.fail("physical projectile contact cannot invoke Brain") };
+  const directOptions = { fixtureRoot: path.join(root, "direct") };
+  try {
+    const initial = c6fDualProjectileContactWorld();
+    const [batchSession, directSession] = await Promise.all([
+      beginWorldSimulationSession({
+        simulation_label: "C6-F canonical dual projectile batch",
+        seed: "dual-projectile-batch", initial_world_state: initial,
+      }, batchOptions),
+      beginWorldSimulationSession({
+        simulation_label: "C6-F direct dual projectile reference",
+        seed: "dual-projectile-batch", initial_world_state: d1Clone(initial),
+      }, directOptions),
+    ]);
+    const sid = batchSession.world_simulation_session_id;
+    const directSid = directSession.world_simulation_session_id;
+    const initialState = await getWorldSimulationState(sid, batchOptions);
+    const at = ms => new Date(Date.parse(initial.simulation_time) + ms).toISOString();
+    const paths = worldSimulationStatePaths(sid, batchOptions);
+    const bytes = () => Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]);
+    const initialBytes = await bytes();
+    const result = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid,
+      max_turns: budget, target_horizon: at(100),
+    }, batchOptions);
+    const count = budget === 0 ? 0 : 1;
+    const currentTime = at(100 * count);
+    assert.equal(result.committed_turn_count, count);
+    assert.equal(result.committed_physical_step_count, count);
+    assert.equal(result.attempted_turn_count, count);
+    assert.equal(result.reached_simulation_time, currentTime);
+    assert.equal(result.target_horizon_claimed, count === 1);
+    assert.equal(result.automatic_replay_allowed, false);
+    assert.equal(result.state_reconciliation_required, false);
+    assert.equal(result.wall_clock_catch_up_used, false);
+    const after = await getWorldSimulationState(sid, batchOptions);
+    const history = await getWorldSimulationHistory(sid, batchOptions);
+    assert.equal(after.revision, initialState.revision + count);
+    assert.equal(history.turns.length, count);
+    assert.equal(after.state.simulation_time, currentTime);
+    assert.deepEqual(after.state.memories, initial.memories);
+    assert.deepEqual(after.state.motivational_goal_history,
+      initial.motivational_goal_history);
+    assert.deepEqual(after.state.event_queue, []);
+    if (count === 0) {
+      assert.equal(result.pending_scene_plan.active_scene_count, 2);
+      assert.equal(result.pending_scene_plan.multi_scene_atomic_execution_authorized, false);
+      assert.deepEqual(await bytes(), initialBytes,
+        "zero budget cannot consume or commit a cross-scene collision");
+    } else {
+      const directBefore = await getWorldSimulationState(directSid, directOptions);
+      const direct = await runWorldSimulationOffscreenDualProjectileContact({
+        world_simulation_session_id: directSid,
+        expected_revision: directBefore.revision,
+        expected_state_hash: directBefore.state_hash,
+        target_horizon: at(100),
+      }, directOptions);
+      assert.equal(direct.committed, true);
+      const directAfter = await getWorldSimulationState(directSid, directOptions);
+      assert.deepEqual(after.state, directAfter.state,
+        "canonical batch must have identical persisted World physics as direct owner");
+      const turn = history.turns[0];
+      assert.equal(turn.event.type, "offscreen_multiscene_projectile_contact_step");
+      assert.equal(turn.previous_state_hash, initialState.state_hash);
+      assert.equal(turn.next_state_hash, after.state_hash);
+      assert.deepEqual(turn.selected_action_intents, []);
+      assert.deepEqual(turn.knowledge_transitions, []);
+      assert.ok(turn.chronological_mutation_queue.queue_hash);
+      assert.ok(turn.chronological_mutation_execution.execution_hash);
+      assert.equal(turn.state_transitions.filter(t =>
+        t.field === "simulation_time").length, 3);
+      const contacts = turn.action_outcomes.filter(item =>
+        item.result === "projectile_hit_character");
+      assert.equal(contacts.length, 2);
+      assert.deepEqual(contacts.map(item => item.target), ["visitor", "aria"]);
+      assert.ok(contacts.every(item => item.damage_applied > 0));
+      for (const sceneId of ["room", "annex"])
+        assert.equal(after.state.scenes[sceneId].simulation_time, at(100));
+      const finalBytes = await bytes();
+      const noReplay = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid,
+        max_turns: 32, target_horizon: at(200),
+      }, batchOptions);
+      assert.equal(noReplay.committed_turn_count, 0);
+      assert.equal(noReplay.target_horizon_claimed, false);
+      assert.deepEqual(await bytes(), finalBytes,
+        "contact cannot be replayed or time advanced without another physical owner");
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+for (const mode of [
+  "unequal-contact", "acoustic", "overlap", "obstacle", "active-field",
+  "scene-mismatch", "bad-damage",
+]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-batch-dual-projectile-refuse-" + mode + "-" + process.pid + "-" + Date.now());
+  const options = { fixtureRoot: root,
+    characterBrain: async () => assert.fail("unsupported offscreen physics cannot invoke Brain") };
+  try {
+    const initial = c6fDualProjectileContactWorld();
+    if (mode === "unequal-contact")
+      initial.projectiles.annex_projectile.velocity_mps.x = 20;
+    if (mode === "acoustic") initial.sound_events = [{
+      schema_version: "cc6b-communication-acoustic-bridge-v1",
+      sound_id: "c6f-unheard", scene_id: "annex", active: true,
+    }];
+    if (mode === "overlap")
+      initial.scenes.annex.entity_positions.aria = { x: 4, y: 4 };
+    if (mode === "obstacle")
+      initial.scenes.room.obstacles = [{ obstacle_id: "c6f-cover" }];
+    if (mode === "active-field") initial.ability_fields = {
+      field_e3: d1Clone(e4FieldWorld().ability_fields.field_e3),
+    };
+    if (mode === "scene-mismatch") initial.scenes.annex.scene_id = "room";
+    if (mode === "bad-damage")
+      initial.projectiles.annex_projectile.base_damage = 1000;
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-F dual-projectile batch refusal",
+      seed: mode, initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, options);
+    const paths = worldSimulationStatePaths(sid, options);
+    const bytesBefore = await Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]);
+    const refused = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: 32,
+    }, options);
+    assert.equal(refused.committed_turn_count, 0);
+    assert.equal(refused.committed_physical_step_count, 0);
+    assert.equal(refused.physical_step_blocked_reason, mode === "acoustic"
+      ? "physical_step_acoustic_ingress_pending"
+      : "physical_step_scene_scope_unresolved");
+    assert.equal(refused.state_reconciliation_required, false);
+    assert.equal(refused.automatic_replay_allowed, false);
+    assert.deepEqual(await getWorldSimulationState(sid, options), before);
+    assert.deepEqual(await Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]), bytesBefore);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+console.log("CB-C6-F canonical batch dual-projectile atomic contact and fail-closed regression passed.");
 
