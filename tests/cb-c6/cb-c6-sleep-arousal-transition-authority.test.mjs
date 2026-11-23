@@ -6774,5 +6774,15 @@ for (const mode of [
     await rm(root, { recursive: true, force: true });
   }
 }
+// Sleep authority must remain active even when the ordinary World commit
+// avoids an unused historical parse. Real C6 sleep/replay/forgery scenarios
+// above exercise the full history-dependent validator.
+const commitSource = await readFile(
+  new URL("../../server/src/world-simulation-state-service.mjs", import.meta.url),
+  "utf8",
+);
+assert.match(commitSource, /const sleepTransitionProposed = Array\.isArray\(input\.state_transitions\)/);
+assert.match(commitSource, /committed_history: sleepTransitionProposed\s+\? await readJson\(paths\.history, "world simulation history"\)\s+: undefined/);
+assert.match(commitSource, /assertWorldSimulationSleepArousalCommitAuthority\(\{/);
 console.log("CB-C6-F canonical batch dual-projectile atomic contact and fail-closed regression passed.");
 
