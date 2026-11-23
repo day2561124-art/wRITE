@@ -6364,4 +6364,258 @@ for (const mode of [
   }
 }
 console.log("CB-C6-F canonical batch independent two-scene field injury and fail-closed guards passed.");
+import {
+  runWorldSimulationOffscreenDualProjectileContact,
+  worldSimulationOffscreenDualProjectileContactVersion,
+} from "../../server/src/world-simulation-offscreen-dual-projectile-contact-service.mjs";
+
+function c6fDualProjectileContactWorld() {
+  const state = e6ProjectileWorld("contact");
+  state.projectiles.projectile_e3.velocity_mps = { x: 10, y: 0 };
+  state.projectiles.projectile_e3.base_damage = 10;
+  state.scenes.annex = {
+    ...d1Clone(state.scenes.room), scene_id: "annex",
+    simulation_time: state.simulation_time,
+    entity_positions: {
+      visitor: { x: 3, y: 4 },
+      annex_guard: { x: 0, y: 0 },
+    },
+    observable_by: {
+      visitor: { visual: [], audible: [] },
+      annex_guard: { visual: [], audible: [] },
+    },
+    obstacles: [],
+  };
+  state.characters.visitor = d1Clone(state.characters.aria);
+  state.characters.annex_guard = d1Clone(state.characters.keeper);
+  state.memories.visitor = [{
+    memory_id: "c6f-dual-projectile-existing",
+    content: "previous independent perception", source: { kind: "fixture" },
+  }];
+  state.projectiles.annex_projectile = {
+    ...d1Clone(state.projectiles.projectile_e3),
+    projectile_id: "annex_projectile", scene_id: "annex",
+    owner: "annex_guard",
+  };
+  return state;
+}
+for (const reverse of [false, true]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-dual-projectile-" + reverse + "-" + process.pid + "-" + Date.now());
+  const jointOptions = { fixtureRoot: path.join(root, "joint") };
+  const roomOptions = { fixtureRoot: path.join(root, "room"),
+    characterBrain: async () => assert.fail("room's physical-only step must never call Brain") };
+  const annexOptions = { fixtureRoot: path.join(root, "annex"),
+    characterBrain: async () => assert.fail("annex's physical-only step must never call Brain") };
+  try {
+    const initial = c6fDualProjectileContactWorld();
+    if (reverse) {
+      initial.scenes = {
+        annex: initial.scenes.annex,
+        room: initial.scenes.room,
+      };
+      initial.projectiles = {
+        annex_projectile: initial.projectiles.annex_projectile,
+        projectile_e3: initial.projectiles.projectile_e3,
+      };
+    }
+    const sourceCopy = d1Clone(initial);
+    const roomInitial = d1Clone(initial);
+    roomInitial.projectiles.annex_projectile.active = false;
+    const annexInitial = d1Clone(initial);
+    annexInitial.projectiles.projectile_e3.active = false;
+    const [jointSession, roomSession, annexSession] = await Promise.all([
+      beginWorldSimulationSession({
+        simulation_label: "C6-F independent dual projectile contacts",
+        seed: "dual-projectile", initial_world_state: initial,
+      }, jointOptions),
+      beginWorldSimulationSession({
+        simulation_label: "C6-F standalone room projectile",
+        seed: "room-projectile-reference", initial_world_state: roomInitial,
+      }, roomOptions),
+      beginWorldSimulationSession({
+        simulation_label: "C6-F standalone annex projectile",
+        seed: "annex-projectile-reference", initial_world_state: annexInitial,
+      }, annexOptions),
+    ]);
+    const sid = jointSession.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, jointOptions);
+    const paths = worldSimulationStatePaths(sid, jointOptions);
+    const durable = () => Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]);
+    const originalBytes = await durable();
+    const at = ms => new Date(Date.parse(initial.simulation_time) + ms).toISOString();
+    const projected = projectWorldSimulationOffscreenSceneBreakpointPlan({
+      world_state: before.state, target_horizon: at(100),
+    });
+    assert.equal(projected.active_scene_count, 2);
+    assert.equal(projected.earliest_breakpoint_confirmed, true);
+    assert.equal(projected.global_breakpoint.kind, "projectile_character");
+    assert.equal(projected.global_breakpoint.delta_ms, 100);
+    assert.deepEqual(projected.scenes.map(s => s.scene_id), ["annex", "room"]);
+    assert.ok(projected.scenes.every(s =>
+      s.breakpoint_due_at_global_frontier));
+    const early = await runWorldSimulationOffscreenDualProjectileContact({
+      world_simulation_session_id: sid,
+      expected_revision: before.revision,
+      expected_state_hash: before.state_hash,
+      target_horizon: at(99),
+    }, jointOptions);
+    assert.equal(early.committed, false);
+    assert.equal(early.automatic_replay_allowed, false);
+    assert.deepEqual(await durable(), originalBytes);
+
+    const allowed = await runWorldSimulationOffscreenDualProjectileContact({
+      world_simulation_session_id: sid,
+      expected_revision: before.revision,
+      expected_state_hash: before.state_hash,
+      target_horizon: at(100),
+    }, jointOptions);
+    assert.equal(allowed.version, worldSimulationOffscreenDualProjectileContactVersion);
+    assert.equal(allowed.committed, true);
+    assert.equal(allowed.automatic_replay_allowed, false);
+    assert.equal(allowed.reached_simulation_time, at(100));
+    assert.deepEqual(allowed.scene_ids, ["annex", "room"]);
+    const after = await getWorldSimulationState(sid, jointOptions);
+    const history = await getWorldSimulationHistory(sid, jointOptions);
+    assert.equal(after.revision, before.revision + 1);
+    assert.equal(history.turns.length, 1);
+    assert.equal(after.state.simulation_time, at(100));
+    assert.equal(after.state.scenes.room.simulation_time, at(100));
+    assert.equal(after.state.scenes.annex.simulation_time, at(100));
+    for (const projectileId of ["projectile_e3", "annex_projectile"]) {
+      const projectile = after.state.projectiles[projectileId];
+      assert.equal(projectile.active, false);
+      assert.equal(projectile.termination_reason, "character_contact");
+      assert.equal(projectile.age_ms, 100);
+    }
+    const turn = history.turns[0];
+    assert.equal(turn.event.type, "offscreen_multiscene_projectile_contact_step");
+    assert.equal(turn.previous_state_hash, before.state_hash);
+    assert.equal(turn.next_state_hash, after.state_hash);
+    assert.deepEqual(turn.selected_action_intents, []);
+    assert.deepEqual(turn.knowledge_transitions, []);
+    assert.ok(turn.chronological_mutation_queue.queue_hash);
+    assert.ok(turn.chronological_mutation_execution.execution_hash);
+    assert.equal(turn.state_transitions.filter(t =>
+      t.field === "simulation_time").length, 3);
+    const hits = turn.action_outcomes.filter(outcome =>
+      outcome.result === "projectile_hit_character");
+    assert.equal(hits.length, 2);
+    assert.deepEqual(hits.map(outcome => outcome.scene_id), ["annex", "room"]);
+    assert.deepEqual(hits.map(outcome => outcome.target), ["visitor", "aria"]);
+    assert.ok(hits.every(outcome => outcome.damage_applied > 0));
+    assert.equal(turn.causal_timeline.entries.filter(entry =>
+      entry.kind === "projectile_resolution").length, 2);
+    for (const ref of [
+      { session: roomSession, options: roomOptions,
+        target: "aria", projectileId: "projectile_e3" },
+      { session: annexSession, options: annexOptions,
+        target: "visitor", projectileId: "annex_projectile" },
+    ]) {
+      const solo = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: ref.session.world_simulation_session_id,
+        max_turns: 1, target_horizon: at(100),
+      }, ref.options);
+      assert.equal(solo.committed_physical_step_count, 1);
+      const soloAfter = await getWorldSimulationState(
+        ref.session.world_simulation_session_id, ref.options);
+      assert.equal(soloAfter.state.simulation_time, at(100));
+      assert.deepEqual(after.state.characters[ref.target].physical_state,
+        soloAfter.state.characters[ref.target].physical_state,
+        "each projectile injury must match its real standalone World contact");
+      assert.deepEqual(after.state.projectiles[ref.projectileId],
+        soloAfter.state.projectiles[ref.projectileId]);
+      const soloHistory = await getWorldSimulationHistory(
+        ref.session.world_simulation_session_id, ref.options);
+      const soloHit = soloHistory.turns[0].action_outcomes.find(outcome =>
+        outcome.result === "projectile_hit_character"
+        && outcome.target === ref.target);
+      assert.ok(soloHit);
+      assert.equal(hits.find(outcome =>
+        outcome.target === ref.target).damage_applied, soloHit.damage_applied);
+    }
+    assert.deepEqual(after.state.memories, initial.memories);
+    assert.deepEqual(after.state.motivational_goal_history,
+      initial.motivational_goal_history);
+    assert.deepEqual(after.state.event_queue, []);
+    const saved = await durable();
+    await assert.rejects(runWorldSimulationOffscreenDualProjectileContact({
+      world_simulation_session_id: sid,
+      expected_revision: before.revision,
+      expected_state_hash: before.state_hash,
+    }, jointOptions), { code: "C6F_DUAL_PROJECTILE_CONTACT_STALE" });
+    assert.deepEqual(await durable(), saved,
+      "stale projectile contact cannot inflict damage a second time");
+    assert.deepEqual(initial, sourceCopy);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+for (const mode of [
+  "unequal-contact", "acoustic", "queue", "overlap", "obstacle", "active-field",
+  "scene-mismatch", "bad-damage",
+]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-dual-projectile-refusal-" + mode + "-" + process.pid + "-" + Date.now());
+  const options = { fixtureRoot: root };
+  try {
+    const initial = c6fDualProjectileContactWorld();
+    if (mode === "unequal-contact")
+      initial.projectiles.annex_projectile.velocity_mps.x = 20;
+    if (mode === "acoustic") initial.sound_events = [{
+      schema_version: "cc6b-communication-acoustic-bridge-v1",
+      kind: "communication_speech_signal", scene_id: "annex",
+      sound_id: "c6f-waiting-for-perception", active: true,
+    }];
+    if (mode === "queue") initial.event_queue = [{
+      event_id: "c6f-queued", scene_id: "room",
+    }];
+    if (mode === "overlap")
+      initial.scenes.annex.entity_positions.aria = { x: 4, y: 4 };
+    if (mode === "obstacle")
+      initial.scenes.room.obstacles = [{ obstacle_id: "c6f-wall" }];
+    if (mode === "active-field") initial.ability_fields = {
+      field_e3: d1Clone(e4FieldWorld().ability_fields.field_e3),
+    };
+    if (mode === "scene-mismatch") initial.scenes.annex.scene_id = "room";
+    if (mode === "bad-damage")
+      initial.projectiles.annex_projectile.base_damage = 1000;
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-F dual projectile contact unsafe refusal",
+      seed: mode, initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, options);
+    const paths = worldSimulationStatePaths(sid, options);
+    const bytes = await Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]);
+    const denial = await runWorldSimulationOffscreenDualProjectileContact({
+      world_simulation_session_id: sid,
+      expected_revision: before.revision,
+      expected_state_hash: before.state_hash,
+    }, options);
+    assert.equal(denial.committed, false);
+    assert.equal(denial.automatic_replay_allowed, false);
+    assert.equal(denial.blocked_reason, {
+      "unequal-contact": "simultaneous_independent_contacts_required",
+      acoustic: "listener_acoustic_ingress_pending",
+      queue: "queued_event_precedes_physical_step",
+      overlap: "cross_scene_character_identity_overlap",
+      obstacle: "scene_geometry_or_clock_authority_unresolved",
+      "active-field": "active_ability_fields_not_yet_supported",
+      "scene-mismatch": "scene_geometry_or_clock_authority_unresolved",
+      "bad-damage": "projectile_contact_process_outside_slice",
+    }[mode]);
+    assert.deepEqual(await getWorldSimulationState(sid, options), before);
+    assert.deepEqual(await Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]), bytes);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+console.log("CB-C6-F dual-scene simultaneous projectile contact atomic and fail-closed regression passed.");
 
