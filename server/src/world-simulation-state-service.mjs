@@ -355,6 +355,47 @@ export async function commitWorldSimulationTurn(
       throw error;
     }
   }
+  if (input.autonomous_reply_subjective_memory_encoding != null) {
+    const meta = requireObject(input.autonomous_reply_subjective_memory_encoding,
+      "autonomous_reply_subjective_memory_encoding");
+    if (meta.version !== "world-reply-subjective-dialogue-memory-v1"
+      || input.event != null
+      || input.autonomous_actor_initiated_action != null
+      || input.autonomous_listener_clarification_reply != null
+      || input.autonomous_cognition_goal_commitment != null
+      || input.autonomous_cognition_plan_commitment != null
+      || (input.selected_action_intents ?? []).length !== 0
+      || (input.action_outcomes ?? []).length !== 0
+      || typeof meta.character !== "string" || !meta.character.trim()
+      || typeof meta.scene_id !== "string" || !meta.scene_id.trim()
+      || typeof meta.source_turn_id !== "string" || !meta.source_turn_id.trim()
+      || typeof meta.source_turn_hash !== "string" || !meta.source_turn_hash.trim()
+      || typeof meta.source_character !== "string" || !meta.source_character.trim()
+      || typeof meta.source_action_id !== "string" || !meta.source_action_id.trim()
+      || meta.source_character === meta.character
+      || !Number.isSafeInteger(meta.source_revision_to)
+      || meta.source_revision_to !== input.expected_revision
+      || typeof meta.observer_increment_ref !== "string" || !meta.observer_increment_ref
+      || typeof meta.memory_id !== "string" || !meta.memory_id.trim()
+      || typeof meta.memory_hash !== "string" || !meta.memory_hash.trim()
+      || typeof meta.interpreted_content_hash !== "string"
+      || !meta.interpreted_content_hash.trim()
+      || !["interpreted","partial","uncertain"].includes(meta.interpretation_status)
+      || input.subjective_memory_formation?.result?.created_memory_count !== 1
+      || input.subjective_memory_formation?.audit?.result_hash !== meta.phase63a_result_hash
+      || input.subjective_memory_formation?.audit?.version
+        !== "phase63a-subjective-memory-formation-v2"
+      || input.subjective_memory_mutation_queue?.queue_hash !== meta.mutation_queue_hash
+      || input.chronological_mutation_queue?.queue_hash !== meta.mutation_queue_hash
+      || !Array.isArray(input.state_transitions)
+      || input.state_transitions.length !== 1
+      || input.state_transitions[0]?.field !== "memories." + meta.character) {
+      const error = new Error(
+        "Private subjective reply memory needs an exact Phase63A World-only transaction.");
+      error.code = "WORLD_REPLY_MEMORY_COMMIT_METADATA_INVALID";
+      throw error;
+    }
+  }
   const nextWorldState = requireObject(input.next_world_state, "next_world_state");
   const paths = worldSimulationStatePaths(sessionId, options);
   let committedEnvelope = null;
@@ -468,6 +509,9 @@ export async function commitWorldSimulationTurn(
             ...(input.autonomous_listener_clarification_reply != null
               ? { autonomous_listener_clarification_reply:
                   input.autonomous_listener_clarification_reply } : {}),
+            ...(input.autonomous_reply_subjective_memory_encoding != null
+              ? { autonomous_reply_subjective_memory_encoding:
+                  input.autonomous_reply_subjective_memory_encoding } : {}),
             selected_action_intents: input.selected_action_intents ?? [],
             subjective_choice_commitment_receipts:
               input.subjective_choice_commitment_receipts ?? null,
