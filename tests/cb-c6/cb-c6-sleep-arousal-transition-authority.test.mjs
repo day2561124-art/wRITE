@@ -4716,4 +4716,268 @@ for (const [mode, breakpointMs] of [
   ["field-first", 50], ["projectile-first", 100], ["tie", 100],
 ]) await c6fNativePhysicalForegroundParity(mode, breakpointMs);
 console.log("CB-C6-F Native physical/foreground paired causal breakpoint regression passed.");
+// C6-F candidate: a speech signal remains reachable for exactly the next
+// listener perception turn in both foreground and bounded queued offscreen runs.
+// No physical-only fast-forward may eat the pending acoustic ingress.
+async function c6fNativeAcousticReentry(mode) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-acoustic-" + mode + "-" + process.pid + "-" + Date.now());
+  const options = { fixtureRoot: root };
+  const meaning = "男孩已離開房子";
+  const utterance = "男孩離開了房子。";
+  try {
+    const initial = {
+      simulation_time: "2026-09-21T00:00:00+08:00",
+      event_queue: [{
+        event_id: "c6f-speak", type: "conversation", scene_id: "room",
+        participants: ["A", "B"], summary: "conversation turn",
+        next_events: [{
+          event_id: "c6f-hear", type: "continue_conversation", scene_id: "room",
+          participants: ["B"], summary: "next listener perception opportunity",
+          next_events: [{
+            event_id: "c6f-after", type: "continue_conversation", scene_id: "room",
+            participants: ["B"], summary: "subsequent independent turn",
+          }],
+        }],
+      }],
+      scenes: {
+        room: {
+          scene_id: "room", simulation_time: "2026-09-21T00:00:00+08:00",
+          dimensions: { width_m: 6, depth_m: 6 },
+          entity_positions: { A: { x: 2, y: 2 }, B: { x: 3, y: 2 } },
+          audibility_profiles: { B: { minimum_audible_db: 35 } },
+          observable_by: {
+            A: { visual: [], audible: [] }, B: { visual: [], audible: [] },
+          },
+        },
+      },
+      characters: {
+        A: {
+          known: [meaning], current_goal: "告知 B",
+          relationships: { B: "朋友" },
+          speech_acoustics: { sound_level_db_at_1m: 60 },
+          communication_goal: {
+            character: "A", purpose: "告知", addressee: "B",
+            mode: "direct", public_content: meaning,
+            claim_kind: "sincere_assertion",
+            surface_realization: {
+              schema_version: "cc5-mandarin-clause-request-v1",
+              semantic_anchor: meaning,
+              clause: {
+                subject: "男孩", predicate: "離開",
+                aspect_particle: "了", object: "房子",
+              },
+            },
+          },
+        },
+        B: {
+          known: [], current_goal: "聽周遭聲音",
+          relationships: { A: "朋友" },
+        },
+      },
+      memories: { A: [], B: [] },
+      available_actions: { A: [], B: [] },
+    };
+    const sourceCopy = d1Clone(initial);
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-F native speech acoustic foreground/offscreen pairing",
+      seed: "c6f-auditory-reentry",
+      rules: {
+        event_driven: true, persistent_causality: true,
+        communication_action_seconds: 0.25,
+      },
+      initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const runtime = createWorldSimulationCharacterRuntimeManager({
+      identityResolver: async name => ({
+        entity_id: "c6f_acoustic_character_" + name,
+        canonical_name: name, identity_source: "c6f_fixture", formal: true,
+      }),
+    });
+    const listenerPackets = [];
+    let selectedSpeechId = null;
+    let followup = false;
+    const turnOptions = {
+      ...options, characterRuntimeManager: runtime,
+      characterBrain: async packet => {
+        if (packet.character === "A") {
+          const candidate = packet.candidate_action_intents.find(item =>
+            item.communication?.surface_realization_complete === true);
+          assert.ok(candidate, "the foreground speaker must select a real speech action");
+          selectedSpeechId = candidate.action_id;
+          return { action_id: candidate.action_id };
+        }
+        if (packet.character === "B" && followup)
+          listenerPackets.push(d1Clone(packet));
+        return "reject_all";
+      },
+    };
+    const direct = async () => {
+      const result = await runWorldSimulationTurn({
+        world_simulation_session_id: sid,
+      }, turnOptions);
+      assert.equal(result.committed, true);
+    };
+    if (mode === "foreground") {
+      await direct();
+    } else {
+      const emittedBatch = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid, max_turns: 1,
+      }, turnOptions);
+      assert.equal(emittedBatch.committed_turn_count, 1);
+      assert.equal(emittedBatch.pending_event_id, "c6f-hear");
+      assert.equal(emittedBatch.automatic_replay_allowed, false);
+    }
+    assert.ok(selectedSpeechId);
+    const afterEmission = await getWorldSimulationState(sid, options);
+    const firstHistory = await getWorldSimulationHistory(sid, options);
+    const outcome = firstHistory.turns[0].action_outcomes.find(item =>
+      item.actor === "A" && item.result === "communication_emitted");
+    assert.ok(outcome);
+    assert.equal(outcome.communication_acoustic_signal.registered, true);
+    const signalId = outcome.communication_acoustic_signal.sound_id;
+    assert.ok(signalId);
+    const signal = afterEmission.state.sound_events.find(item =>
+      item.sound_id === signalId);
+    assert.ok(signal);
+    assert.equal(signal.communication_action_id, selectedSpeechId);
+    for (const hidden of [meaning, utterance]) {
+      assert.equal(JSON.stringify(signal).includes(hidden), false,
+        "World sound exposes no private speaker semantics or realized text");
+    }
+    const blockedWithQueue = await e4Resolve(afterEmission.state);
+    assert.equal(blockedWithQueue.blocked_reason,
+      "physical_step_queue_not_empty");
+    const acousticOnly = d1Clone(afterEmission.state);
+    acousticOnly.event_queue = [];
+    const blockedWithSound = await e4Resolve(acousticOnly);
+    assert.equal(blockedWithSound.blocked_reason,
+      "physical_step_acoustic_ingress_pending");
+    const paths = worldSimulationStatePaths(sid, options);
+    const durable = () => Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]);
+    const beforeFollowup = await durable();
+    assert.equal(afterEmission.state.event_queue[0].event_id, "c6f-hear");
+    assert.deepEqual(await durable(), beforeFollowup,
+      "physical-only admission checks are pure");
+
+    followup = true;
+    if (mode === "foreground") {
+      await direct();
+      await direct();
+    } else {
+      const resumed = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid, max_turns: 2,
+      }, turnOptions);
+      assert.equal(resumed.committed_turn_count, 2);
+      assert.equal(resumed.pending_event_count, 0);
+      assert.equal(resumed.automatic_replay_allowed, false);
+      assert.equal(resumed.state_reconciliation_required, false);
+    }
+    assert.equal(listenerPackets.length, 2);
+    const heard = JSON.stringify(listenerPackets[0]);
+    const afterHeard = JSON.stringify(listenerPackets[1]);
+    assert.equal(heard.includes("unidentified_speech_sound"), true);
+    assert.equal(afterHeard.includes("unidentified_speech_sound"), false,
+      "speech signal must not be replayed to the listener in later turns");
+    for (const raw of [heard, afterHeard]) {
+      for (const privateValue of [meaning, utterance, signalId])
+        assert.equal(raw.includes(privateValue), false,
+          "speech is heard as sound, not automatically understood as truth");
+    }
+    assert.equal(listenerPackets[0].perception.information_boundary
+      .programmatic_audibility_enforced, true);
+
+    const final = await getWorldSimulationState(sid, options);
+    const history = await getWorldSimulationHistory(sid, options);
+    assert.equal(final.revision, 3);
+    assert.deepEqual(history.turns.map(turn => turn.event.event_id),
+      ["c6f-speak", "c6f-hear", "c6f-after"]);
+    assert.deepEqual(final.state.event_queue, []);
+    assert.equal((final.state.sound_events ?? []).some(item =>
+      item.sound_id === signalId), false);
+    // Actual speech and actual hearing SHOULD form traceable subjective memories.
+    // Offscreen reduction must preserve, not erase, these real experiences.
+    const speakerMemories = final.state.memories.A ?? [];
+    const listenerMemories = final.state.memories.B ?? [];
+    assert.equal(speakerMemories.length, 1);
+    assert.equal(listenerMemories.length, 1);
+    const speakerMemory = speakerMemories[0];
+    const listenerMemory = listenerMemories[0];
+    assert.equal(speakerMemory.memory_type, "episodic_action_experience");
+    assert.equal(speakerMemory.content.kind, "post_outcome_action_experience");
+    assert.equal(speakerMemory.content.perceived_status, "communication_emitted");
+    assert.equal(speakerMemory.internal_provenance.event_id, "c6f-speak");
+    assert.equal(speakerMemory.subjective_memory_not_world_truth, true);
+    assert.equal(listenerMemory.memory_type, "episodic_direct_perception");
+    assert.equal(listenerMemory.content.kind, "audible_sound");
+    assert.equal(listenerMemory.content.perceptual_label, "unidentified_speech_sound");
+    assert.equal(listenerMemory.internal_provenance.event_id, "c6f-hear");
+    assert.equal(listenerMemory.source.kind, "direct_perception");
+    assert.equal(listenerMemory.subjective_memory_not_world_truth, true);
+    for (const value of [meaning, utterance]) {
+      assert.equal(JSON.stringify(listenerMemory.content).includes(value), false,
+        "heard sound memory must not be promoted to understood speech");
+    }
+    assert.deepEqual(final.state.characters.A.known, initial.characters.A.known);
+    assert.deepEqual(final.state.characters.B.known, initial.characters.B.known);
+    assert.deepEqual(final.state.characters.A.relationships,
+      initial.characters.A.relationships);
+    assert.deepEqual(final.state.characters.B.relationships,
+      initial.characters.B.relationships);
+    const emitted = history.turns.flatMap(turn => turn.action_outcomes)
+      .filter(item => item.actor === "A" && item.result === "communication_emitted");
+    assert.equal(emitted.length, 1);
+    for (let i = 0; i < history.turns.length; i++) {
+      assert.equal(history.turns[i].previous_state_hash,
+        i ? history.turns[i - 1].next_state_hash : session.world_state_hash);
+      if (i === history.turns.length - 1)
+        assert.equal(history.turns[i].next_state_hash, final.state_hash);
+    }
+    const stable = await durable();
+    const reentry = await scheduleWorldSimulationAutonomousCognitionOpportunities({
+      world_simulation_session_id: sid, runtime_context_by_character: {},
+    }, options);
+    assert.ok(reentry.scheduler_projection);
+    assert.deepEqual(await durable(), stable,
+      "reentry read creates neither a fabricated social memory nor a World turn");
+    assert.deepEqual(initial, sourceCopy);
+    return {
+      eventIds: history.turns.map(turn => turn.event.event_id),
+      elapsedTime: final.state.simulation_time,
+      revision: final.revision,
+      heardOnce: heard.includes("unidentified_speech_sound"),
+      heardAgain: afterHeard.includes("unidentified_speech_sound"),
+      emissionCount: emitted.length,
+      finalSoundCount: (final.state.sound_events ?? []).length,
+      memoryEvidence: {
+        speaker: {
+          type: speakerMemory.memory_type,
+          content: speakerMemory.content,
+          event: speakerMemory.internal_provenance.event_id,
+          subjective: speakerMemory.subjective_memory_not_world_truth,
+        },
+        listener: {
+          type: listenerMemory.memory_type,
+          content: listenerMemory.content,
+          event: listenerMemory.internal_provenance.event_id,
+          subjective: listenerMemory.subjective_memory_not_world_truth,
+        },
+      },
+      speakerKnown: final.state.characters.A.known,
+      listenerKnown: final.state.characters.B.known,
+      relationships: [final.state.characters.A.relationships,
+        final.state.characters.B.relationships],
+    };
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+const c6fAcousticForeground = await c6fNativeAcousticReentry("foreground");
+const c6fAcousticOffscreen = await c6fNativeAcousticReentry("offscreen");
+assert.deepEqual(c6fAcousticOffscreen, c6fAcousticForeground,
+  "queued offscreen replay preserves actual speech, listener ingress and social evidence");
+console.log("CB-C6-F Native speech/acoustic foreground and offscreen reentry parity passed.");
 
