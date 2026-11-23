@@ -1,6 +1,7 @@
 import { getWorldSimulationState } from "./world-simulation-state-service.mjs";
 import { runWorldSimulationTurn } from "./world-simulation-loop-service.mjs";
 import { runWorldSimulationOffscreenPhysicalStep } from "./world-simulation-offscreen-physical-step-service.mjs";
+import { runWorldSimulationOffscreenMultiSceneFieldStep } from "./world-simulation-offscreen-multiscene-field-step-service.mjs";
 import {
   projectWorldSimulationOffscreenBreakpoint,
 } from "./world-simulation-offscreen-breakpoint-service.mjs";
@@ -166,11 +167,23 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
             || (discovery.breakpoint.delta_ms === 0 && !isCurrentProjectileEffect(discovery)))
           return reportIdle();
         attempts += 1;
-        result = await runWorldSimulationOffscreenPhysicalStep({
+        const physicalInput = {
           world_simulation_session_id: sessionId,
           expected_revision: snapshot.revision, expected_state_hash: snapshot.state_hash,
           ...(target === null ? {} : { target_horizon: target }),
-        }, options);
+        };
+        result = await runWorldSimulationOffscreenPhysicalStep(physicalInput, options);
+        // Only an explicit scene-scope refusal may enter the strictly bounded
+        // two-harmless-field-scene owner. Keep all existing noncommitted
+        // reasons unchanged when that owner also refuses admission.
+        if (result.committed !== true
+            && result.blocked_reason === "physical_step_scene_scope_unresolved") {
+          const physicalOnlyOptions = { ...options };
+          delete physicalOnlyOptions.characterBrain;
+          const scoped = await runWorldSimulationOffscreenMultiSceneFieldStep(
+            physicalInput, physicalOnlyOptions);
+          if (scoped.committed === true) result = scoped;
+        }
         eventId = result.turn_id ?? null;
         // Physical Native returns the atomic writer envelope, not queued-turn shape.
         // Read its actual committed identity before any post-commit state read.
