@@ -154,7 +154,7 @@ export async function initializeWorldSimulationState(
       {
         type: "write",
         filePath: paths.history,
-        content: `${JSON.stringify(history, null, 2)}\n`,
+        content: encodeWorldSimulationHistory(history),
       },
     ],
     {
@@ -193,6 +193,14 @@ export async function getWorldSimulationHistory(sessionId, options = {}) {
   return history;
 }
 
+
+// The World History file is machine-readable JSON, not a line-oriented log.
+// Avoid writing quadratic amounts of indentation/whitespace as committed
+// nested evidence grows. Hashes and causal lineage are computed from values,
+// not the storage formatting. A final newline keeps CLI inspection usable.
+function encodeWorldSimulationHistory(history) {
+  return JSON.stringify(history) + "\\n";
+}
 
 function arrayTurns(history) {
   return Array.isArray(history?.turns) ? history.turns : [];
@@ -986,7 +994,7 @@ export async function commitWorldSimulationTurn(
             ...history,
             turns: [...arrayTurns(history), committedHistoryEntry],
           };
-          return `${JSON.stringify(nextHistory, null, 2)}\n`;
+          return encodeWorldSimulationHistory(nextHistory);
         },
       },
     ],
