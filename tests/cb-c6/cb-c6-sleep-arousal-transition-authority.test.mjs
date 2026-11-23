@@ -6721,7 +6721,7 @@ for (const budget of [0, 1, 32]) {
   }
 }
 for (const mode of [
-  "unequal-contact", "acoustic", "overlap", "obstacle", "active-field",
+  "acoustic", "overlap", "obstacle", "active-field",
   "scene-mismatch", "bad-damage",
 ]) {
   const root = path.join(projectRoot, "tests", ".tmp",
@@ -6730,8 +6730,6 @@ for (const mode of [
     characterBrain: async () => assert.fail("unsupported offscreen physics cannot invoke Brain") };
   try {
     const initial = c6fDualProjectileContactWorld();
-    if (mode === "unequal-contact")
-      initial.projectiles.annex_projectile.velocity_mps.x = 20;
     if (mode === "acoustic") initial.sound_events = [{
       schema_version: "cc6b-communication-acoustic-bridge-v1",
       sound_id: "c6f-unheard", scene_id: "annex", active: true,
@@ -7012,3 +7010,194 @@ for (const mode of [
 }
 console.log("CB-C6-F sequential two-scene projectile frontier, in-flight carryover and refusal passed.");
 
+// C6-F: guarded ordinary offscreen batches reuse the independently verified
+// staggered two-scene physical owner. A previous committed contact receipt,
+// not just an inactive projectile, authorizes the second joint clock update.
+for (const budget of [0, 1, 2, 32]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-batch-staggered-" + budget + "-" + process.pid + "-" + Date.now());
+  const batchOptions = { fixtureRoot: path.join(root, "batch"),
+    characterBrain: async () => assert.fail("staggered physical-only World batches cannot call Brain") };
+  const referenceOptions = { fixtureRoot: path.join(root, "direct") };
+  try {
+    const initial = c6fStaggeredProjectileWorld();
+    const [session, reference] = await Promise.all([
+      beginWorldSimulationSession({
+        simulation_label: "C6-F canonical two-frontier projectile batch",
+        seed: "staggered-contact-batch", initial_world_state: initial,
+      }, batchOptions),
+      beginWorldSimulationSession({
+        simulation_label: "C6-F direct two-frontier projectile reference",
+        seed: "staggered-contact-batch", initial_world_state: d1Clone(initial),
+      }, referenceOptions),
+    ]);
+    const sid = session.world_simulation_session_id;
+    const directSid = reference.world_simulation_session_id;
+    const start = await getWorldSimulationState(sid, batchOptions);
+    const paths = worldSimulationStatePaths(sid, batchOptions);
+    const bytes = () => Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]);
+    const originalBytes = await bytes();
+    const at = ms => new Date(Date.parse(start.state.simulation_time) + ms).toISOString();
+    const result = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid,
+      max_turns: budget, target_horizon: at(200),
+    }, batchOptions);
+    const count = Math.min(2, budget);
+    assert.equal(result.committed_turn_count, count);
+    assert.equal(result.committed_physical_step_count, count);
+    assert.equal(result.attempted_turn_count, count);
+    assert.equal(result.reached_simulation_time, at(count * 100));
+    assert.equal(result.automatic_replay_allowed, false);
+    assert.equal(result.state_reconciliation_required, false);
+    assert.equal(result.wall_clock_catch_up_used, false);
+    assert.equal(result.target_horizon_claimed, count === 2);
+    let current = await getWorldSimulationState(sid, batchOptions);
+    assert.equal(current.revision, count);
+    for (let i = 0; i < count; i++) {
+      const before = await getWorldSimulationState(directSid, referenceOptions);
+      const direct = await runWorldSimulationOffscreenStaggeredProjectileStep({
+        world_simulation_session_id: directSid,
+        expected_revision: before.revision,
+        expected_state_hash: before.state_hash,
+        target_horizon: at(200),
+      }, referenceOptions);
+      assert.equal(direct.committed, true);
+    }
+    const directFinal = await getWorldSimulationState(directSid, referenceOptions);
+    assert.deepEqual(current.state, directFinal.state,
+      "canonical batch and direct World owner must resolve exact same independent projectiles");
+    assert.deepEqual(current.state.memories, initial.memories);
+    assert.deepEqual(current.state.motivational_goal_history,
+      initial.motivational_goal_history);
+    assert.deepEqual(current.state.event_queue, []);
+    const history = await getWorldSimulationHistory(sid, batchOptions);
+    assert.equal(history.turns.length, count);
+    for (let i = 0; i < history.turns.length; i++) {
+      const turn = history.turns[i];
+      assert.equal(turn.event.type, "offscreen_multiscene_projectile_staggered_step");
+      assert.equal(turn.revision_from, i);
+      assert.equal(turn.revision_to, i + 1);
+      assert.equal(turn.previous_state_hash, i === 0
+        ? start.state_hash : history.turns[i - 1].next_state_hash);
+      assert.deepEqual(turn.selected_action_intents, []);
+      assert.deepEqual(turn.knowledge_transitions, []);
+      assert.ok(turn.chronological_mutation_queue.queue_hash);
+      assert.ok(turn.chronological_mutation_execution.execution_hash);
+      const contacts = turn.action_outcomes.filter(item =>
+        item.result === "projectile_hit_character");
+      assert.equal(contacts.length, 1);
+      assert.equal(contacts[0].target, i === 0 ? "aria" : "visitor");
+      assert.equal(contacts[0].scene_id, i === 0 ? "room" : "annex");
+      assert.ok(contacts[0].damage_applied > 0);
+      assert.equal(turn.state_transitions.filter(t =>
+        t.field === "simulation_time").length, 3);
+    }
+    if (count > 0) assert.equal(history.turns.at(-1).next_state_hash, current.state_hash);
+    if (count === 0) {
+      assert.deepEqual(await bytes(), originalBytes);
+      assert.equal(result.pending_scene_plan.active_scene_count, 2);
+    }
+    if (count === 1) {
+      assert.equal(current.state.projectiles.annex_projectile.active, true);
+      assert.equal(current.state.projectiles.annex_projectile.position.x, 1.5);
+      assert.equal(current.state.projectiles.annex_projectile.age_ms, 100);
+      assert.equal(current.state.characters.visitor.physical_state.health_current, 100);
+      for (const sceneId of ["annex", "room"])
+        assert.equal(current.state.scenes[sceneId].simulation_time, at(100));
+      const followup = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid, max_turns: 1, target_horizon: at(200),
+      }, batchOptions);
+      assert.equal(followup.committed_turn_count, 1);
+      assert.equal(followup.committed_physical_step_count, 1);
+      assert.equal(followup.reached_simulation_time, at(200));
+      current = await getWorldSimulationState(sid, batchOptions);
+      const directBefore = await getWorldSimulationState(directSid, referenceOptions);
+      const directNext = await runWorldSimulationOffscreenStaggeredProjectileStep({
+        world_simulation_session_id: directSid,
+        expected_revision: directBefore.revision,
+        expected_state_hash: directBefore.state_hash,
+        target_horizon: at(200),
+      }, referenceOptions);
+      assert.equal(directNext.committed, true);
+      const directNextState = await getWorldSimulationState(directSid, referenceOptions);
+      assert.deepEqual(current.state, directNextState.state);
+      assert.equal(current.revision, 2);
+      const twoTurns = await getWorldSimulationHistory(sid, batchOptions);
+      assert.equal(twoTurns.turns.length, 2);
+      assert.equal(twoTurns.turns[1].previous_state_hash, twoTurns.turns[0].next_state_hash);
+    }
+    if (budget >= 2 || budget === 1) {
+      assert.equal(current.state.simulation_time, at(200));
+      assert.equal(current.state.characters.aria.physical_state.health_current, 90);
+      assert.equal(current.state.characters.visitor.physical_state.health_current, 90);
+      for (const sceneId of ["annex", "room"])
+        assert.equal(current.state.scenes[sceneId].simulation_time, at(200));
+      assert.equal(current.state.projectiles.annex_projectile.active, false);
+      const bytesAtRest = await bytes();
+      const idle = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid, max_turns: 32,
+        target_horizon: at(250),
+      }, batchOptions);
+      assert.equal(idle.committed_turn_count, 0);
+      assert.equal(idle.target_horizon_claimed, false);
+      assert.deepEqual(await bytes(), bytesAtRest,
+        "both contacts must be exactly-once despite spare budget and later horizons");
+    }
+    assert.deepEqual(await getWorldSimulationHistory(sid, batchOptions),
+      await getWorldSimulationHistory(sid, batchOptions));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+for (const mode of ["acoustic", "obstacle", "overlap", "active-field", "scene-mismatch"]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-f-batch-staggered-refuse-" + mode + "-" + process.pid + "-" + Date.now());
+  const options = { fixtureRoot: root,
+    characterBrain: async () => assert.fail("unsafe staggered physics may not call Brain") };
+  try {
+    const initial = c6fStaggeredProjectileWorld();
+    if (mode === "acoustic") initial.sound_events = [{
+      schema_version: "cc6b-communication-acoustic-bridge-v1",
+      sound_id: "c6f-staggered-unheard", scene_id: "annex",
+    }];
+    if (mode === "obstacle")
+      initial.scenes.annex.obstacles = [{ obstacle_id: "unresolved-cover" }];
+    if (mode === "overlap")
+      initial.scenes.annex.entity_positions.aria = { x: 3, y: 4 };
+    if (mode === "active-field")
+      initial.ability_fields = {
+        field_e3: d1Clone(e4FieldWorld().ability_fields.field_e3),
+      };
+    if (mode === "scene-mismatch")
+      initial.scenes.annex.scene_id = "room";
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-F staggered batch unsupported authority",
+      seed: mode, initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, options);
+    const paths = worldSimulationStatePaths(sid, options);
+    const durable = await Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]);
+    const refused = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: 32,
+    }, options);
+    assert.equal(refused.committed_turn_count, 0);
+    assert.equal(refused.committed_physical_step_count, 0);
+    assert.equal(refused.physical_step_blocked_reason, mode === "acoustic"
+      ? "physical_step_acoustic_ingress_pending"
+      : "physical_step_scene_scope_unresolved");
+    assert.equal(refused.state_reconciliation_required, false);
+    assert.equal(refused.automatic_replay_allowed, false);
+    assert.deepEqual(await getWorldSimulationState(sid, options), before);
+    assert.deepEqual(await Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]), durable);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+console.log("CB-C6-F canonical staggered two-frontier projectile batch and refusal passed.");
