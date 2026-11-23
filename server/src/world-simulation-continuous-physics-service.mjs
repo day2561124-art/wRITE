@@ -1066,7 +1066,7 @@ function resolveSupportedDualFieldSharedFrontiers(
     && ["attack", "defense", "ability", "projectile"].every(key =>
       !Object.keys(object(selected[0]?.candidate?.[key])).length)
     && resolved.some(item => item?.actor === mover
-      && item?.result === "movement_completed")
+      && ["movement_completed", "movement_interrupted"].includes(item?.result))
     && resolved.every(item => item?.actor === mover
       && ["movement_completed", "movement_interrupted"].includes(item?.result))
     && Object.keys(trajectories).every(actor => actor === mover);
