@@ -15,7 +15,7 @@ export function createPiRuntimeCapabilityMetadata({tools,availability}={}) {
  const definitions=CAPABILITY_DEFINITIONS.map(cap=>{
   const tool=registry.get(cap.tool);if(!tool?.inputSchema)throw Error('CAPABILITY_SCHEMA_UNBOUND:'+cap.capability);
   const properties=Object.fromEntries([...cap.required,...cap.optional].map(name=>{
-   const source=tool.inputSchema.properties?.[name];if(source===undefined)throw Error('CAPABILITY_FIELD_UNBOUND:'+cap.capability+':'+name);
+   const source=cap.inputProperties?.[name]??tool.inputSchema.properties?.[name];if(source===undefined)throw Error('CAPABILITY_FIELD_UNBOUND:'+cap.capability+':'+name);
    return [name,publicSchema(source)];
   }));
   return {capability_name:cap.capability,active_version:'1',versions:[{

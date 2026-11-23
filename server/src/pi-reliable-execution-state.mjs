@@ -82,13 +82,59 @@ function factualObjects(evidence) {
   }
   return values;
 }
-function reconciliationBinding(action,context,evidence,binding=null) {
-  const definition=capabilityDefinition(action.capability);
-  const effective=binding??context;
-  const args={...action.input,...(["workspace","workspace_shell"].includes(definition.scope)?{workspace_id:effective.workspace_id}:definition.scope==="host_maintenance"?{workspace_id:"dev_workspace_shared_repository_v1"}:{})};
-  if(binding && action.capability==="workspace.create_isolated") {args.workstream_id=binding.workstream_id;args.expected_workstream_revision=binding.workstream_revision;}
-  return evidence.reconciliation_key===action.idempotency_key
-    &&evidence.request_fingerprint_sha256===hashExecutionInput({tool_name:definition.tool,arguments:args});
+function failedIsolatedPowerShell(value) {
+  return value?.isolation_mode === "appcontainer" && value.workspace_writes === false
+    && value.execution_ok === true && value.timed_out === false && value.reason === null
+    && Number.isSafeInteger(value.exit_code) && value.exit_code !== 0
+    && value.job_terminated === true && value.cleanup_pending === false
+    && /^[a-f0-9]{64}$/u.test(value.input_manifest_sha256 ?? "");
+}
+
+export function observedRecoveryFailure(action, receipt) {
+  if (!action?.on_failure || !receipt) return false;
+  if (action.capability === "workspace.powershell_isolated") {
+    if (receipt.kind === "reconciled_facts") {
+      const facts = receipt.evidence?.original_result;
+      return receipt.evidence?.reconciliation_state === "no_effect" && receipt.evidence.terminal === true
+        && facts?.outcome === "failed_no_effect" && facts.reconciliation_required === false
+        && /^dev_journal_event_[a-f0-9]{32}$/u.test(facts.shell_terminal_event_id ?? "") && failedIsolatedPowerShell(facts);
+    }
+    const facts = factualObjects(receipt.evidence);
+    return !facts.some(value => value?.isError === true) && facts.some(failedIsolatedPowerShell);
+  }
+  if (receipt.kind === "reconciled_facts") {
+    const facts = receipt.evidence?.original_result;
+    return receipt.evidence?.reconciliation_state === "completed" && facts?.suite === action.input.suite
+      && facts.passed === false && facts.execution_ok === true && facts.timed_out === false
+      && facts.verification_manifest_gate_result === "failed"
+      && /^[a-f0-9]{64}$/u.test(facts.verification_manifest_sha256 ?? "")
+      && /^dev_operation_[a-f0-9]{32}$/u.test(facts.test_operation_id ?? "");
+  }
+  const facts = factualObjects(receipt.evidence);
+  return !facts.some(value => value?.isError === true)
+    && facts.some(value => value?.suite === action.input.suite && value.passed === false && value.execution_ok === true
+      && value.timed_out === false && value.failure_code === null && Number.isSafeInteger(value.exit_code) && value.exit_code !== 0);
+}
+
+function recoveryTrigger(intent, state) {
+  const id = state.recovery?.active_step;
+  return id ? intent.requested_actions.find(action => action.step_id === id) : undefined;
+}
+
+export function executionPhaseForStep(intent, state, step) {
+  const trigger = recoveryTrigger(intent, state);
+  if (trigger?.on_failure.includes(step.step_id)) {
+    return trigger.capability.startsWith("verification.") ? "VERIFYING" : "EXECUTING";
+  }
+  if (step.capability.startsWith("git.") && capabilityDefinition(step.capability).effect) return "COMMITTING";
+  return step.capability.startsWith("verification.") ? "VERIFYING" : "EXECUTING";
+}
+
+const capabilityPlanner = createMcpCapabilityAdapter();
+function reconciliationBinding(action,intent,evidence,binding=null) {
+  if (evidence.reconciliation_key !== action.idempotency_key) return false;
+  const step = capabilityPlanner.describe(intent, action.step_id, { binding });
+  return evidence.request_fingerprint_sha256 === hashExecutionInput({ tool_name: step.tool, arguments: step.arguments });
 }
 export function makeReliableProjection(body) {
   const record={...body,projection_hash:projectionHash(body)};
@@ -109,6 +155,11 @@ export function reduceReliableProjection(prior,command,now) {
   const currentCall=()=>{own();if(!active||command.call_id!==active.call_id||!action)reliableFailure("STALE_TOOL_RESPONSE");};
   const checkpoint=step=>{state.checkpoint={schema_version:2,operation_id:state.operation_id,intent_hash:state.intent_hash,
     workspace_id:state.workspace_id,at_revision:prior.revision+1,phase:active?.phase??state.status,step_id:step};};
+  const recordResult = r => {
+    state.tool_results.push({ call_id: active.call_id, step_id: action.step_id,
+      input_hash: r.input_hash, result_hash: r.result_hash, receipt_hash: hashExecutionInput(r) });
+    checkpoint(action.step_id);state.current_step=null;runtime.active_call=null;runtime.retry_at=null;
+  };
   const finish=(r)=>{
     receipt(r,action);
     if(r.kind==="tool_response") {
@@ -116,7 +167,7 @@ export function reduceReliableProjection(prior,command,now) {
       if(facts.some(x=>x?.isError===true||x?.ok===false||x?.execution_ok===false||x?.passed===false)
         ||(action.capability.startsWith("verification.")&&!facts.some(x=>x?.passed===true)))
         reliableFailure("INVALID_SUCCESS_RECEIPT");
-    } else if(!reconciliationBinding(action,prior.intent.context,r.evidence,prior.runtime.lifecycle_binding??null)
+    } else if(!reconciliationBinding(action,prior.intent,r.evidence,prior.runtime.lifecycle_binding??null)
       ||!/^dev_operation_[a-f0-9]{32}$/u.test(r.evidence.operation_id)
       ||(action.capability.startsWith("verification.")&&r.evidence.original_result?.passed!==true))
       reliableFailure("INVALID_RECONCILIATION");
@@ -124,13 +175,23 @@ export function reduceReliableProjection(prior,command,now) {
       const fact=r.kind==="reconciled_facts"?r.evidence.original_result:factualObjects(r.evidence).find(v=>v?.workstream_id&&v?.workspace_id);
       runtime.lifecycle_binding=piBootstrapBinding(runtime.lifecycle_binding,action.capability,fact);
     }
-    state.tool_results.push({call_id:active.call_id,step_id:action.step_id,
-      input_hash:r.input_hash,result_hash:r.result_hash,receipt_hash:hashExecutionInput(r)});
-    state.completed_steps.push(action.step_id);state.pending_steps=state.pending_steps.filter(x=>x!==action.step_id);
-    for(const [level,steps] of Object.entries(prior.intent.verification)) {
-      if(steps.length&&steps.every(x=>state.completed_steps.includes(x)))state.verification_state[level]="passed";
+    recordResult(r);
+    state.completed_steps.push(action.step_id);
+    if (action.on_failure) state.recovery.skipped_steps.push(...action.on_failure);
+    const trigger = recoveryTrigger(prior.intent, state);
+    if (trigger?.on_failure.at(-1) === action.step_id) {
+      state.recovery.recovered_steps.push(trigger.step_id);
+      state.recovery.active_step = null;
+      if (trigger.capability.startsWith("verification.")) {
+        state.verification_state[trigger.capability.slice("verification.".length)] = "pending";
+      }
     }
-    checkpoint(action.step_id);state.current_step=null;runtime.active_call=null;runtime.retry_at=null;state.last_error=null;
+    state.pending_steps=state.pending_steps.filter(x=>x!==action.step_id && !action.on_failure?.includes(x));
+    for(const [level,steps] of Object.entries(prior.intent.verification)) {
+      if(steps.length&&steps.every(x=>state.completed_steps.includes(x) || state.recovery?.skipped_steps.includes(x)
+        || state.recovery?.recovered_steps.includes(x)))state.verification_state[level]="passed";
+    }
+    state.last_error=null;
   };
   switch(command.type) {
     case "execution_isolated":
@@ -165,13 +226,14 @@ export function reduceReliableProjection(prior,command,now) {
       if(!/^pi_call_[a-f0-9]{32}$/u.test(command.call_id)||state.pending_steps[0]!==command.step_id
         ||!["EXECUTING","VERIFYING","COMMITTING"].includes(state.status))reliableFailure("INVALID_STEP_CLAIM");
       const step=prior.intent.requested_actions.find(x=>x.step_id===command.step_id);
-      if((step.depends_on??[]).some(x=>!state.completed_steps.includes(x)))reliableFailure("STEP_DEPENDENCY_UNSATISFIED");
+      const trigger = recoveryTrigger(prior.intent, state);
+      if(step.depends_on.some(id => !state.completed_steps.includes(id) && !state.recovery?.recovered_steps.includes(id)
+        && !(trigger?.step_id === id && trigger.on_failure.includes(step.step_id)))) reliableFailure("STEP_DEPENDENCY_UNSATISFIED");
       const attempt=state.tool_calls.filter(x=>x.step_id===step.step_id).length+1;
       if(attempt>runtime.retry_policy.max_attempts)reliableFailure("RETRY_EXHAUSTED");
       if(state.tool_calls.some(x=>x.call_id===command.call_id))reliableFailure("DUPLICATE_CALL_ID");
       const definition=capabilityDefinition(step.capability);
-      const required=step.capability.startsWith("git.")&&definition.effect?"COMMITTING"
-        :step.capability.startsWith("verification.")?"VERIFYING":"EXECUTING";
+      const required=executionPhaseForStep(prior.intent,state,step);
       if(["EXECUTING","VERIFYING","COMMITTING"].indexOf(state.status)<["EXECUTING","VERIFYING","COMMITTING"].indexOf(required)
         ||(definition.effect&&required!==state.status))reliableFailure("PHASE_ORDER_CONFLICT");
       runtime.active_call={call_id:command.call_id,step_id:step.step_id,attempt,input_hash:hashExecutionInput(step.input),
@@ -183,6 +245,30 @@ export function reduceReliableProjection(prior,command,now) {
       exact(command,["type","worker_id","call_id","receipt"]);currentCall();
       if(!["EXECUTING","VERIFYING","COMMITTING"].includes(state.status))reliableFailure("INVALID_COMPLETION_PHASE");
       finish(command.receipt);break;
+    case "verification_recovery_scheduled":
+    case "shell_recovery_scheduled": {
+      exact(command, ["type", "worker_id", "call_id", "receipt"]);currentCall();
+      receipt(command.receipt, action);
+      const reconciled = command.receipt.kind === "reconciled_facts";
+      const shell = action.capability === "workspace.powershell_isolated";
+      const phase = shell ? "EXECUTING" : "VERIFYING";
+      if ((command.type === "shell_recovery_scheduled") !== shell || active.phase !== phase
+        || state.status !== (reconciled ? "RECONCILING" : phase)
+        || !state.recovery || state.recovery.active_step !== null || !observedRecoveryFailure(action, command.receipt)
+        || (reconciled && !reconciliationBinding(action, prior.intent, command.receipt.evidence, prior.runtime.lifecycle_binding ?? null))) {
+        reliableFailure("INVALID_FAILURE_RECOVERY");
+      }
+      if (!shell) state.verification_state[action.capability.slice("verification.".length)] = "failed";
+      state.last_error = { code: shell ? "ISOLATED_COMMAND_FAILED" : "TEST_FAILURE", step_id: action.step_id };
+      state.recovery.active_step = action.step_id;
+      state.pending_steps = state.pending_steps.filter(id => id !== action.step_id);
+      recordResult(command.receipt);
+      if (reconciled) {
+        Object.assign(state, transitionOperation(state, active.phase, now));
+        state.resume_point = null;
+      }
+      break;
+    }
     case "reconciliation_started":
       exact(command,["type","worker_id","call_id"]);currentCall();
       if(!active.mutation||active.reconciliation_attempt>=runtime.retry_policy.max_attempts||runtime.retry_at!==null)
@@ -194,7 +280,7 @@ export function reduceReliableProjection(prior,command,now) {
       receipt(command.receipt,action);
       if(state.status!=="RECONCILING"||command.receipt.kind!=="reconciled_facts"
         ||command.receipt.evidence.reconciliation_state!=="active"
-        ||!reconciliationBinding(action,prior.intent.context,command.receipt.evidence,prior.runtime.lifecycle_binding??null))reliableFailure("INVALID_RECONCILIATION");
+        ||!reconciliationBinding(action,prior.intent,command.receipt.evidence,prior.runtime.lifecycle_binding??null))reliableFailure("INVALID_RECONCILIATION");
       runtime.retry_at=new Date(Date.parse(now)+Math.min(runtime.retry_policy.max_delay_ms,
         runtime.retry_policy.base_delay_ms*2**(active.reconciliation_attempt-1))).toISOString();state.retry_count++;break;
     case "reconciliation_read_retry_scheduled":
@@ -229,7 +315,7 @@ export function reduceReliableProjection(prior,command,now) {
         if(state.status!=="RECONCILING"||!command.not_started_receipt)reliableFailure("UNSAFE_RETRY");
         receipt(command.not_started_receipt,action);
         const e=command.not_started_receipt.evidence;
-        if(e.reconciliation_state!=="not_admitted"||e.safe_same_key_retry!==true||!reconciliationBinding(action,prior.intent.context,e,prior.runtime.lifecycle_binding??null))
+        if(e.reconciliation_state!=="not_admitted"||e.safe_same_key_retry!==true||!reconciliationBinding(action,prior.intent,e,prior.runtime.lifecycle_binding??null))
           reliableFailure("UNSAFE_RETRY");
         Object.assign(state,transitionOperation(state,active.phase,now));
       } else if(command.not_started_receipt!==null)reliableFailure("UNSAFE_RETRY");

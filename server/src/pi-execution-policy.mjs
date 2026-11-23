@@ -12,7 +12,8 @@ const lightweightReads = new Set([
 const ordinaryCapabilities = new Set([
   "filesystem.read", "filesystem.list", "filesystem.write", "filesystem.patch",
   "git.status", "git.commit", "verification.focused", "verification.affected",
-  "host.powershell",
+  "host.powershell", "workspace.powershell_isolated", "workspace.create_checkpoint", "windows.service.ensure_running",
+  "windows.powershell.run_approved",
 ]);
 function fail(code) { throw Object.assign(new Error(code), { code }); }
 function exact(value, required, optional = []) {
@@ -20,12 +21,23 @@ function exact(value, required, optional = []) {
     || required.some(key => !Object.hasOwn(value, key))
     || Object.keys(value).some(key => ![...required, ...optional].includes(key))) fail("INVALID_AUTHORIZED_REQUEST");
 }
+function mutationTarget(action, workspaceId) {
+  if (action.capability.startsWith("filesystem.")) return action.input.path;
+  if (action.capability === "host.powershell") return "dev_workspace_shared_repository_v1";
+  if (action.capability === "windows.service.ensure_running" && typeof action.input.service_name === "string") {
+    return `windows_service:${action.input.service_name.toLowerCase()}`;
+  }
+  if (action.capability === "windows.powershell.run_approved") return `windows_script:${action.input.script_id}`;
+  return workspaceId;
+}
 
 // A finite host-owned route list, never an annotation or caller assertion of safety.
 // The existing handler still owns path, symlink, secret, size and sandbox checks.
 export async function admitPiLightweightRead({ tool, mutation, params, resolveWorkspace }) {
   if (mutation !== false || !lightweightReads.has(tool) || typeof resolveWorkspace !== "function") return false;
-  const workspace_id = params?.arguments?.workspace_id;
+  const supplied = params?.arguments?.workspace_id;
+  if (supplied === undefined && tool === "dev_pi_execute_readonly") return false;
+  const workspace_id = supplied === undefined ? "dev_workspace_shared_repository_v1" : supplied;
   if (typeof workspace_id !== "string" || !workspacePattern.test(workspace_id)) return false;
   const context = await resolveWorkspace({ workspace_id }, { mutation: false });
   if (context?.workspace_id !== workspace_id) fail("WORKSPACE_IDENTITY_MISMATCH");
@@ -41,19 +53,27 @@ export async function adaptAuthorizedPiRequest(source, { resolveWorkspace } = {}
     hashExecutionInput(source);
     exact(source, ["request_kind", "intent_id", "goal", "workspace_id"],
       ["schema_version", "constraints", "completion_conditions", "permissions",
-        "requested_actions", "command", "cwd", "timeoutMs"]);
+        "requested_actions", "command", "cwd", "timeoutMs", "task_authorization_id", "sandbox_paths", "sandbox_directories",
+        "output_paths", "toolchain"]);
     if (source.schema_version !== undefined && source.schema_version !== 1) fail("UNSUPPORTED_INTENT_VERSION");
     const usesCommand = source.command !== undefined;
+    const isolatedCommand = usesCommand && source.task_authorization_id !== undefined;
     if (usesCommand === (source.requested_actions !== undefined)
       || (!usesCommand && (source.timeoutMs !== undefined || source.cwd !== undefined))) fail("INVALID_AUTONOMOUS_ACTIONS");
+    if (!isolatedCommand && (source.sandbox_paths !== undefined || source.sandbox_directories !== undefined
+      || source.output_paths !== undefined || source.toolchain !== undefined)) fail("ISOLATED_TASK_AUTHORIZATION_REQUIRED");
     if (source.cwd !== undefined
       && (typeof source.cwd !== "string" || !source.cwd.trim() || source.cwd.length > 4096))
       fail("INVALID_HOST_CWD");
     const requested_actions = usesCommand
-      ? [{ step_id: "run", capability: "host.powershell",
+      ? [{ step_id: "run", capability: isolatedCommand ? "workspace.powershell_isolated" : "host.powershell",
         input: { command: source.command,
           ...(source.cwd === undefined ? {} : { cwd: source.cwd }),
-          ...(source.timeoutMs === undefined ? {} : { timeoutMs: source.timeoutMs }) } }]
+          ...(source.timeoutMs === undefined ? {} : { timeoutMs: source.timeoutMs }),
+          ...(source.sandbox_paths === undefined ? {} : { sandbox_paths: source.sandbox_paths }),
+          ...(source.sandbox_directories === undefined ? {} : { sandbox_directories: source.sandbox_directories }),
+          ...(source.output_paths === undefined ? {} : { output_paths: source.output_paths }),
+          ...(source.toolchain === undefined ? {} : { toolchain: source.toolchain }) } }]
       : source.requested_actions;
     if (!Array.isArray(requested_actions) || !requested_actions.length
       || requested_actions.length > 100) fail("INVALID_ACTIONS");
@@ -70,6 +90,7 @@ export async function adaptAuthorizedPiRequest(source, { resolveWorkspace } = {}
     return adaptAuthorizedPiRequest({
       schema_version: 1, request_kind: "authorized_engineering",
       intent_id: source.intent_id, goal: source.goal, workspace_id: source.workspace_id,
+      ...(source.task_authorization_id === undefined ? {} : { task_authorization_id: source.task_authorization_id }),
       constraints: source.constraints ?? [],
       requested_actions, permissions: inferred,
       completion_conditions: source.completion_conditions ?? [
@@ -79,7 +100,7 @@ export async function adaptAuthorizedPiRequest(source, { resolveWorkspace } = {}
   if (source?.request_kind !== "authorized_engineering") return createExecutionIntent(source);
   hashExecutionInput(source); // Existing bounded, accessor-free JSON validation.
   exact(source, ["schema_version", "request_kind", "intent_id", "goal", "workspace_id",
-    "constraints", "requested_actions", "permissions", "completion_conditions"], ["decision_boundaries"]);
+    "constraints", "requested_actions", "permissions", "completion_conditions"], ["decision_boundaries", "task_authorization_id"]);
   if (source.schema_version !== 1 || typeof source.workspace_id !== "string"
     || !workspacePattern.test(source.workspace_id)
     || source.workspace_id === "dev_workspace_shared_repository_v1") fail("ISOLATED_WORKSPACE_REQUIRED");
@@ -91,7 +112,7 @@ export async function adaptAuthorizedPiRequest(source, { resolveWorkspace } = {}
     || source.requested_actions.length > 100) fail("INVALID_ACTIONS");
   const actions = source.requested_actions.map(action => {
     exact(action, ["step_id", "capability", "input"], ["depends_on", "idempotency_key",
-      "expected_capability_version", "expected_schema_hash"]);
+      "expected_capability_version", "expected_schema_hash", "on_failure"]);
     if (!ordinaryCapabilities.has(action.capability)) fail("STRICT_EXECUTION_INTENT_REQUIRED");
     const definition = capabilityDefinition(action.capability);
     if (permissions[definition.permission] !== true) fail("PERMISSION_DENIED");
@@ -107,12 +128,12 @@ export async function adaptAuthorizedPiRequest(source, { resolveWorkspace } = {}
     || (mutation && context.mutation_allowed !== true)) fail("WORKSPACE_IDENTITY_MISMATCH");
   return createExecutionIntent({
     schema_version: 1, intent_id: source.intent_id, goal: source.goal,
+    ...(source.task_authorization_id === undefined ? {} : { task_authorization_id: source.task_authorization_id }),
     context: { project_id: "writer_workbench", workspace_id: context.workspace_id, workstream_id: context.workstream_id },
     constraints: source.constraints, requested_actions: actions, permissions,
     mutation_plan: actions.filter(action => capabilityDefinition(action.capability).effect).map(action => ({
       step_id: action.step_id,
-      target: action.capability.startsWith("filesystem.") ? action.input.path
-        : action.capability === "host.powershell" ? "dev_workspace_shared_repository_v1" : context.workspace_id,
+      target: mutationTarget(action, context.workspace_id),
       expected_change: "Execute the exact GPT-authorized " + action.capability + " input",
       input_sha256: hashExecutionInput(action.input),
     })),

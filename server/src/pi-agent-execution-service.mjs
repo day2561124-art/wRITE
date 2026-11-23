@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
+import { projectRoot, releaseRoot } from "./project-paths.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -9,9 +9,7 @@ export const PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
 export const PI_REQUIRED_NODE_VERSION = "22.19.0";
 export const PI_RUNTIME_RUNNER_RELATIVE_PATH = "scripts/pi-runtime/runner.mjs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const projectRoot = path.resolve(__dirname, "..", "..");
-const runnerPath = path.join(projectRoot, ...PI_RUNTIME_RUNNER_RELATIVE_PATH.split("/"));
+const runnerPath = path.join(releaseRoot, ...PI_RUNTIME_RUNNER_RELATIVE_PATH.split("/"));
 const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_OUTPUT_BYTES = 64 * 1024;
 

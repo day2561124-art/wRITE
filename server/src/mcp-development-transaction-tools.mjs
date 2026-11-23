@@ -860,7 +860,7 @@ export function createDevTransactionService({
         result: { transaction_id: record.transaction_id, transaction_plan_hash: record.transaction_plan_hash, state: record.state, reason: String(error?.message ?? error).slice(0, 1024), ...result },
       });
     } catch (journalError) {
-      await journal.markDegraded(`transaction terminal provenance append failed: ${journalError.message}`);
+      await journal.markDegraded(`transaction terminal provenance append failed: ${journalError.message}`, operation.operation_id);
       throw journalError;
     }
   }
@@ -868,7 +868,9 @@ export function createDevTransactionService({
   async function assertSubsystemPreconditions() {
     const [checkpointStatus, journalStatus] = await Promise.all([checkpoint.status(), journal.status()]);
     if (checkpointStatus.health !== "healthy") throw transactionError("CHECKPOINT_STORE_NOT_HEALTHY", `Checkpoint store health is ${checkpointStatus.health}.`);
-    if (journalStatus.health !== "healthy") throw transactionError("JOURNAL_NOT_HEALTHY", `Operation journal health is ${journalStatus.health}.`);
+    if (journalStatus.writes_available === false || journalStatus.chain_verified === false || journalStatus.health === "corrupt") {
+      throw transactionError("JOURNAL_NOT_HEALTHY", `Operation journal write admission is unavailable (${journalStatus.health}).`);
+    }
   }
 
   function transitionUsesPublishTemp(transition) {

@@ -1,10 +1,10 @@
 import { createExecutionIntent, hashExecutionInput, classifyExecutionFailure } from "./pi-execution-contract.mjs";
 import { createMcpCapabilityAdapter } from "./pi-mcp-adapter.mjs";
-import { reliableFailure, reliableJson, receiptOf } from "./pi-reliable-execution-state.mjs";
+import { observedRecoveryFailure, reliableFailure, reliableJson, receiptOf } from "./pi-reliable-execution-state.mjs";
 const known=new Set(["TRANSPORT_ERROR","TEMPORARY_UNAVAILABLE","TIMEOUT","PERMISSION_DENIED","CORRUPT_STATE",
   "VALIDATION_FAILURE","TEST_FAILURE","GIT_SEMANTIC_CONFLICT","ARCHITECTURE_CONFLICT","IMPLEMENTATION_FAILURE",
   "CAPABILITY_STATUS_UNCERTAIN","CAPABILITY_EXPECTATION_REQUIRED","CAPABILITY_VERSION_DRIFT","CAPABILITY_SCHEMA_DRIFT",
-  "CAPABILITY_UNAVAILABLE","CAPABILITY_NOT_DISPATCHABLE","CAPABILITY_DEPRECATED","UNKNOWN_CAPABILITY"]);
+  "CAPABILITY_UNAVAILABLE","CAPABILITY_NOT_DISPATCHABLE","CAPABILITY_DEPRECATED","UNKNOWN_CAPABILITY","JOURNAL_SCOPE_ISOLATED"]);
 export function reliableErrorCode(error) {return known.has(error?.code)?error.code:"UNCLASSIFIED_FAILURE";}
 function observations(evidence) {
   const facts=[evidence];
@@ -47,6 +47,8 @@ export function createPiReliableMcpAdapter({callTool,queryOperation,resolveWorks
       const workspace=await timedRequest(()=>resolveWorkspace({workspace_id:context.workspace_id},{mutation:step.effect}),queryTimeoutMs);
       if(!workspace||workspace.workspace_id!==context.workspace_id||workspace.workstream_id!==context.workstream_id)
         reliableFailure("PERMISSION_DENIED");
+      if(intent.task_authorization_id!==undefined&&workspace.workstream_state!=="active")
+        reliableFailure("PERMISSION_DENIED");
       if(step.effect&&(workspace.workspace_type!=="isolated_worktree"||workspace.state!=="active"))
         reliableFailure("PERMISSION_DENIED");
     } else {
@@ -61,12 +63,12 @@ export function createPiReliableMcpAdapter({callTool,queryOperation,resolveWorks
     // The transport deadline starts at dispatch, after durable authorization.
     // A slow Journal read must not leave a timed-out callback that sends later.
     await options.authorizeDispatch?.();
+    const action=intent.requested_actions.find(x=>x.step_id===stepId);
     const evidence=reliableJson(await timedRequest(()=>{
       return callTool({name:step.tool,arguments:step.arguments,
         ...(step.effect?{_meta:{reconciliation_key:step.idempotency_key}}:{})},
-        {authorizeDispatch:options.authorizeDispatch});
+        {authorizeDispatch:options.authorizeDispatch,action});
     },step.tool==='dev_run_tests'?longRequestTimeoutMs:requestTimeoutMs));
-    const action=intent.requested_actions.find(x=>x.step_id===stepId);
     const facts=observations(evidence);
     const deduped=facts.find(x=>x?.reconciled===true);
     if(deduped&&(deduped.reconciliation_key!==step.idempotency_key
@@ -99,9 +101,18 @@ export function createPiReliableMcpAdapter({callTool,queryOperation,resolveWorks
       return {verdict:"active",receipt:receiptOf(intent.requested_actions.find(x=>x.step_id===stepId),raw,"reconciled_facts")};
     if(raw.reconciliation_state==="completed"&&raw.request_fingerprint_sha256===params.request_fingerprint_sha256
       &&/^dev_operation_[a-f0-9]{32}$/u.test(raw.operation_id)) {
+      const action = intent.requested_actions.find(x => x.step_id === stepId);
+      const receipt = receiptOf(action, raw, "reconciled_facts");
+      if (observedRecoveryFailure(action, receipt)) return { verdict: "recoverable_failure", receipt };
       if(step.capability.startsWith("verification.")&&raw.original_result?.passed!==true)
         return {verdict:"unknown",code:"VALIDATION_EVIDENCE_REQUIRED"};
-      return {verdict:"completed",receipt:receiptOf(intent.requested_actions.find(x=>x.step_id===stepId),raw,"reconciled_facts")};
+      return {verdict:"completed",receipt};
+    }
+    if (step.capability === "workspace.powershell_isolated" && raw.reconciliation_state === "no_effect"
+      && raw.request_fingerprint_sha256 === params.request_fingerprint_sha256 && /^dev_operation_[a-f0-9]{32}$/u.test(raw.operation_id)) {
+      const action = intent.requested_actions.find(x => x.step_id === stepId);
+      const receipt = receiptOf(action, raw, "reconciled_facts");
+      if (observedRecoveryFailure(action, receipt)) return { verdict: "recoverable_failure", receipt };
     }
     if(raw.reconciliation_state==='no_effect'&&raw.safe_to_reinitiate===true&&raw.reinitiate_requires_new_key===true
       &&raw.terminal===true&&raw.original_result?.outcome==='no_effect_observed'&&raw.original_result?.reconciliation_required===false

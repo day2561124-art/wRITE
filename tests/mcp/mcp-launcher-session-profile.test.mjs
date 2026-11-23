@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,cp,symlink,realpath,rm} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+import {createHash} from 'node:crypto';
+import {existsSync} from 'node:fs';
 import {spawn,execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import net from 'node:net';
@@ -80,7 +82,10 @@ test('real Listener cold start and controlled restart load profile without calle
  for(let generation=0;generation<2;generation++){
   const p=await port();stderr='';child=spawn(process.execPath,[path.join(repo,'server/src/launcher-test-entry.mjs'),'--config',path.join(repo,'config/mcp-http.example.json'),'--port',String(p)],{cwd:os.tmpdir(),env:{...cleanEnv(),MCP_TOOL_PROFILE:'chatgpt_developer'},windowsHide:true,stdio:['ignore','ignore','pipe','ipc']});child.stderr.on('data',b=>stderr+=b);
   const endpoint=`http://127.0.0.1:${p}`;
-  const health=await until(async()=>{if(child.exitCode!==null)throw Error(stderr);return fetch(endpoint+'/health').then(async r=>{if(!r.ok)return null;const h=await r.json();return Number.isInteger(h.pi_durable_worker?.pid)&&['ready','idle'].includes(h.pi_durable_worker.state)?h:null;}).catch(()=>null);},'fixture Listener not ready');worker=health.pi_durable_worker.pid;
+  let lastWorkerStatus;
+  const health=await until(async()=>{if(child.exitCode!==null)throw Error(stderr);return fetch(endpoint+'/health').then(async r=>{if(!r.ok)return null;const h=await r.json();lastWorkerStatus=h.pi_durable_worker;return Number.isInteger(lastWorkerStatus?.pid)&&['ready','idle'].includes(lastWorkerStatus.state)?h:null;}).catch(()=>null);},'fixture Listener not ready')
+    .catch(error=>{throw new Error(`${error.message}: ${JSON.stringify(lastWorkerStatus)}\n${stderr}`,{cause:error});});
+  worker=health.pi_durable_worker.pid;
   assert.match(stderr,/session lifecycle idle_timeout_ms=900000 max_idle_sessions=4 max_total_sessions=32/);
   assert.equal(health.pi_execution_protocol,'writer-workbench/pi-production/v1');assert(Number.isInteger(worker));
   const live=await fetch(endpoint+'/live').then(r=>r.json());assert.equal(live.live,true);assert.equal(live.session_count,0);
@@ -90,4 +95,47 @@ test('real Listener cold start and controlled restart load profile without calle
  // when inherited values would otherwise be valid.
  await writeFile(path.join(repo,'config/mcp-session-memory-profile.json'),'{}');
  await assert.rejects(exec(process.execPath,[path.join(repo,'server/src/mcp-http-server.mjs'),'--port',String(await port())],{cwd:os.tmpdir(),env:{...cleanEnv(),...expected},windowsHide:true,timeout:10000}),/Invalid session memory profile/);
+});
+
+test('a separate release launches runtime children against the existing managed repository', {timeout:60000},async t=>{
+ const {repo:release,container}=await fixture(t);
+ const managed=path.join(container,'managed repository');await mkdir(managed);
+ await cp(path.join(release,'config'),path.join(managed,'config'),{recursive:true});
+ await writeFile(path.join(managed,'package.json'),'{"name":"managed-workspace-fixture"}\n');
+ const git=(...args)=>exec('git',args,{cwd:managed,env:cleanEnv(),windowsHide:true,timeout:15000});
+ await git('init','-qb','main');await git('add','package.json','config');
+ await git('-c','user.name=Release fixture','-c','user.email=release@example.invalid','commit','-qm','Managed repository baseline');
+ const env={...cleanEnv(),MCP_TOOL_PROFILE:'chatgpt_developer',NEXA_MANAGED_PROJECT_ROOT:managed};
+ const p=await port();
+ const listener=spawn(process.execPath,[path.join(release,'server/src/launcher-test-entry.mjs'),'--port',String(p)],
+  {cwd:managed,env,windowsHide:true,stdio:['ignore','ignore','pipe','ipc']});
+ const exited=new Promise(resolve=>listener.once('close',resolve));
+ let stderr='';listener.stderr.on('data',b=>stderr+=b);
+ try {
+  const health=await until(async()=>{
+   if(listener.exitCode!==null)throw Error(stderr);
+   const result=await fetch(`http://127.0.0.1:${p}/health`).then(r=>r.json()).catch(()=>null);
+   return ['ready','idle'].includes(result?.pi_durable_worker?.state)?result:null;
+  },'managed release Listener or worker did not start');
+  assert.equal(health.repositoryId,createHash('sha256').update((await realpath(managed)).toLowerCase()).digest('hex'));
+  assert(existsSync(path.join(managed,'data/outputs/logs/development_runtime/operation-journal/events')));
+  assert(!existsSync(path.join(release,'data/outputs/logs/development_runtime/operation-journal')));
+  const adapter=pathToFileURL(path.join(release,'server/src/mcp-http-stdio-adapter.mjs')).href;
+  const probe=await exec(process.execPath,['--input-type=module','-e',`
+   import {createStdioSession} from ${JSON.stringify(adapter)};
+   const s=createStdioSession({trustedLocalOwner:true});
+   try {
+    const reply=await new Promise((ok,fail)=>s.call({jsonrpc:'2.0',id:1,method:'tools/call',
+     params:{name:'dev_read_file',arguments:{path:'package.json'}}},(e,r)=>e?fail(e):ok(r)));
+    console.log(JSON.stringify(reply));
+   } finally {s.close();}
+  `],{cwd:managed,env,windowsHide:true,timeout:20000});
+  const tool=JSON.parse(probe.stdout).result;
+  assert.equal(JSON.parse(JSON.parse(tool.content[0].text).content).name,'managed-workspace-fixture');
+  assert.equal((await git('status','--porcelain','--untracked-files=no')).stdout,'');
+ }finally{
+  if(listener.connected)listener.send('fixture-shutdown');
+  const abort=setTimeout(()=>listener.kill(),5000).unref();
+  await exited;clearTimeout(abort);
+ }
 });

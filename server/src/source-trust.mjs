@@ -1,12 +1,10 @@
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { projectRoot } from "./project-paths.mjs";
 import {
   registeredSources,
 } from "./source-registry.mjs";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-export const rootDir = path.resolve(__dirname, "..", "..");
+export const rootDir = projectRoot;
 
 const source = (entry) => ({
   source_id: entry.source_id,

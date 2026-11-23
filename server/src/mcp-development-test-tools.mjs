@@ -566,6 +566,11 @@ export function createDevTestRunner({
     fail: failDevJournalOperation, markDegraded: markDevJournalDegraded },
 } = {}) {
   return async function runTests(input = {}) {
+    const { usesScopedAdminDispatcherRoot } = await import("./mcp-powershell-maintenance-tools.mjs");
+    if (usesScopedAdminDispatcherRoot()) {
+      throw Object.assign(new Error("Use workspace.powershell_isolated to test under the scoped dispatcher."),
+        { code: "ISOLATED_VERIFICATION_REQUIRED" });
+    }
     const startedAt = Date.now();
     const suite = input?.suite;
     const definition = suiteDefinitions[suite];
@@ -649,7 +654,7 @@ export function createDevTestRunner({
           },
         });
       } catch (journalError) {
-        await journal.markDegraded(`dev_run_tests setup failure terminal append failed: ${journalError.message}`);
+        await journal.markDegraded(`dev_run_tests setup failure terminal append failed: ${journalError.message}`, journalOperation.operation_id);
       }
       await releaseRunLock(lockHandle, lockPath);
       return {
@@ -762,7 +767,7 @@ export function createDevTestRunner({
         },
       });
     } catch (error) {
-      await journal.markDegraded(`dev_run_tests terminal append failed: ${error.message}`);
+      await journal.markDegraded(`dev_run_tests terminal append failed: ${error.message}`, journalOperation.operation_id);
       result = {
         ...result,
         execution_ok: false,

@@ -939,7 +939,7 @@ export function createDevCheckpointService({
           },
         });
       } catch (error) {
-        await journalApi.markDegraded(`checkpoint create terminal append failed: ${error.message}`);
+        await journalApi.markDegraded(`checkpoint create terminal append failed: ${error.message}`, journalOperation.operation_id);
         throw checkpointError("JOURNAL_TERMINAL_APPEND_FAILED", `Checkpoint is durable but provenance completion failed: ${error.message}`);
       }
       return {
@@ -973,7 +973,7 @@ export function createDevCheckpointService({
           await journalApi.fail(journalOperation.operation_id, { result: { checkpoint_id: checkpointId, checkpoint_visible: false, reason: String(error.message).slice(0, 512) } });
         }
       } catch (journalError) {
-        await journalApi.markDegraded(`checkpoint create failure terminal append failed: ${journalError.message}`);
+        await journalApi.markDegraded(`checkpoint create failure terminal append failed: ${journalError.message}`, journalOperation.operation_id);
       }
       throw error;
     }
@@ -1270,7 +1270,7 @@ export function createDevCheckpointService({
             reason: String(error.message).slice(0, 512),
           },
         });
-      } catch (journalError) { await journalApi.markDegraded(`checkpoint recovery failure terminal append failed: ${journalError.message}`); }
+      } catch (journalError) { await journalApi.markDegraded(`checkpoint recovery failure terminal append failed: ${journalError.message}`, journalOperation.operation_id); }
       throw error;
     }
   }
@@ -1296,7 +1296,7 @@ export function createDevCheckpointService({
       await journalApi.complete(operation.operation_id, { links: [{ relation: "retires", checkpoint_id: checkpointId }], result: { checkpoint_id: checkpointId, deleted: true } });
       return { ...result, operation_id: operation.operation_id, physical_objects_deleted: false };
     } catch (error) {
-      try { await journalApi.fail(operation.operation_id, { result: { checkpoint_id: checkpointId, reason: String(error.message).slice(0, 512) } }); } catch (journalError) { await journalApi.markDegraded(`checkpoint delete terminal append failed: ${journalError.message}`); }
+      try { await journalApi.fail(operation.operation_id, { result: { checkpoint_id: checkpointId, reason: String(error.message).slice(0, 512) } }); } catch (journalError) { await journalApi.markDegraded(`checkpoint delete terminal append failed: ${journalError.message}`, operation.operation_id); }
       throw error;
     }
   }
@@ -1341,7 +1341,7 @@ export function createDevCheckpointService({
       await journalApi.complete(operation.operation_id, { result });
       return { ...result, operation_id: operation.operation_id };
     } catch (error) {
-      try { await journalApi.fail(operation.operation_id, { result: { dry_run: dryRun, reason: String(error.message).slice(0, 512) } }); } catch (journalError) { await journalApi.markDegraded(`checkpoint GC terminal append failed: ${journalError.message}`); }
+      try { await journalApi.fail(operation.operation_id, { result: { dry_run: dryRun, reason: String(error.message).slice(0, 512) } }); } catch (journalError) { await journalApi.markDegraded(`checkpoint GC terminal append failed: ${journalError.message}`, operation.operation_id); }
       throw error;
     }
   }
@@ -1416,7 +1416,7 @@ export function createDevCheckpointService({
       if (record.workspace_id) {
         await transitionRecoveryWorkspace({ workspace_id: record.workspace_id, state: "reconciliation_required", last_error: String(error.message).slice(0, 1024) }).catch(() => {});
       }
-      try { await journalApi.fail(operation.operation_id, { result: { checkpoint_id: record.checkpoint_id, reason: String(error.message).slice(0, 512) } }); } catch (journalError) { await journalApi.markDegraded(`checkpoint recovery reconciliation terminal append failed: ${journalError.message}`); }
+      try { await journalApi.fail(operation.operation_id, { result: { checkpoint_id: record.checkpoint_id, reason: String(error.message).slice(0, 512) } }); } catch (journalError) { await journalApi.markDegraded(`checkpoint recovery reconciliation terminal append failed: ${journalError.message}`, operation.operation_id); }
       return false;
     }
   }

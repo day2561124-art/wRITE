@@ -8,11 +8,14 @@ export const REQUIRED_DECISION_BOUNDARIES = Object.freeze([
   "unsafe_ambiguous_mutation",
 ]);
 export const PERMISSIONS = Object.freeze(["read", "workspace_create", "write", "tests", "commit", "integrate", "push"]);
+export const PI_TASK_AUTHORIZATION_ID = /^pi_task_[a-f0-9]{32}$/u;
+export const WINDOWS_SERVICE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,79}$/u;
+export const WINDOWS_APPROVED_SCRIPT_ID = /^(?!(?:aux|con|nul|prn|com[0-9]|lpt[0-9])$)[a-z0-9][a-z0-9_-]{0,63}$/u;
 const suites = ["mcp", "mcp_core", "mcp_pi_postseal", "mcp_infrastructure", "mcp_reliability", "mcp_tunnel",
   "communication", "world_simulation", "cognition", "memory_retrieval"];
-function descriptor(capability, tool, permission, effect, required, optional = [], scope = "workspace") {
+function descriptor(capability, tool, permission, effect, required, optional = [], scope = "workspace", inputProperties) {
   return Object.freeze({ capability, tool, permission, effect, required: Object.freeze(required),
-    optional: Object.freeze(optional), scope });
+    optional: Object.freeze(optional), scope, ...(inputProperties ? { inputProperties } : {}) });
 }
 export const CAPABILITY_DEFINITIONS = Object.freeze([
   descriptor("filesystem.read", "dev_read_file", "read", false, ["path"], ["maxBytes"]),
@@ -47,6 +50,13 @@ export const CAPABILITY_DEFINITIONS = Object.freeze([
   descriptor("git.status", "dev_git_status", "read", false, [], ["includeUntracked"]),
   descriptor("host.powershell", "powershell_run", "write", true, ["command"], ["cwd", "timeoutMs"], "host_maintenance"),
   descriptor("workspace.powershell", "powershell_run", "write", true, ["command"], ["cwd", "timeoutMs"], "workspace_shell"),
+  descriptor("workspace.powershell_isolated", "powershell_run", "write", true, ["command"],
+    ["cwd", "timeoutMs", "sandbox_paths", "sandbox_directories", "output_paths", "toolchain"]),
+  descriptor("windows.service.ensure_running", "powershell_admin_run", "write", true, ["service_name"], [], "workspace",
+    Object.freeze({ service_name: Object.freeze({ type: "string", pattern: WINDOWS_SERVICE_NAME.source, maxLength: 80 }) })),
+  descriptor("windows.powershell.run_approved", "powershell_admin_run", "write", true, ["script_id", "script_sha256"], [], "workspace",
+    Object.freeze({ script_id: Object.freeze({ type: "string", pattern: WINDOWS_APPROVED_SCRIPT_ID.source, maxLength: 64 }),
+      script_sha256: Object.freeze({ type: "string", pattern: "^[a-f0-9]{64}$" }) })),
   descriptor("git.commit", "dev_git_commit", "commit", true, ["message", "paths", "expectedHead"]),
   descriptor("git.integrate", "dev_workspace_integrate", "integrate", true,
     ["integration_candidate_id", "expected_revision"], [], "candidate"),
@@ -156,6 +166,17 @@ function validateInput(action, context, bootstrap = false) {
     normalizePiWorkstreamBootstrap({bootstrap_id:action.idempotency_key,...action.input});
   }
   const input = action.input;
+  if (action.capability === "workspace.powershell_isolated" && input.cwd !== undefined) relativePath(input.cwd);
+  if ("toolchain" in input && input.toolchain !== "node") fail("INVALID_SANDBOX_TOOLCHAIN");
+  for (const [name, limit] of [["sandbox_paths", 64], ["sandbox_directories", 8], ["output_paths", 8]]) {
+    if (name in input) {
+      strings(input[name], limit);
+      input[name].forEach(relativePath);
+    }
+  }
+  if ("service_name" in input && (typeof input.service_name !== "string" || !WINDOWS_SERVICE_NAME.test(input.service_name))) fail("INVALID_WINDOWS_SERVICE_NAME");
+  if ("script_id" in input && (typeof input.script_id !== "string" || !WINDOWS_APPROVED_SCRIPT_ID.test(input.script_id)
+    || typeof input.script_sha256 !== "string" || !sha256Pattern.test(input.script_sha256))) fail("INVALID_WINDOWS_APPROVED_SCRIPT");
   if ("path" in input) relativePath(input.path);
   if ("maxBytes" in input) integer(input.maxBytes, 1, 8192);
   if ("maxEntries" in input) integer(input.maxEntries, 1, 50);
@@ -197,15 +218,42 @@ function validateInput(action, context, bootstrap = false) {
     if (!allowed.includes(input.suite)) fail("VERIFICATION_CAPABILITY_MISMATCH");
   }
 }
+const repairCapabilities = new Set(["filesystem.read", "filesystem.list", "filesystem.write", "filesystem.patch", "workspace.powershell_isolated"]);
+
+function validateFailureRecovery(intent) {
+  const actions = intent.requested_actions;
+  const owners = new Map();
+  for (const [index, action] of actions.entries()) {
+    if (action.on_failure === undefined) continue;
+    if (!intent.task_authorization_id || intent.context.workspace_id === "dev_workspace_shared_repository_v1"
+      || !["verification.focused", "verification.affected", "workspace.powershell_isolated"].includes(action.capability)
+      || !Array.isArray(action.on_failure) || action.on_failure.length < 2 || action.on_failure.length > 5) fail("INVALID_FAILURE_RECOVERY");
+    const branch = actions.slice(index + 1, index + 1 + action.on_failure.length);
+    if (branch.length !== action.on_failure.length || branch.some((step, i) =>
+      step.step_id !== action.on_failure[i] || step.on_failure !== undefined || owners.has(step.step_id))) fail("INVALID_FAILURE_RECOVERY");
+    const retry = branch.at(-1);
+    if (retry.capability !== action.capability || hashExecutionInput(retry.input) !== hashExecutionInput(action.input)
+      || branch.slice(0, -1).some(step => !repairCapabilities.has(step.capability))) fail("INVALID_FAILURE_RECOVERY");
+    for (const step of branch) owners.set(step.step_id, action.step_id);
+  }
+  for (const action of actions) {
+    if (action.depends_on.some(id => owners.has(id) && owners.get(id) !== owners.get(action.step_id))) {
+      fail("INVALID_FAILURE_RECOVERY_DEPENDENCY");
+    }
+  }
+}
+
 export function createExecutionIntent(input) {
   const intent = jsonCopy(input).value;
   fields(intent, ["schema_version", "intent_id", "goal", "context", "constraints", "requested_actions",
-    "mutation_plan", "verification", "completion_conditions", "permissions", "decision_boundaries"], ["bootstrap"]);
+    "mutation_plan", "verification", "completion_conditions", "permissions", "decision_boundaries"], ["bootstrap", "task_authorization_id"]);
   if (intent.schema_version !== 1) fail("UNSUPPORTED_INTENT_VERSION");
   string(intent.intent_id, 128); string(intent.goal, 4096);
   fields(intent.context, ["project_id", "workstream_id", "workspace_id"]);
   if(intent.bootstrap!==undefined && intent.bootstrap!==true) fail("INVALID_BOOTSTRAP_INTENT");
   const bootstrap=intent.bootstrap===true;
+  if (intent.task_authorization_id !== undefined && (bootstrap || typeof intent.task_authorization_id !== "string"
+    || !PI_TASK_AUTHORIZATION_ID.test(intent.task_authorization_id))) fail("INVALID_TASK_AUTHORIZATION_ID");
   if(bootstrap && (intent.context.workstream_id!==null || intent.context.workspace_id!=="dev_workspace_shared_repository_v1")) fail("INVALID_BOOTSTRAP_CONTEXT");
   if (intent.context.project_id !== "writer_workbench" || (!bootstrap && !workstreamPattern.test(intent.context.workstream_id))
     || !workspacePattern.test(intent.context.workspace_id)) fail("INVALID_EXECUTION_CONTEXT");
@@ -224,7 +272,7 @@ export function createExecutionIntent(input) {
   }
   const steps = new Map(); const keys = new Set();
   for (const action of intent.requested_actions) {
-    fields(action, ["step_id", "capability", "input"], ["depends_on", "idempotency_key", "expected_capability_version", "expected_schema_hash"]);
+    fields(action, ["step_id", "capability", "input"], ["depends_on", "idempotency_key", "expected_capability_version", "expected_schema_hash", "on_failure"]);
     string(action.step_id, 128);
     if (action.expected_capability_version !== undefined && (typeof action.expected_capability_version !== "string" || !/^[1-9][0-9]{0,2}(?:\.[0-9]{1,3}){0,2}$/u.test(action.expected_capability_version))) fail("INVALID_CAPABILITY_VERSION");
     if (action.expected_schema_hash !== undefined && !sha256Pattern.test(action.expected_schema_hash)) fail("INVALID_CAPABILITY_SCHEMA_HASH");
@@ -238,6 +286,13 @@ export function createExecutionIntent(input) {
     validateInput(action, intent.context, bootstrap);
     const plan = plans.get(action.step_id);
     if (definition.effect) {
+      if (action.capability === "workspace.powershell_isolated" && (intent.task_authorization_id === undefined
+        || plan?.target !== intent.context.workspace_id
+        || intent.context.workspace_id === "dev_workspace_shared_repository_v1")) fail("ISOLATED_TASK_AUTHORIZATION_REQUIRED");
+      if (action.capability === "windows.service.ensure_running" && (intent.task_authorization_id === undefined
+        || plan?.target !== `windows_service:${action.input.service_name.toLowerCase()}`)) fail("WINDOWS_SERVICE_AUTHORIZATION_REQUIRED");
+      if (action.capability === "windows.powershell.run_approved" && (intent.task_authorization_id === undefined
+        || plan?.target !== `windows_script:${action.input.script_id}`)) fail("WINDOWS_SCRIPT_AUTHORIZATION_REQUIRED");
       if (action.capability === "workspace.create_checkpoint"
         && !bootstrap && intent.context.workspace_id === "dev_workspace_shared_repository_v1") fail("ISOLATED_WORKSPACE_REQUIRED");
       if (typeof action.idempotency_key !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(action.idempotency_key)
@@ -272,6 +327,7 @@ export function createExecutionIntent(input) {
   for (const action of steps.values()) {
     if (action.capability.startsWith("verification.") && !verificationIds.has(action.step_id)) fail("UNDECLARED_VERIFICATION");
   }
+  validateFailureRecovery(intent);
   return freeze(intent);
 }
 
@@ -296,6 +352,8 @@ export function createOperationState(input, options = {}) {
     schema_version: 1, operation_id: operationId, intent_id: intent.intent_id, intent_hash: hashExecutionInput(intent),
     parent_operation_id: parent, ...intent.context, ...(intent.bootstrap?{bootstrap:true}:{}), status: "CREATED", current_phase: "CREATED", current_step: null,
     completed_steps: [], pending_steps: intent.requested_actions.map(x => x.step_id), tool_calls: [], tool_results: [],
+    ...(intent.requested_actions.some(action => action.on_failure !== undefined)
+      ? { recovery: { active_step: null, recovered_steps: [], skipped_steps: [] } } : {}),
     retry_count: 0, last_error: null, checkpoint: null, resume_point: null,
     idempotency_keys: Object.fromEntries(intent.requested_actions.filter(x => x.idempotency_key).map(x => [x.step_id, x.idempotency_key])),
     verification_state: { focused: "pending", affected: "pending", full: "pending" },
@@ -307,7 +365,7 @@ export function validateOperationState(input) {
   fields(state, ["schema_version", "operation_id", "intent_id", "intent_hash", "parent_operation_id",
     "project_id", "workstream_id", "workspace_id", "status", "current_phase", "current_step",
     "completed_steps", "pending_steps", "tool_calls", "tool_results", "retry_count", "last_error",
-    "checkpoint", "resume_point", "idempotency_keys", "verification_state", "created_at", "updated_at", "completed_at"], ["bootstrap"]);
+    "checkpoint", "resume_point", "idempotency_keys", "verification_state", "created_at", "updated_at", "completed_at"], ["bootstrap", "recovery"]);
   if (state.schema_version !== 1 || !/^pi_operation_[a-f0-9]{32}$/u.test(state.operation_id)
     || !sha256Pattern.test(state.intent_hash) || state.project_id !== "writer_workbench"
     || (state.bootstrap!==true && !workstreamPattern.test(state.workstream_id)) || !workspacePattern.test(state.workspace_id)
@@ -317,6 +375,16 @@ export function validateOperationState(input) {
   if (state.parent_operation_id !== null && !/^(?:pi|dev)_operation_[a-f0-9]{32}$/u.test(state.parent_operation_id)) fail("CORRUPT_STATE");
   strings(state.completed_steps); strings(state.pending_steps);
   const steps = [...state.completed_steps, ...state.pending_steps];
+  if (state.recovery !== undefined) {
+    fields(state.recovery, ["active_step", "recovered_steps", "skipped_steps"]);
+    strings(state.recovery.recovered_steps); strings(state.recovery.skipped_steps);
+    if (state.recovery.active_step !== null) {
+      string(state.recovery.active_step, 128);
+      if (state.status === "COMPLETED") fail("CORRUPT_STATE");
+      steps.push(state.recovery.active_step);
+    }
+    steps.push(...state.recovery.recovered_steps, ...state.recovery.skipped_steps);
+  }
   if (new Set(steps).size !== steps.length || (state.current_step !== null && !state.pending_steps.includes(state.current_step))) fail("CORRUPT_STATE");
   if (!Array.isArray(state.tool_calls) || !Array.isArray(state.tool_results)
     || state.tool_calls.length > 1000 || state.tool_results.length > 1000) fail("CORRUPT_STATE");

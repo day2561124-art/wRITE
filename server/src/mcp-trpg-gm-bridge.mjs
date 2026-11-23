@@ -1,13 +1,32 @@
 import {pathToFileURL} from 'node:url';
+import {lstat,realpath} from 'node:fs/promises';
+import path from 'node:path';
 const readNames=new Set(['trpg.gm.get_round_context','trpg.gm.get_pending_actions','trpg.gm.get_character_context','trpg.gm.get_scenario_context','trpg.gm.get_asset_metadata','trpg.gm.get_scenario_import']);
 const attachmentName='trpg.gm.stage_scenario_attachment';
 const previewName='trpg.gm.preview_scenario_publish',publishName='trpg.gm.publish_scenario';
 const writeNames=new Set([attachmentName,previewName,publishName,'trpg.gm.claim_round','trpg.gm.commit_round_result']);
 const error=code=>({isError:true,content:[{type:'text',text:JSON.stringify({error:{code,retryable:false}})}]});
 const empty=()=>Object.freeze({tools:Object.freeze([]),instruction:'',callTool:async()=>error('TOOL_NOT_AUTHORIZED')});
-// The sole deployment path is the user's existing TRPG checkout. No tool input
-// or environment-selected module can redirect imports, credentials or endpoints.
-const loadModule=()=>import(pathToFileURL('E:\\TRPG\\apps\\gm-adapter\\dist\\writer-workbench.js').href);
+// The operator configures the protected dependency at startup. Tool input never
+// selects imports. A dedicated dispatcher must not execute the desktop checkout.
+export async function resolveTRPGAdapterModule(name, {
+ dist=process.env.NEXA_TRPG_ADAPTER_DIST,
+ taskAuthorizationRoot=process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT,
+}={}) {
+ if(!['writer-workbench.js','workbench-security.js'].includes(name))throw Error('INVALID_TRPG_ADAPTER_MODULE');
+ const dedicated=path.basename(path.dirname(taskAuthorizationRoot??'')).toLowerCase()==='writerworkbench-pimaintenance-v3';
+ if(dist===undefined){
+  if(dedicated)throw Error('PROTECTED_TRPG_ADAPTER_REQUIRED');
+  return pathToFileURL('E:\\TRPG\\apps\\gm-adapter\\dist\\'+name);
+ }
+ if(!path.isAbsolute(dist))throw Error('INVALID_TRPG_ADAPTER_DIST');
+ const directory=await lstat(dist);
+ if(!directory.isDirectory()||directory.isSymbolicLink())throw Error('INVALID_TRPG_ADAPTER_DIST');
+ const root=await realpath(dist), file=path.join(root,name), info=await lstat(file);
+ if(!info.isFile()||info.isSymbolicLink())throw Error('INVALID_TRPG_ADAPTER_MODULE');
+ return pathToFileURL(file);
+}
+const loadModule=async()=>import((await resolveTRPGAdapterModule('writer-workbench.js')).href);
 export function isTRPGTransportTrusted({ipc=typeof process.send==='function',trustedLocalOwner=process.argv.includes('--trusted-local-owner')}={}){
  // Stdio under the local Windows owner can read its private credential file.
  // Remote IPC needs a verified request token. Only an OS-owner process argument trusts the local Pi CLI.
@@ -39,7 +58,18 @@ export function trpgPublicToolDefinition(tool){
    ...(tool.name===attachmentName?{'openai/fileParams':['file'],'trpg/idempotency':'The qualified attachment SHA-256 identifies the draft request; never publish through this tool.'}:tool.name===previewName?{'trpg/approval':'Preview only. Review the returned plan without changing the live world.'}:tool.name===publishName?{'trpg/approval':'Use the exact preview receipt and revision after explicit campaign publication authorization. On uncertainty, check status or retry the same receipt.'}:writeNames.has(tool.name)?{'trpg/idempotency':'Preserve GMResolution idempotency_key on retries; audit and transactions belong to TRPG, not Writer development journal.'}:{})}};
 }
 
-const loadSecurityModule=()=>import(pathToFileURL('E:\\TRPG\\apps\\gm-adapter\\dist\\workbench-security.js').href);
+export function trpgGatewayFailureCode(result) {
+ const payload=result?.content?.[0]?.text;
+ if(result?.isError!==true||typeof payload!=='string'||payload.length>4096)return null;
+ try {
+  const fault=JSON.parse(payload).error;
+  if(fault?.status===401&&fault.code==='UNAUTHORIZED')return 'TRPG_GATEWAY_CREDENTIAL_REJECTED';
+  if(['TRPG_GATEWAY_UNAVAILABLE','GATEWAY_UNAVAILABLE'].includes(fault?.code))return 'TRPG_GATEWAY_UNAVAILABLE';
+ } catch { /* A malformed result has no credential authority. */ }
+ return null;
+}
+
+const loadSecurityModule=async()=>import((await resolveTRPGAdapterModule('workbench-security.js')).href);
 async function defaultSecurityLoader(){
  const args=process.argv.filter(value=>value.startsWith('--workbench-security-config='));
  if(args.length>1)throw Error('INVALID_PRIVATE_CONFIGURATION');

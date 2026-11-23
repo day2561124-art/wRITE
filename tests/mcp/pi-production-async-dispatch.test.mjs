@@ -13,6 +13,7 @@ import {createPiExecutionHistoryValidator} from '../../server/src/pi-execution-s
 import {createPiReliableMcpAdapter} from '../../server/src/pi-mcp-reliable-adapter.mjs';
 import {runPiDurableWorker,PI_DURABLE_WORKER_PROTOCOL} from '../../server/src/pi-durable-worker.mjs';
 import {createPiDurableWorkerSupervisor} from '../../server/src/pi-durable-worker-supervisor.mjs';
+import {attachPiInspector,createPiInspectionClient} from '../../server/src/pi-durable-worker-protocol.mjs';
 import {fingerprintMcpMutationRequest} from '../../server/src/mcp-operation-reconciliation-context.mjs';
 import {hashExecutionInput,REQUIRED_DECISION_BOUNDARIES} from '../../server/src/pi-execution-contract.mjs';
 const exec=promisify(execFile);
@@ -91,6 +92,85 @@ test('worker failure propagates rather than leaving a live abandoned owner loop'
  await assert.rejects(runPiDurableWorker({controller:{discover:async()=>{throw failure;},execute:async()=>{}},observe:e=>events.push(e.kind)}),failure);
  assert.equal(events.at(-1),'failed');
 });
+
+test("a worker defers an unclaimed failing task and an independent task completes through the same process", async t => {
+  const f = await fixture(t);
+  let now = 10_000;
+  let writes = 0;
+  const h = host(f, async () => { writes++; return { ok: true }; }, { workerClock: () => now });
+  const blocked = await h.submit(intent("fixture-deferred"));
+  const independent = await h.submit(intent("fixture-independent", true));
+  const failure = Object.assign(new Error("temporary fixture capability failure"), { code: "TEMPORARY_UNAVAILABLE" });
+  const seen = [];
+  const abort = new AbortController();
+  const source = { ...h, async execute(value) {
+    seen.push(value.intent_id);
+    if (value.intent_id === "fixture-deferred") throw failure;
+    return h.execute(value);
+  } };
+  await runPiDurableWorker({ controller: source, signal: abort.signal, intervalMs: 10, observe: event => {
+    if (event.kind === "idle" && seen.at(-1) === "fixture-independent") abort.abort();
+  } });
+  assert.deepEqual(seen, ["fixture-deferred", "fixture-independent"]);
+  assert.equal(writes, 1);
+  assert.equal((await h.inspect({ operation_id: independent.state.operation_id, context })).state.status, "COMPLETED");
+  const reopened = host({ ...f, journal: createDevOperationJournalService({ storageRoot: f.storageRoot }) },
+    undefined, { workerClock: () => now, pendingLimit: 1 });
+  const args = { operation_id: blocked.state.operation_id, context };
+  const first = (await reopened.inspect(args)).worker_deferral;
+  assert.equal(first.code, "TEMPORARY_UNAVAILABLE");
+  assert.equal(first.attempt, 1);
+  assert.deepEqual(await reopened.discover(), []);
+  now = first.retry_after_ms;
+  assert.equal((await reopened.discover())[0].state.operation_id, blocked.state.operation_id);
+  const second = await reopened.deferExecutionFailure(args, failure);
+  assert.equal(second.attempt, 2);
+  now = second.retry_after_ms;
+  const exhausted = await reopened.deferExecutionFailure(args, failure);
+  assert.equal(exhausted.attempt, 3);
+  assert.equal(exhausted.retry_after_ms, null);
+  now += 60_000;
+  assert.deepEqual(await reopened.discover(), []);
+  const afterExhaustion = await reopened.submit(intent("fixture-after-exhaustion"));
+  assert.equal((await reopened.discover())[0].state.operation_id, afterExhaustion.state.operation_id);
+  assert.equal((await f.journal.listOperations({ operation_type: "pi_worker_deferral" })).total, 3);
+  assert.equal((await f.journal.status()).chain_verified, true);
+});
+
+test("an abandoned active claim exits the owner instead of counting a retry", async t => {
+  const f = await fixture(t);
+  const failure = new Error("fixture interruption after durable claim");
+  const h = host(f, async () => assert.fail("the interrupted call never dispatched"), {
+    executionHook: async point => { if (point === "after_claim") throw failure; },
+  });
+  const queued = await h.submit(intent("worker-abandoned-active-claim", true));
+  await assert.rejects(runPiDurableWorker({ controller: h, intervalMs: 10, observe: () => {} }), failure);
+  const state = await h.inspect({ operation_id: queued.state.operation_id, context });
+  assert.equal(state.runtime.active_call.step_id, "action");
+  assert.equal(state.worker_deferral, undefined);
+  assert.equal((await f.journal.listOperations({ operation_type: "pi_worker_deferral" })).total, 0);
+});
+
+test("concurrent workers record only one deferral per operation progress and attempt", async t => {
+  const f = await fixture(t);
+  const original = host(f, undefined, { workerClock: () => 1000 });
+  const peerJournal = createDevOperationJournalService({ storageRoot: f.storageRoot });
+  const peer = host({ ...f, journal: peerJournal, route: createPiProductionRouteStore({ journal: peerJournal }) },
+    undefined, { workerClock: () => 1200 });
+  const admitted = await original.submit(intent("concurrent-worker-deferral"));
+  const args = { operation_id: admitted.state.operation_id, context };
+  const [a, b] = await Promise.all([
+    original.deferExecutionFailure(args, Object.assign(new Error("first peer failure"), { code: "FIRST_PEER_FAILURE" })),
+    peer.deferExecutionFailure(args, Object.assign(new Error("second peer failure"), { code: "SECOND_PEER_FAILURE" })),
+  ]);
+  assert.equal(a.attempt, 1);
+  assert.equal(b.attempt, 1);
+  assert.equal(a.retry_after_ms, b.retry_after_ms);
+  assert.equal(a.code, b.code);
+  assert.equal((await f.journal.listOperations({ operation_type: "pi_worker_deferral" })).total, 1);
+  assert.deepEqual(await peer.discover(), []);
+});
+
 test('a pre-aborted worker performs no discovery or dispatch',async()=>{
  const abort=new AbortController();abort.abort();let calls=0;
  await runPiDurableWorker({controller:{discover:async()=>{calls++;return [];},execute:async()=>{calls++;}},signal:abort.signal,observe:()=>{}});
@@ -110,6 +190,57 @@ test('the host supervisor restarts a failed worker and never restarts after drai
   supervisor.drain();assert.equal(messages.at(-1).kind,'drain');workers[1].emit('close',0,null);
   await new Promise(r=>setTimeout(r,30));assert.equal(workers.length,2);assert.equal(supervisor.getStatus().state,'stopped');
  }finally{supervisor.drain();}
+});
+test('concurrent session inspections use the ready worker and recheck a changed Journal', async t => {
+ const { journal, route, storageRoot } = await fixture(t);
+ function channelPair() {
+  const a = Object.assign(new EventEmitter(), { connected: true });
+  const b = Object.assign(new EventEmitter(), { connected: true });
+  a.send = (message, done) => { queueMicrotask(() => b.emit('message', message)); done(); };
+  b.send = (message, done) => { queueMicrotask(() => a.emit('message', message)); done(); };
+  return [a, b];
+ }
+ const [worker, workerProcess] = channelPair();
+ worker.pid = 70001;
+ worker.stderr = new EventEmitter();
+ const supervisor = createPiDurableWorkerSupervisor({ spawnProcess: () => worker });
+ t.after(() => supervisor.drain());
+ let journalCalls = 0;
+ let routeCalls = 0;
+ t.after(attachPiInspector(workerProcess, view => {
+  if (view === 'route') {
+   routeCalls += 1;
+   return route.inspect();
+  }
+  journalCalls += 1;
+  return journal.status();
+ }));
+ await assert.rejects(supervisor.inspect('journal'), /PI_INSPECTION_NOT_READY/);
+ worker.emit('message', { protocol: PI_DURABLE_WORKER_PROTOCOL, kind: 'ready', pid: worker.pid });
+ const sessions = Array.from({ length: 2 }, () => {
+  const [clientChannel, httpChannel] = channelPair();
+  const client = createPiInspectionClient(clientChannel, { timeoutMs: 1000 });
+  t.after(client.close);
+  t.after(attachPiInspector(httpChannel, supervisor.inspect));
+  return client;
+ });
+ const health = await Promise.all(sessions.map(client => client.inspect('journal')));
+ assert.deepEqual(health.map(value => value.latest_sequence), [2, 2]);
+ assert.equal(journalCalls, 1);
+ const started = await journal.begin({ operation_type: 'inspection_fixture', tool_name: 'fixture' });
+ await journal.complete(started.operation_id);
+ const [updated, routing] = await Promise.all([
+  sessions[0].inspect('journal'), sessions[1].inspect('route'),
+ ]);
+ assert.equal(updated.latest_sequence, 4);
+ assert.equal(routing.mode, 'pi_default');
+ assert.equal(routeCalls, 1);
+ await assert.rejects(sessions[0].inspect('dispatch'), /PI_INSPECTION_UNAVAILABLE/);
+ const events = path.join(storageRoot, 'events');
+ const [first] = (await readdir(events)).sort();
+ await appendFile(path.join(events, first), 'invalid JSON');
+ assert.equal((await sessions[0].inspect('journal')).chain_verified, false);
+ await assert.rejects(sessions[1].inspect('route'), /PI_INSPECTION_FAILED/);
 });
 test('semantic snapshot reuse rejects altered prior bytes despite unchanged event hashes',async t=>{
  const f=await fixture(t),h=host(f);await h.submit(intent('semantic-prefix'));

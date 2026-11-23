@@ -41,6 +41,7 @@ function createFakeSpawn(scenario) {
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
     child.messages = [];
+    let hung = false;
 
     const emitResponse = (message) => {
       const payload = message.method === 'initialize'
@@ -75,10 +76,15 @@ function createFakeSpawn(scenario) {
         const message = JSON.parse(String(frame).trim());
         child.messages.push(structuredClone(message));
         if (message.method === 'notifications/initialized') return true;
+        if (hung) return true;
         if (message.method === 'tools/call' && (generation === 1 || scenario === 'read-always')) {
-          if (message.params.name === 'safe_read' && ['read-hang', 'read-always', 'read-flips'].includes(scenario)) return true;
+          if (message.params.name === 'safe_read' && ['read-hang', 'read-always', 'read-flips'].includes(scenario)) {
+            hung = true;
+            return true;
+          }
           if (message.params.name === 'unsafe_write') {
-            if (scenario === 'mutation-hang') return true;
+            if (scenario === 'mutation-hang') { hung = true; return true; }
+            if (scenario === 'isolated-tool-timeout') return true;
             if (scenario === 'mutation-crash') {
               setImmediate(() => { child.exitCode = 17; child.stdin.writable = false; child.emit('exit', 17, null); });
               return true;
@@ -491,13 +497,27 @@ for (const failure of ['hang', 'crash', 'overflow']) {
   try {
     await assert.rejects(rpcCall(fixture.session, { jsonrpc: '2.0', id: 'mutation', method: 'tools/call',
       params: { name: 'unsafe_write', arguments: { reconciliation_key: 'stable-mutation-key' }, readOnlyHint: true } }),
-    (error) => error.code === ({ hang: 'CHILD_HUNG', crash: 'CHILD_DEAD', overflow: 'CHILD_PROTOCOL_OVERFLOW' })[failure]);
+    (error) => error.code === ({ hang: 'TOOL_CALL_TIMEOUT', crash: 'CHILD_DEAD', overflow: 'CHILD_PROTOCOL_OVERFLOW' })[failure]);
     await waitForRecovered(fixture.session, 2);
     assert.equal(fixture.fake.children.flatMap((c) => c.messages).filter((m) => m.params?.name === 'unsafe_write').length, 1);
     assert.deepEqual(fixture.delays, []);
   } finally { fixture.close(); }
 }
 console.log('R5 bounded read retry, deterministic jitter, shared storm budget and mutation no-replay passed.');
+
+{
+  const fixture = await retryFixture('isolated-tool-timeout');
+  try {
+    const affected = assert.rejects(rpcCall(fixture.session, { jsonrpc: '2.0', id: 'one-timeout', method: 'tools/call',
+      params: { name: 'unsafe_write', arguments: { reconciliation_key: 'stable-isolated-timeout' } } }),
+      { code: 'TOOL_CALL_TIMEOUT' });
+    assert.equal((await rpcCall(fixture.session, readRequest('healthy-before-timeout'))).result.generation, 1);
+    await affected;
+    assert.equal((await rpcCall(fixture.session, readRequest('healthy-after-timeout'))).result.generation, 1);
+    assert.equal(fixture.fake.children.length, 1);
+    assert.equal(fixture.fake.children[0].messages.filter(message => message.params?.name === 'unsafe_write').length, 1);
+  } finally { fixture.close(); }
+}
 
 {
   const fixture = await retryFixture('read-flips');

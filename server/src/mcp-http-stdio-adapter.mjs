@@ -3,10 +3,13 @@ import { randomUUID } from 'crypto';
 import { once } from 'events';
 import { attachWorldSimulationPreparedTurnBrokerIpc } from './world-simulation-prepared-turn-broker-ipc.mjs';
 import { attachWorkspaceSnapshotAuthorityIpc } from './mcp-workspace-snapshot-authority-ipc.mjs';
+import { attachPiInspector } from './pi-durable-worker-protocol.mjs';
 import { createMcpRuntimeDiagnostics } from './mcp-runtime-diagnostics.mjs';
 import {performance} from 'node:perf_hooks';
 import {REQUEST_TRACE_PROTOCOL,REQUEST_TRACE_META_KEY,createTraceBuffer,publishTrace,requestTraceChannel,sanitizeTrace,traceId,withTraceId} from './mcp-request-tracing.mjs';
 import { terminateProcessTree } from './process-control.mjs';
+import path from 'node:path';
+import { projectRoot, releaseRoot } from './project-paths.mjs';
 
 // Minimal stdio proxy: spawn a per-connection child process running mcp-server.mjs
 // and provide helpers to forward JSON-RPC messages via newline framing.
@@ -96,7 +99,7 @@ export function createStdioSession(options = {}) {
   const retryMaxMs = boundedInteger(options.readonlyRetryMaxDelayMs, 2_000, retryBaseMs, 30_000);
   const random = options.retryRandom ?? Math.random;
   const retrySleep = options.retrySleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
-  const retryableCodes = new Set(['CHILD_HUNG', 'CHILD_DEAD', 'CHILD_PROTOCOL_OVERFLOW']);
+  const retryableCodes = new Set(['CHILD_HUNG', 'CHILD_DEAD', 'CHILD_PROTOCOL_OVERFLOW', 'TOOL_CALL_TIMEOUT']);
   function captureReadOnlyCatalog(response) {
     readOnlyTools.clear();
     for (const tool of response?.result?.tools ?? []) {
@@ -117,6 +120,7 @@ export function createStdioSession(options = {}) {
   let restarting = false;
   let recovering = false;
   let recoveryPromise = null;
+  let timeoutProbe = null;
   let recoveryBlockedReason = null;
   let lastRecovery = null;
   const recoveryAttemptTimestamps = [];
@@ -215,14 +219,18 @@ export function createStdioSession(options = {}) {
     const timer = setTimeout(() => {
       const entry = listeners.get(id);
       if (!entry || entry.generation !== listenerGeneration) return;
+      const toolTimeout = options.isolatedTimeout === true;
       const error = reliabilityError(
-        'CHILD_HUNG',
+        toolTimeout ? 'TOOL_CALL_TIMEOUT' : 'CHILD_HUNG',
         `MCP child call timed out after ${timeoutMs}ms`,
         { request_id: id, generation: listenerGeneration, timeout_ms: timeoutMs },
       );
-      notifyPendingListeners(error);
+      if (toolTimeout) settleListener(id, error, null);
+      else if (options.internal === true) settleListener(id, error, null);
+      else notifyPendingListeners(error);
       if (options.recoverOnTimeout !== false && initializedNotification) {
-        void scheduleRecovery('call_timeout');
+        if (toolTimeout) void probeTransportAfterTimeout(listenerGeneration);
+        else void scheduleRecovery('call_timeout');
       }
     }, timeoutMs);
     listeners.set(id, {
@@ -231,6 +239,31 @@ export function createStdioSession(options = {}) {
       generation: listenerGeneration,
       internal: options.internal === true,
     });
+  }
+
+  function probeTransportAfterTimeout(attemptedGeneration) {
+    if (closed || attemptedGeneration !== generation || recovering || restarting) {
+      return recoveryPromise ?? Promise.resolve(lastRecovery);
+    }
+    if (timeoutProbe?.generation === attemptedGeneration) return timeoutProbe.promise;
+    const probe = { generation: attemptedGeneration, promise: null };
+    timeoutProbe = probe;
+    probe.promise = (async () => {
+      try {
+        // Ping uses the protocol lane, independent of the timed-out tool.
+        // An authenticated error response still proves the transport answered.
+        await internalCall({ jsonrpc: '2.0', id: 'liveness-' + randomUUID(), method: 'ping',
+          params: { _meta: initializeRequest?.params?._meta } },
+        { timeoutMs: Math.min(callTimeoutMs, 5_000), recoverOnTimeout: false });
+        return { ok: true, generation: attemptedGeneration };
+      } catch {
+        if (closed || generation !== attemptedGeneration || recovering || restarting) return recoveryPromise ?? lastRecovery;
+        notifyPendingListeners(reliabilityError('CHILD_HUNG', 'MCP child did not answer its independent liveness probe.',
+          { generation: attemptedGeneration }));
+        return scheduleRecovery('transport_liveness_timeout');
+      }
+    })().finally(() => { if (timeoutProbe === probe) timeoutProbe = null; });
+    return probe.promise;
   }
 
   function bindChild(nextChild, childGeneration) {
@@ -263,6 +296,9 @@ export function createStdioSession(options = {}) {
           change_clock_provider: options.workspaceChangeClockProvider ?? null,
         },
       )
+      : () => {};
+    const detachPiInspection = options.piInspection
+      ? attachPiInspector(nextChild, options.piInspection)
       : () => {};
     const onRuntimeReadinessMessage = (message) => {
       if(message?.protocol===REQUEST_TRACE_PROTOCOL&&child===nextChild&&Array.isArray(message.records)) {
@@ -422,6 +458,7 @@ export function createStdioSession(options = {}) {
     nextChild.on('exit', (code, signal) => {
       detachPreparedTurnBrokerIpc();
       detachWorkspaceSnapshotAuthorityIpc();
+      detachPiInspection();
       nextChild.off('message', onRuntimeReadinessMessage);
       lastExit = {
         child_pid: nextChild.pid ?? null,
@@ -450,11 +487,17 @@ export function createStdioSession(options = {}) {
   function spawnChild() {
     readOnlyTools.clear();
     stdoutBuffer = Buffer.alloc(0);
-    const nextChild = spawnProcess(process.execPath, ['server/src/mcp-server.mjs',...(options.trustedLocalOwner===true?['--trusted-local-owner']:[])], {
+    const managed = process.env.NEXA_MANAGED_PROJECT_ROOT !== undefined;
+    const entry = managed ? path.join(releaseRoot, 'server/src/mcp-server.mjs') : 'server/src/mcp-server.mjs';
+    const args = [entry];
+    if (options.trustedLocalOwner === true) args.push('--trusted-local-owner');
+    if (options.piInspection) args.push('--pi-parent-inspection');
+    const nextChild = spawnProcess(process.execPath, args, {
       // fd 3 is Node's internal IPC channel for the world-simulation prepared-turn
       // broker. stdout remains exclusively MCP JSON-RPC framing.
       // Session startup, reload and recovery are background operations on Windows.
       windowsHide: true,
+      ...(managed ? { cwd: projectRoot } : {}),
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
       env: {
         ...process.env,
@@ -762,7 +805,7 @@ export function createStdioSession(options = {}) {
       }
       const sent = { ...request, id: retryNumber === 0 ? originalId : 'retry-' + randomUUID() };
       registerListener(sent.id, (error, response) => error ? reject(error) : resolve(response),
-        { timeoutMs: timeoutForRequest(request), recoverOnTimeout: true });
+        { timeoutMs: timeoutForRequest(request), recoverOnTimeout: true, isolatedTimeout: request.method === 'tools/call' });
       send(sent);
     });
     void (async () => {
@@ -785,9 +828,11 @@ export function createStdioSession(options = {}) {
             release = retryBudget.acquire();
             if (!release) throw boundedFailure('shared_budget_exhausted');
             retries += 1;
-            // Recovery is single-flight. Never dispatch a retry into the failed generation.
-            const recovery = await (recoveryPromise ?? (generation === attemptedGeneration
-              ? scheduleRecovery('read_only_retry') : Promise.resolve(lastRecovery)));
+            // A tool timeout retries only on a responsive or recovered transport.
+            // An isolated timeout can leave the rest of its generation healthy.
+            const recovery = await (error.code === 'TOOL_CALL_TIMEOUT' ? probeTransportAfterTimeout(attemptedGeneration)
+              : recoveryPromise ?? (generation === attemptedGeneration
+                ? scheduleRecovery('read_only_retry') : Promise.resolve(lastRecovery)));
             if (!recovery?.ok || closed || finished) throw boundedFailure('child_recovery_unavailable');
             if (request.method === 'tools/call' && !readOnlyTools.has(request.params?.name)) {
               throw boundedFailure('read_only_classification_changed');

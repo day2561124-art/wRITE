@@ -453,7 +453,7 @@ export async function dev_apply_patch(input = {}, options = {}) {
           },
         });
       } catch (journalError) {
-        await markDevJournalDegraded(`dev_apply_patch failure terminal append failed: ${journalError.message}`);
+        await markDevJournalDegraded(`dev_apply_patch failure terminal append failed: ${journalError.message}`, journalOperation?.operation_id);
       }
     }
     throw error;
@@ -474,7 +474,7 @@ export async function dev_apply_patch(input = {}, options = {}) {
       result: { changed: true, after_sha256: result.after_sha256 },
     });
   } catch (error) {
-    await markDevJournalDegraded(`dev_apply_patch terminal append failed: ${error.message}`);
+    await markDevJournalDegraded(`dev_apply_patch terminal append failed: ${error.message}`, journalOperation?.operation_id);
     throw new Error(`dev_apply_patch effect completed but provenance terminal append failed: ${error.message}`);
   }
   return attachMutationContext({ ...result, operation_id: journalOperation.operation_id }, context);
@@ -586,7 +586,7 @@ export async function dev_delete_file(input = {}, options = {}) {
           },
         });
       } catch (journalError) {
-        await markDevJournalDegraded(`dev_delete_file failure terminal append failed: ${journalError.message}`);
+        await markDevJournalDegraded(`dev_delete_file failure terminal append failed: ${journalError.message}`, journalOperation?.operation_id);
       }
     }
     throw error;
@@ -607,7 +607,7 @@ export async function dev_delete_file(input = {}, options = {}) {
       result: { deleted: true },
     });
   } catch (error) {
-    await markDevJournalDegraded(`dev_delete_file terminal append failed: ${error.message}`);
+    await markDevJournalDegraded(`dev_delete_file terminal append failed: ${error.message}`, journalOperation?.operation_id);
     throw new Error(`dev_delete_file effect completed but provenance terminal append failed: ${error.message}`);
   }
   return attachMutationContext({ ...result, operation_id: journalOperation.operation_id }, context);
@@ -721,7 +721,7 @@ export async function dev_create_file(input = {}, options = {}) {
         result: { created: true, after_sha256: observedSha256 },
       });
     } catch (error) {
-      await markDevJournalDegraded(`dev_create_file terminal append failed: ${error.message}`);
+      await markDevJournalDegraded(`dev_create_file terminal append failed: ${error.message}`, journalOperation?.operation_id);
       const provenanceError = new Error(`dev_create_file effect completed but provenance terminal append failed: ${error.message}`);
       provenanceError.code = "JOURNAL_TERMINAL_APPEND_FAILED";
       throw provenanceError;
@@ -754,7 +754,7 @@ export async function dev_create_file(input = {}, options = {}) {
           },
         });
       } catch (journalError) {
-        await markDevJournalDegraded(`dev_create_file failure terminal append failed: ${journalError.message}`);
+        await markDevJournalDegraded(`dev_create_file failure terminal append failed: ${journalError.message}`, journalOperation?.operation_id);
         throw new Error(`dev_create_file failed and provenance terminal append failed: ${journalError.message}`);
       }
       throw error;
@@ -819,7 +819,7 @@ export async function dev_create_directory(input = {}, options = {}) {
         result: { created: true, artifact_type: "directory" },
       });
     } catch (error) {
-      await markDevJournalDegraded(`dev_create_directory terminal append failed: ${error.message}`);
+      await markDevJournalDegraded(`dev_create_directory terminal append failed: ${error.message}`, journalOperation?.operation_id);
       const provenanceError = new Error(`dev_create_directory effect completed but provenance terminal append failed: ${error.message}`);
       provenanceError.code = "JOURNAL_TERMINAL_APPEND_FAILED";
       throw provenanceError;
@@ -851,7 +851,7 @@ export async function dev_create_directory(input = {}, options = {}) {
           },
         });
       } catch (journalError) {
-        await markDevJournalDegraded(`dev_create_directory failure terminal append failed: ${journalError.message}`);
+        await markDevJournalDegraded(`dev_create_directory failure terminal append failed: ${journalError.message}`, journalOperation?.operation_id);
         throw new Error(`dev_create_directory failed and provenance terminal append failed: ${journalError.message}`);
       }
       throw error;
@@ -1007,7 +1007,7 @@ export async function dev_move_path(input = {}, options = {}) {
         result: { moved: true, after_sha256: beforeSha256 },
       });
     } catch (error) {
-      await markDevJournalDegraded(`dev_move_path terminal append failed: ${error.message}`);
+      await markDevJournalDegraded(`dev_move_path terminal append failed: ${error.message}`, journalOperation?.operation_id);
       const provenanceError = new Error(`dev_move_path effect completed but provenance terminal append failed: ${error.message}`);
       provenanceError.code = "JOURNAL_TERMINAL_APPEND_FAILED";
       throw provenanceError;
@@ -1055,7 +1055,7 @@ export async function dev_move_path(input = {}, options = {}) {
           },
         });
       } catch (journalError) {
-        await markDevJournalDegraded(`dev_move_path failure terminal append failed: ${journalError.message}`);
+        await markDevJournalDegraded(`dev_move_path failure terminal append failed: ${journalError.message}`, journalOperation?.operation_id);
         throw new Error(`dev_move_path failed and provenance terminal append failed: ${journalError.message}`);
       }
       throw error;
@@ -2073,7 +2073,7 @@ export async function dev_git_commit(input = {}, options = {}) {
         },
       });
     } catch (error) {
-      await markDevJournalDegraded(`dev_git_commit failure terminal append failed: ${error.message}`);
+      await markDevJournalDegraded(`dev_git_commit failure terminal append failed: ${error.message}`, journalOperation?.operation_id);
       return attachMutationContext({
         ...result,
         execution_ok: false,
@@ -2124,7 +2124,7 @@ export async function dev_git_commit(input = {}, options = {}) {
       },
     });
   } catch (error) {
-    await markDevJournalDegraded(`dev_git_commit terminal append failed: ${error.message}`);
+    await markDevJournalDegraded(`dev_git_commit terminal append failed: ${error.message}`, journalOperation?.operation_id);
     return attachMutationContext({
       ...result,
       execution_ok: false,
@@ -2205,26 +2205,19 @@ process.once("exit", () => {
   for (const child of activePushGitChildren) terminatePushProcessTree(child);
 });
 
-function terminatePushProcessTree(child, { forceAfterMs = 2_000 } = {}) {
+function terminatePushProcessTree(child) {
   if (!child || child.exitCode !== null || !child.pid) return;
   if (process.platform === "win32") {
-    terminateProcessTree(child, { forceAfterMs });
+    terminateProcessTree(child);
     return;
   }
   try {
-    process.kill(-child.pid, "SIGTERM");
+    // The timed-out command owns this detached process group. Stop every
+    // member now, including descendants with no inherited response pipes.
+    process.kill(-child.pid, "SIGKILL");
   } catch {
-    terminateProcessTree(child, { forceAfterMs });
-    return;
+    terminateProcessTree(child);
   }
-  const forceTimer = setTimeout(() => {
-    try {
-      process.kill(-child.pid, "SIGKILL");
-    } catch {
-      // The isolated process group may already have exited.
-    }
-  }, forceAfterMs);
-  forceTimer.unref?.();
 }
 
 function validatePushInput(input) {

@@ -13,8 +13,11 @@ import {
 import { workspaceExecutionProvenance } from "./mcp-development-readonly-tools.mjs";
 import { resolveDevWorkspaceExecutionContext } from "./mcp-development-workstream-tools.mjs";
 import { markPowerShellPreDispatchFailure } from "./mcp-powershell-predispatch-failure.mjs";
+import { prepareAppContainerPowerShell } from "./mcp-powershell-appcontainer.mjs";
+import { PI_TASK_AUTHORIZATION_ID, WINDOWS_APPROVED_SCRIPT_ID, WINDOWS_SERVICE_NAME } from "./pi-execution-contract.mjs";
 import {
   beginDevJournalOperation,
+  DEV_JOURNAL_STORAGE_ROOT,
   completeDevJournalOperation,
   failDevJournalOperation,
   markDevJournalDegraded,
@@ -25,9 +28,145 @@ export const POWERSHELL_MAINTENANCE_OUTPUT_MAX_CHARACTERS = 64 * 1024;
 export const POWERSHELL_MAINTENANCE_DEFAULT_TIMEOUT_MS = 30_000;
 export const POWERSHELL_MAINTENANCE_MAX_TIMEOUT_MS = 120_000;
 export const POWERSHELL_ADMIN_TASK_NAME = "WriterWorkbench-PowerShellAdminRunner";
+export const POWERSHELL_SCOPED_ADMIN_TASK_NAME = "WriterWorkbench-PowerShellScopedAdminRunner";
+
+function scopedAdminRoot(version) {
+  const programFiles = process.env.ProgramW6432 ?? process.env.ProgramFiles;
+  return programFiles && path.join(programFiles, version === 3 ? "WriterWorkbench-PiMaintenance-v3" : "WriterWorkbench-PiMaintenance");
+}
+
+export function usesScopedAdminDispatcherRoot() {
+  const grants = process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT;
+  const root = scopedAdminRoot(3);
+  return Boolean(root && typeof grants === "string" && path.isAbsolute(grants)
+    && path.relative(path.join(root, "grants"), grants) === "");
+}
+
+function scopedAdminStateRoot() {
+  if (!usesScopedAdminDispatcherRoot()) {
+    throw new Error("SCOPED_ADMIN_AUTHORIZATION_STORE_REQUIRED");
+  }
+  return scopedAdminRoot(3);
+}
+
+async function assertScopedAdminReady(approvedScript = false) {
+  const root = scopedAdminStateRoot();
+  const directories = ["requests", "results", "grants", ...(approvedScript ? ["approved-scripts"] : [])];
+  for (const dir of [root, ...directories.map(name => path.join(root, name))]) {
+    const info = await lstat(dir);
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("SCOPED_ADMIN_RUNNER_NOT_REGISTERED");
+  }
+  const configPath = path.join(root, "config.json");
+  const info = await lstat(configPath);
+  if (!info.isFile() || info.isSymbolicLink() || info.size > 16_384) throw new Error("SCOPED_ADMIN_RUNNER_NOT_REGISTERED");
+  const config = JSON.parse(await readFile(configPath, "utf8"));
+  if (config?.schema_version !== 3 || (approvedScript && config.approved_scripts !== true)
+    || typeof config.journal_root !== "string" || path.relative(DEV_JOURNAL_STORAGE_ROOT, config.journal_root) !== ""
+    || !/^S-1-5-21-(?:\d+-){3}\d+$/u.test(config.dispatcher_sid ?? "")
+    || config.dispatcher_sid === config.expected_user_sid || process.env.NEXA_PI_REQUIRE_TASK_AUTHORIZATION !== "1") {
+    throw new Error("SCOPED_ADMIN_RUNNER_NOT_REGISTERED");
+  }
+  const windows = process.env.SystemRoot;
+  if (!windows || !path.isAbsolute(windows)) throw new Error("SCOPED_ADMIN_DISPATCHER_IDENTITY_REQUIRED");
+  const whoami = path.join(windows, "System32", "whoami.exe");
+  const tokenIds = group => spawnSync(whoami, [group, "/fo", "csv", "/nh"], {
+    encoding: "utf8", windowsHide: true, timeout: 3000, env: controlledProcessEnvironment(),
+  });
+  const user = tokenIds("/user");
+  const groups = tokenIds("/groups");
+  if (user.status !== 0 || groups.status !== 0 || !user.stdout.includes(`"${config.dispatcher_sid}"`)
+    || groups.stdout.includes('"S-1-5-32-544"')) throw new Error("SCOPED_ADMIN_DISPATCHER_IDENTITY_REQUIRED");
+}
 
 const ADMIN_RESULT_STARTUP_GRACE_MS = 20_000;
 const ADMIN_RESULT_POLL_MS = 125;
+const ADMIN_RECEIPT_ID = /^[a-f0-9]{32}$/u;
+
+function scopedAdminBinding(grant) {
+  const scope = [grant.workspace_id, grant.workstream_id, grant.goal];
+  if (grant.script_id) scope.push("approved_script", grant.script_id, grant.script_sha256);
+  else scope.push(grant.service_name.toLowerCase());
+  return sha256(scope.join("\n")).slice(0, 32);
+}
+
+function scopedAdminTarget(grant) {
+  return grant.script_id ? { script_id: grant.script_id, script_sha256: grant.script_sha256 }
+    : { service_name: grant.service_name.toLowerCase() };
+}
+
+function approvedScriptTargetValid(grant) {
+  return typeof grant.script_id === "string" && WINDOWS_APPROVED_SCRIPT_ID.test(grant.script_id)
+    && typeof grant.script_sha256 === "string" && /^[a-f0-9]{64}$/u.test(grant.script_sha256);
+}
+
+function scopedAdminReceiptMatches(receipt, expected) {
+  if (receipt?.schema_version !== 2 || receipt.request_id !== expected.request_id
+    || receipt.task_authorization_id !== expected.task_authorization_id || receipt.scope_binding !== expected.scope_binding
+    || typeof receipt.dispatch_started !== "boolean" || typeof receipt.timed_out !== "boolean") return false;
+  const script = Boolean(expected.script_id);
+  const targets = scopedAdminTarget(expected);
+  if (receipt.reason === "SCOPED_ADMIN_AUTHORIZATION_DENIED") {
+    return receipt.execution_ok === false && receipt.exit_code === null && receipt.timed_out === false
+      && receipt.dispatch_started === false && Object.keys(targets).every(key => receipt[key] === null);
+  }
+  if (Object.entries(targets).some(([key, value]) => receipt[key] !== value)) return false;
+  if (receipt.execution_ok === true) {
+    return receipt.exit_code === 0 && receipt.reason === null && receipt.timed_out === false && (!script || receipt.dispatch_started);
+  }
+  if (receipt.execution_ok !== false) return false;
+  if (!script) return receipt.reason === "SCOPED_ADMIN_SERVICE_FAILED" && receipt.exit_code === null && receipt.timed_out === false;
+  if (receipt.reason === "SCOPED_ADMIN_SCRIPT_TIMEOUT") return receipt.dispatch_started && receipt.timed_out && receipt.exit_code === null;
+  return receipt.reason === "SCOPED_ADMIN_SCRIPT_FAILED" && receipt.timed_out === false
+    && (receipt.exit_code === null || receipt.dispatch_started && Number.isSafeInteger(receipt.exit_code) && receipt.exit_code !== 0);
+}
+
+// Inspect an already-published protected receipt without making a request to the runner.
+export async function inspectScopedAdminRecovery(started, { stateRoot } = {}) {
+  const requestId = started.operation_id.slice("dev_operation_".length);
+  const scope = started.result;
+  if (!ADMIN_RECEIPT_ID.test(requestId) || !ADMIN_RECEIPT_ID.test(scope?.scoped_admin_scope_binding ?? "")
+    || !PI_TASK_AUTHORIZATION_ID.test(scope?.task_authorization_id ?? "")
+    || !(scope.script_id ? approvedScriptTargetValid(scope) : WINDOWS_SERVICE_NAME.test(scope.service_name ?? ""))) {
+    return null;
+  }
+  const root = stateRoot ?? scopedAdminRoot(scope.scoped_admin_dispatch_protocol === 3 ? 3 : 2);
+  if (!root) return null;
+  const file = path.join(root, "results", `${requestId}.result.json`);
+  // The scheduled task can outlive the crashed MCP process. Give a recent
+  // dispatch time to publish its receipt without requesting another execution.
+  const startedAt = Date.parse(started.timestamp);
+  const timeoutMs = Number.isSafeInteger(scope.timeout_ms)
+    ? Math.min(scope.timeout_ms, POWERSHELL_MAINTENANCE_MAX_TIMEOUT_MS) : 0;
+  const deadline = Math.min(Date.now() + ADMIN_RESULT_STARTUP_GRACE_MS, startedAt + timeoutMs + ADMIN_RESULT_STARTUP_GRACE_MS);
+  let info;
+  for (;;) {
+    try {
+      info = await lstat(file);
+      break;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+      if (!(Date.now() < deadline)) return null;
+      await new Promise(resolve => setTimeout(resolve, ADMIN_RESULT_POLL_MS));
+    }
+  }
+  if (!info.isFile() || info.isSymbolicLink() || info.size > 16_384) return null;
+  const raw = await readFile(file, "utf8");
+  const receipt = JSON.parse(raw);
+  if (!scopedAdminReceiptMatches(receipt, { ...scope, request_id: requestId, scope_binding: scope.scoped_admin_scope_binding })
+    || (!receipt.execution_ok && receipt.dispatch_started)) return null;
+  return {
+    command_sha256: scope.command_sha256,
+    scoped_admin_scope_binding: scope.scoped_admin_scope_binding,
+    scoped_request_id: requestId,
+    scoped_admin_receipt_sha256: sha256(raw),
+    task_authorization_id: scope.task_authorization_id,
+    ...scopedAdminTarget(scope),
+    scoped_admin_dispatch_started: receipt.dispatch_started,
+    execution_ok: receipt.execution_ok,
+    exit_code: receipt.exit_code,
+    reason: receipt.reason,
+  };
+}
 
 const blockedCommandPatterns = Object.freeze([
   {
@@ -276,10 +415,22 @@ export async function runPowerShellViaAdminTask({
   command,
   cwd,
   timeoutMs,
-  stateRoot = defaultAdminStateRoot(),
-  taskName = POWERSHELL_ADMIN_TASK_NAME,
+  serviceAuthorization,
+  scriptAuthorization,
+  journalAdmission,
+  stateRoot = serviceAuthorization || scriptAuthorization ? scopedAdminStateRoot() : defaultAdminStateRoot(),
+  taskName = serviceAuthorization || scriptAuthorization ? POWERSHELL_SCOPED_ADMIN_TASK_NAME : POWERSHELL_ADMIN_TASK_NAME,
   spawnSyncImpl = spawnSync,
+  requestId = randomUUID().replaceAll("-", ""),
 } = {}) {
+  if (typeof requestId !== "string" || !ADMIN_RECEIPT_ID.test(requestId)) throw new Error("INVALID_ADMIN_REQUEST_ID");
+  const scoped = scriptAuthorization ?? serviceAuthorization;
+  if (scoped && (journalAdmission?.operation_id !== `dev_operation_${requestId}`
+    || !/^dev_journal_event_[a-f0-9]{32}$/u.test(journalAdmission.started_event_id ?? "")
+    || !Number.isSafeInteger(journalAdmission.started_sequence) || journalAdmission.started_sequence < 1
+    || journalAdmission.started_sequence > 999_999_999_999)) {
+    throw new Error("SCOPED_ADMIN_JOURNAL_ADMISSION_REQUIRED");
+  }
   const startedAt = Date.now();
   const base = processResultBase({ elevated: true, command, cwd, timeoutMs, startedAt });
 
@@ -292,10 +443,13 @@ export async function runPowerShellViaAdminTask({
   }
   adminInvocationActive = true;
 
-  const requestId = randomUUID().replaceAll("-", "");
   const requestsDir = path.join(stateRoot, "requests");
   const resultsDir = path.join(stateRoot, "results");
-  const requestPath = path.join(requestsDir, `${requestId}.request.json`);
+  const scopeBinding = scoped ? scopedAdminBinding(scoped) : null;
+  const eventSuffix = scoped ? journalAdmission.started_event_id.slice("dev_journal_event_".length) : null;
+  const requestPath = path.join(requestsDir, scoped
+    ? `${requestId}~${scoped.task_authorization_id}~${scopeBinding}~${Date.now()}~${String(journalAdmission.started_sequence).padStart(12, "0")}~${eventSuffix}${scriptAuthorization ? "~script" : ""}.scoped-request`
+    : `${requestId}.request.json`);
   const resultPath = path.join(resultsDir, `${requestId}.result.json`);
 
   try {
@@ -307,16 +461,19 @@ export async function runPowerShellViaAdminTask({
       };
     }
 
-    await mkdir(requestsDir, { recursive: true });
-    await mkdir(resultsDir, { recursive: true });
-    await writeFile(requestPath, `${JSON.stringify({
+    if (!scoped) {
+      await mkdir(requestsDir, { recursive: true });
+      await mkdir(resultsDir, { recursive: true });
+    }
+    const request = scoped ? "" : `${JSON.stringify({
       schema_version: 1,
       request_id: requestId,
       command,
       cwd,
       timeout_ms: timeoutMs,
       created_at: new Date().toISOString(),
-    })}\n`, { encoding: "utf8", flag: "wx" });
+    })}\n`;
+    await writeFile(requestPath, request, { encoding: "utf8", flag: "wx" });
 
     const runResult = spawnSyncImpl(
       "schtasks.exe",
@@ -351,6 +508,10 @@ export async function runPowerShellViaAdminTask({
         stderr: "Elevated runner did not publish a result before the bounded wait expired.",
       };
     }
+    if (scoped && !scopedAdminReceiptMatches(payload, { ...scopedAdminTarget(scoped), request_id: requestId,
+      task_authorization_id: scoped.task_authorization_id, scope_binding: scopeBinding })) {
+      return { ...base, reason: "SCOPED_ADMIN_RECEIPT_MISMATCH", stderr: "The protected maintenance receipt did not match the request." };
+    }
 
     return {
       elevated: true,
@@ -371,10 +532,17 @@ export async function runPowerShellViaAdminTask({
       stderr_truncated: payload.stderr_truncated === true,
       reason: typeof payload.reason === "string" ? payload.reason : null,
       request_id: requestId,
+      ...(scoped ? { task_authorization_id: payload.task_authorization_id,
+        ...scopedAdminTarget(scoped), scoped_admin_dispatch_started: payload.dispatch_started,
+        scoped_admin_scope_binding: scopeBinding } : {}),
+      ...(scriptAuthorization ? {
+        script_stdout_sample_sha256: /^[a-f0-9]{64}$/u.test(payload.script_stdout_sample_sha256 ?? "") ? payload.script_stdout_sample_sha256 : null,
+        script_stderr_sample_sha256: /^[a-f0-9]{64}$/u.test(payload.script_stderr_sample_sha256 ?? "") ? payload.script_stderr_sample_sha256 : null,
+      } : {}),
     };
   } finally {
     await rm(requestPath, { force: true }).catch(() => {});
-    await rm(resultPath, { force: true }).catch(() => {});
+    if (!scoped) await rm(resultPath, { force: true }).catch(() => {});
     adminInvocationActive = false;
   }
 }
@@ -402,21 +570,38 @@ function journalResult(result) {
     stdout_truncated: result.stdout_truncated === true,
     stderr_truncated: result.stderr_truncated === true,
     reason: result.reason ?? null,
+    ...(result.task_authorization_id ? { task_authorization_id: result.task_authorization_id, ...scopedAdminTarget(result),
+      scoped_admin_dispatch_started: result.scoped_admin_dispatch_started, scoped_request_id: result.request_id,
+      scoped_admin_scope_binding: result.scoped_admin_scope_binding } : {}),
+    ...(result.script_id ? { script_stdout_sample_sha256: result.script_stdout_sample_sha256,
+      script_stderr_sample_sha256: result.script_stderr_sample_sha256 } : {}),
+    ...(result.isolation_mode === "appcontainer" ? {
+      isolation_mode: result.isolation_mode,
+      workspace_writes: false,
+      job_terminated: result.job_terminated === true,
+      cleanup_pending: result.cleanup_pending === true,
+      input_manifest_sha256: result.input_manifest_sha256,
+      input_file_count: result.input_file_count,
+      ...(result.toolchain ? { toolchain: result.toolchain } : {}),
+      artifact_manifest_sha256: sha256(JSON.stringify((result.artifacts ?? []).map(({content, ...item}) => item))),
+    } : {}),
   };
 }
 
 export function createPowerShellMaintenanceTool({
   elevated = false,
+  isolated = false,
   platform = process.platform,
   workspaceContextResolver = resolveDevWorkspaceExecutionContext,
   executor = elevated ? runPowerShellViaAdminTask : runPowerShellProcess,
   journalApi = defaultJournalApi,
 } = {}) {
+  if (isolated && elevated) throw new Error("INVALID_POWERSHELL_RUNNER_CONFIGURATION");
   const toolName = elevated ? "powershell_admin_run" : "powershell_run";
   const operationType = elevated ? "powershell_admin_maintenance" : "powershell_maintenance";
 
   return async function powershellMaintenance(input = {}) {
-    let timeoutMs, context, cwd;
+    let timeoutMs, context, cwd, prepared, scoped;
     try {
       if (platform !== "win32") throw new Error(`${toolName} is only available on Windows.`);
       assertPowerShellMaintenanceCommandAllowed(input.command);
@@ -426,8 +611,34 @@ export function createPowerShellMaintenanceTool({
         { mutation: true },
       );
       cwd = await resolveMaintenanceCwd(context.root, input.cwd ?? ".", {
-        hostAbsoluteCwd: !elevated && context.workspace_type === "shared",
+        hostAbsoluteCwd: !isolated && !elevated && context.workspace_type === "shared",
       });
+      if (input.service_authorization !== undefined || input.script_authorization !== undefined) {
+        const script = input.script_authorization !== undefined;
+        const grant = script ? input.script_authorization : input.service_authorization;
+        if (!elevated || context.workspace_type !== "isolated_worktree" || context.workstream_state !== "active"
+          || (script && input.service_authorization !== undefined)
+          || !grant || typeof grant.task_authorization_id !== "string" || !PI_TASK_AUTHORIZATION_ID.test(grant.task_authorization_id)
+          || (script ? !approvedScriptTargetValid(grant)
+            : typeof grant.service_name !== "string" || !WINDOWS_SERVICE_NAME.test(grant.service_name))
+          || typeof grant.goal !== "string" || !grant.goal.trim() || grant.goal.length > 4096
+          || grant.workstream_id !== context.workstream_id) throw new Error("SCOPED_ADMIN_AUTHORIZATION_REQUIRED");
+        if (script && input.command !== `approved_script:${grant.script_id}:${grant.script_sha256}`) {
+          throw new Error("SCOPED_ADMIN_AUTHORIZATION_REQUIRED");
+        }
+        const target = script ? { script_id: grant.script_id, script_sha256: grant.script_sha256 }
+          : { service_name: grant.service_name.toLowerCase() };
+        scoped = { task_authorization_id: grant.task_authorization_id, goal: grant.goal, ...target,
+          workstream_id: context.workstream_id, workspace_id: context.workspace_id };
+        if (executor === runPowerShellViaAdminTask) await assertScopedAdminReady(script);
+      }
+      if (isolated) {
+        if (context.workspace_type !== "isolated_worktree" || context.workstream_state !== "active"
+          || context.lifecycle_state !== "active" || context.mutation_allowed !== true) throw new Error("ISOLATED_WORKSPACE_REQUIRED");
+        prepared = await prepareAppContainerPowerShell({ context, cwd, command: input.command, timeoutMs,
+          sandbox_paths: input.sandbox_paths, sandbox_directories: input.sandbox_directories,
+          output_paths: input.output_paths, toolchain: input.toolchain });
+      }
     } catch (error) {
       throw markPowerShellPreDispatchFailure(error, toolName);
     }
@@ -443,17 +654,33 @@ export function createPowerShellMaintenanceTool({
         command_sha256: commandHash,
         cwd,
         timeout_ms: timeoutMs,
+        ...(prepared ? { isolation_mode: "appcontainer", workspace_writes: false, ...prepared.manifest } : {}),
+        ...(scoped ? { task_authorization_id: scoped.task_authorization_id, ...scopedAdminTarget(scoped),
+          scoped_admin_scope_binding: scopedAdminBinding(scoped), scoped_admin_dispatch_protocol: 3 } : {}),
       },
+    }).catch(async error => {
+      await prepared?.cleanup();
+      throw error;
     });
 
     let result;
     try {
-      result = await executor({
+      result = prepared ? await prepared.run() : await executor({
         command: input.command,
         cwd,
         timeoutMs,
+        ...(scoped ? { [scoped.script_id ? "scriptAuthorization" : "serviceAuthorization"]: scoped,
+          requestId: operation.operation_id.slice("dev_operation_".length), journalAdmission: operation } : {}),
       });
+      if (prepared) {
+        try {
+          await prepared.cleanup();
+          result = { ...result, cleanup_pending: false };
+        }
+        catch { result = { ...result, ok: false, cleanup_pending: true, reason: "SANDBOX_CLEANUP_PENDING" }; }
+      }
     } catch (error) {
+      await prepared?.cleanup().catch(() => {});
       const reason = redactProcessOutput(error?.message ?? String(error)).slice(0, 512);
       try {
         await journalApi.fail(operation.operation_id, {
@@ -467,7 +694,7 @@ export function createPowerShellMaintenanceTool({
           },
         });
       } catch (journalError) {
-        await journalApi.degrade(`${toolName} failure terminal append failed: ${journalError.message}`);
+        await journalApi.degrade(`${toolName} failure terminal append failed: ${journalError.message}`, operation.operation_id);
       }
       throw error;
     }
@@ -477,7 +704,7 @@ export function createPowerShellMaintenanceTool({
         result: journalResult(result),
       });
     } catch (error) {
-      await journalApi.degrade(`${toolName} terminal append failed: ${error.message}`);
+      await journalApi.degrade(`${toolName} terminal append failed: ${error.message}`, operation.operation_id);
       return {
         ...result,
         execution_ok: false,
@@ -500,3 +727,4 @@ export function createPowerShellMaintenanceTool({
 
 export const powershell_run = createPowerShellMaintenanceTool({ elevated: false });
 export const powershell_admin_run = createPowerShellMaintenanceTool({ elevated: true });
+export const powershell_isolated_run = createPowerShellMaintenanceTool({ isolated: true });

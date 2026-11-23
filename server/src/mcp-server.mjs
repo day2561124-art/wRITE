@@ -1,10 +1,14 @@
-import {loadTRPGGMBridge,trpgPublicToolDefinition,createWorkbenchTransportBoundary} from './mcp-trpg-gm-bridge.mjs';
+import {loadTRPGGMBridge,trpgPublicToolDefinition,createWorkbenchTransportBoundary,trpgGatewayFailureCode} from './mcp-trpg-gm-bridge.mjs';
 import { fingerprintMcpMutationRequest, normalizeMcpReconciliationKey, MCP_RECONCILIATION_KEY_PATTERN_SOURCE } from "./mcp-operation-reconciliation-context.mjs";
 import "./mcp-stdio-guard.mjs";
 import {performance} from "node:perf_hooks";
 import {REQUEST_TRACE_META_KEY,attachTraceIpc,publishTrace,runRequestTrace,traceId,traceSpan} from "./mcp-request-tracing.mjs";
 if(process.env.MCP_REQUEST_TRACING==='1')attachTraceIpc();
 import { createRuntimeReadiness } from "./mcp-runtime-readiness.mjs";
+import { attachPiInspector, createPiInspectionClient } from "./pi-durable-worker-protocol.mjs";
+const parentPiInspection = process.argv.includes('--pi-parent-inspection')
+  ? createPiInspectionClient(process, { timeoutMs: 90_000 })
+  : null;
 import { preserveWorkstreamPrewriteFailure } from "./mcp-workstream-prewrite-failure.mjs";
 import { markPowerShellPreDispatchFailure, preservePowerShellPreDispatchFailure } from "./mcp-powershell-predispatch-failure.mjs";
 import { chatgpt_bridge_save_settlement_report } from "./mcp-direct-pasted-chapter-settlement-wrapper.mjs";
@@ -18,6 +22,7 @@ import {
   assertExactPath,
   assertPathInside,
   projectPaths,
+  projectRoot,
   resolveCandidateMarkdownPath,
   resolveGeneratedMarkdownPath,
   resolveProjectPath,
@@ -179,6 +184,7 @@ import {
   POWERSHELL_MAINTENANCE_MAX_TIMEOUT_MS,
   powershell_admin_run,
   powershell_run,
+  powershell_isolated_run,
 } from "./mcp-powershell-maintenance-tools.mjs";
 import {
   DEV_WORKSTREAM_ID_PATTERN_SOURCE,
@@ -236,6 +242,7 @@ import {
   dev_workspace_list_operations,
   initializeDevJournalRuntime,
 } from "./mcp-development-journal-tools.mjs";
+import { isJournalIsolationFailure, journalMutationDetails, preserveJournalIsolationFailure } from "./mcp-development-journal-isolation.mjs";
 import {
   DEV_CHECKPOINT_ID_PATTERN_SOURCE,
   DEV_CHECKPOINT_MAX_LIST_RESULTS,
@@ -290,8 +297,8 @@ const execFileAsync = promisify(execFile);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const rootDir = path.resolve(__dirname, "..", "..");
-const toolsDir = path.join(rootDir, "server", "src", "tools");
+const rootDir = projectRoot;
+const toolsDir = path.join(__dirname, "tools");
 
 const serverInfo = {
   name: "armed-academy-fiction-engine",
@@ -877,6 +884,14 @@ function summarizeToolArguments(args, toolName = "") {
   if (isWorldSimulationMcpToolName(toolName)) {
     return summarizeWorldSimulationMcpAuditArguments(args);
   }
+  if (toolName === "blender_edit_scene") {
+    return {
+      scene: summarizeInputValue(args.scene),
+      scene_id: summarizeInputValue(args.scene_id),
+      operations: summarizeInputValue(JSON.stringify(args.operations ?? null), "newText"),
+      operation_count: Array.isArray(args.operations) ? args.operations.length : null,
+    };
+  }
   const summary = {};
   for (const [key, value] of Object.entries(args)) {
     if (["powershell_run", "powershell_admin_run"].includes(toolName) && key === "command" && typeof value === "string") {
@@ -1205,7 +1220,7 @@ async function auditedToolCall(tool, args, actor) {
     });
   } catch (error) {
     if (!handlerInvoked) markPowerShellPreDispatchFailure(error, tool.name);
-    result = {
+    result = isJournalIsolationFailure(error) ? journalIsolationResult(error) : {
       isError: true,
       content: [
         {
@@ -1215,6 +1230,7 @@ async function auditedToolCall(tool, args, actor) {
       ],
     };
     preserveWorkstreamPrewriteFailure(error, result);
+    preserveJournalIsolationFailure(error, result);
     preservePowerShellPreDispatchFailure(error, result);
   }
 
@@ -1253,6 +1269,10 @@ async function auditedToolCall(tool, args, actor) {
   ], { audit_id: auditId, tool_name: tool.name });
 
   return result;
+}
+
+function journalIsolationResult(error) {
+  return { ...jsonContent({ ok: false, code: error.code, message: error.message, isolation: error.isolation }), isError: true };
 }
 
 async function directoryCount(dirPath) {
@@ -1808,7 +1828,7 @@ const devWorkspaceExecutionProperties = Object.freeze({
   }),
 });
 
-import {CAPABILITY_DEFINITIONS, verifyPiWorkspaceShellScope} from "./pi-execution-contract.mjs";
+import {CAPABILITY_DEFINITIONS, verifyPiWorkspaceShellScope, WINDOWS_APPROVED_SCRIPT_ID} from "./pi-execution-contract.mjs";
 import {beginPiWorkstreamBootstrap} from "./mcp-development-workstream-tools.mjs";
 import {isPiManagedMcpCall,assertPiManagedMcpCall} from "./pi-production-execution-controller.mjs";
 import {getMcpOperationReconciliationContext as getPiBootstrapReconciliation} from "./mcp-operation-reconciliation-context.mjs";
@@ -2029,7 +2049,7 @@ const toolDefinitions = [
   },
   {
     name: "powershell_run",
-    description: "Run bounded non-elevated Windows PowerShell for Pi-approved host maintenance or isolated-workspace engineering. Host-maintenance scope permits an existing local absolute-drive cwd (for example C:, D: or E:), while isolated workspace-shell and elevated scopes remain confined. Commands use the Windows user account; cwd is not an OS sandbox. Timeout/output caps, audit and destructive system-command guards remain.",
+    description: "Run non-elevated Windows PowerShell. Task-authorized workspace.powershell_isolated runs in AppContainer with selected UTF-8 workspace files and source directories and returns selected scratch artifacts. Legacy Pi host maintenance keeps the explicit local cwd, audit, timeout, and system-command guards.",
     risk: "low-risk-write",
     annotations: { readOnlyHint: false },
     inputSchema: baseSchema({
@@ -2039,6 +2059,11 @@ const toolDefinitions = [
         maxLength: POWERSHELL_MAINTENANCE_COMMAND_MAX_CHARACTERS,
       },
       cwd: { type: "string", default: "." },
+      sandbox: { type: "boolean", const: true },
+      sandbox_paths: { type: "array", maxItems: 64, items: { type: "string", minLength: 1, maxLength: 512 } },
+      sandbox_directories: { type: "array", maxItems: 8, items: { type: "string", minLength: 1, maxLength: 512 } },
+      output_paths: { type: "array", maxItems: 8, items: { type: "string", minLength: 1, maxLength: 512 } },
+      toolchain: { type: "string", enum: ["node"] },
       timeoutMs: {
         type: "integer",
         minimum: 1_000,
@@ -2046,11 +2071,20 @@ const toolDefinitions = [
         default: POWERSHELL_MAINTENANCE_DEFAULT_TIMEOUT_MS,
       },
     }, ["command"]),
-    handler: async (args) => jsonContent(await powershell_run(args)),
+    handler: async (args) => {
+      if (args.sandbox === true) {
+        if (!isPiManagedMcpCall()) throw markPowerShellPreDispatchFailure(new Error("PI_TASK_AUTHORIZATION_REQUIRED"), "powershell_run");
+        return jsonContent(await powershell_isolated_run(args));
+      }
+      if (args.sandbox_paths !== undefined || args.sandbox_directories !== undefined || args.output_paths !== undefined || args.toolchain !== undefined) {
+        throw markPowerShellPreDispatchFailure(new Error("ISOLATED_TASK_AUTHORIZATION_REQUIRED"), "powershell_run");
+      }
+      return jsonContent(await powershell_run(args));
+    },
   },
   {
     name: "powershell_admin_run",
-    description: "Run bounded elevated Windows PowerShell through the one-time registered protected Task Scheduler runner. Writer Workbench itself remains non-elevated; UAC stays enabled; cwd/timeout/output/safety limits and Development Journal recording still apply.",
+    description: "Run protected Windows maintenance through the registered Task Scheduler runner. Task-authorized service maintenance is independently checked by the elevated runner. Legacy diagnostic PowerShell remains available on compatible hosts with task enforcement disabled.",
     risk: "high-risk-write",
     annotations: { readOnlyHint: false },
     inputSchema: baseSchema({
@@ -2060,6 +2094,17 @@ const toolDefinitions = [
         maxLength: POWERSHELL_MAINTENANCE_COMMAND_MAX_CHARACTERS,
       },
       cwd: { type: "string", default: "." },
+      service_authorization: { type: "object", additionalProperties: false,
+        properties: { task_authorization_id: { type: "string", pattern: "^pi_task_[a-f0-9]{32}$" },
+          workstream_id: { type: "string", pattern: DEV_WORKSTREAM_ID_PATTERN_SOURCE },
+          goal: { type: "string", maxLength: 4096 }, service_name: { type: "string", maxLength: 80 } },
+        required: ["task_authorization_id", "workstream_id", "goal", "service_name"] },
+      script_authorization: { type: "object", additionalProperties: false,
+        properties: { task_authorization_id: { type: "string", pattern: "^pi_task_[a-f0-9]{32}$" },
+          workstream_id: { type: "string", pattern: DEV_WORKSTREAM_ID_PATTERN_SOURCE },
+          goal: { type: "string", maxLength: 4096 }, script_id: { type: "string", pattern: WINDOWS_APPROVED_SCRIPT_ID.source },
+          script_sha256: { type: "string", pattern: "^[a-f0-9]{64}$" } },
+        required: ["task_authorization_id", "workstream_id", "goal", "script_id", "script_sha256"] },
       timeoutMs: {
         type: "integer",
         minimum: 1_000,
@@ -2067,7 +2112,13 @@ const toolDefinitions = [
         default: POWERSHELL_MAINTENANCE_DEFAULT_TIMEOUT_MS,
       },
     }, ["command"]),
-    handler: async (args) => jsonContent(await powershell_admin_run(args)),
+    handler: async (args) => {
+      const scoped = args.service_authorization !== undefined || args.script_authorization !== undefined;
+      if (scoped ? !isPiManagedMcpCall() : process.env.NEXA_PI_REQUIRE_TASK_AUTHORIZATION === "1") {
+        throw markPowerShellPreDispatchFailure(new Error("SCOPED_ADMIN_AUTHORIZATION_REQUIRED"), "powershell_admin_run");
+      }
+      return jsonContent(await powershell_admin_run(args));
+    },
   },
   {
     name: "dev_git_status",
@@ -2100,7 +2151,7 @@ const toolDefinitions = [
   },
   {
     name: "dev_pi_execute_intent",
-    description: "Default engineering ingress. For routine work, request_kind=autonomous_engineering accepts intent_id, goal, registered isolated workspace_id and either a command (non-elevated host PowerShell) or requested_actions; Pi derives mechanical contract fields and permissions while retaining durable authorization, audit and risk checks. request_kind=authorized_engineering and the full ExecutionIntent contract remain supported. request_kind=reconcile_only needs the exact operation identity and context. High-risk capabilities retain the full contract. Duplicate intents return durable state.",
+    description: "Default engineering ingress. Routine work accepts intent_id, goal, registered isolated workspace_id, requested_actions, and the operator-issued task_authorization_id. Pi derives mechanical contract fields for autonomous_engineering. Legacy autonomous PowerShell, authorized_engineering, and full ExecutionIntent inputs remain subject to server policy. reconcile_only needs the exact operation identity and context. Duplicate intents return durable state.",
     risk: "high-risk-write",
     annotations: { readOnlyHint: false },
     inputSchema: baseSchema({ intent_json: { type: "string", minLength: 1, maxLength: 524288 } }, ["intent_json"]),
@@ -2116,7 +2167,7 @@ const toolDefinitions = [
   },
   {
     name: "dev_pi_execution_status",
-    description: "Read persisted production route and optionally one Pi operation by exact registered workspace/workstream identity. This observational entry does not select implementation, migrate legacy operations or dispatch tools.",
+    description: "Read the production route, an exact Pi operation with its evidence, or a registered workspace's recent Pi operations and checkpoints. Use workstream_id and workspace_id without an operation selector for paginated history. This read does not dispatch tools.",
     risk: "read",
     annotations: { readOnlyHint: true },
     inputSchema: baseSchema({
@@ -2125,12 +2176,30 @@ const toolDefinitions = [
       operation_id: { type: "string", pattern: "^pi_operation_[a-f0-9]{32}$", maxLength: 64 },
       workstream_id: { type: "string", pattern: DEV_WORKSTREAM_ID_PATTERN_SOURCE, maxLength: 64 },
       workspace_id: { type: "string", pattern: DEV_WORKSPACE_EXECUTION_ID_PATTERN_SOURCE, maxLength: 64 },
+      history_limit: { type: "integer", minimum: 1, maximum: 25 },
+      before_sequence: { type: "integer", minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
     }),
     handler: async args => {
       if (Object.keys(args).length === 0) {
-        const route = await piProductionController.status();
+        const route = await (parentPiInspection?.inspect('route') ?? piProductionController.status());
         return jsonContent({ route, default_path: route.revision > 0 ? "GPT -> Pi -> MCP" : "GPT -> MCP", legacy_migration: false, decision_owner: "GPT", execution_owner: "Pi", tool_owner: "MCP" });
       }
+      if (!args.operation_id && !args.intent_id && !args.bootstrap && args.workstream_id && args.workspace_id) {
+        const workstream = await dev_workspace_get_workstream({workstream_id: args.workstream_id});
+        if (workstream.workspace_id !== args.workspace_id) throw new Error("WORKSPACE_CONTEXT_MISMATCH");
+        const context = { project_id: "writer_workbench", workspace_id: args.workspace_id, workstream_id: args.workstream_id };
+        const [history, checkpointLookup] = await Promise.all([
+          piProductionController.listOperations({ context, limit: args.history_limit, before_sequence: args.before_sequence }),
+          dev_workspace_list_checkpoints({ workspace_id: args.workspace_id, workstream_id: args.workstream_id, state: "active", limit: 10 })
+            .then(checkpoints => ({ checkpoints, checkpoint_status: { available: true } }), error => ({
+              checkpoints: null,
+              checkpoint_status: { available: false,
+                code: error?.code === "CHECKPOINT_STORE_BUSY" ? error.code : "CHECKPOINT_HISTORY_UNAVAILABLE" },
+            })),
+        ]);
+        return jsonContent({ workstream, ...history, ...checkpointLookup });
+      }
+      if (args.history_limit !== undefined || args.before_sequence !== undefined) throw new Error("PI_OPERATION_CONTEXT_REQUIRED");
       if ((!args.operation_id === !args.intent_id) || (args.bootstrap
         ? args.workstream_id!==undefined || args.workspace_id!==undefined
         : !args.workstream_id || !args.workspace_id)) throw new Error("PI_OPERATION_CONTEXT_REQUIRED");
@@ -2316,7 +2385,7 @@ const toolDefinitions = [
     risk: "read",
     annotations: { readOnlyHint: true },
     inputSchema: baseSchema({}),
-    handler: async () => jsonContent(await dev_workspace_journal_status()),
+    handler: async () => jsonContent(await (parentPiInspection?.inspect('journal') ?? dev_workspace_journal_status())),
   },
   {
     name: "dev_workspace_get_operation",
@@ -4683,9 +4752,8 @@ for (const definition of toolDefinitions) {
 
 const workbenchTransportBoundary=createWorkbenchTransportBoundary();
 process.once('exit',()=>workbenchTransportBoundary.close());
-let trpgGMBridge = await loadTRPGGMBridge();
-const trpgGMToolNames = new Set(trpgGMBridge.tools.map(tool => tool.name));
-toolDefinitions.push(...trpgGMBridge.tools);
+let trpgGMBridge = null;
+const trpgGMToolNames = new Set();
 const toolRegistry = new Map(toolDefinitions.map((tool) => [tool.name, tool]));
 
 const chatgptPublicToolNames = new Set([
@@ -4732,6 +4800,9 @@ const chatgptPublicToolNames = new Set([
 ]);
 
 const chatgptDeveloperToolNames = new Set([
+  "blender_list_scene_objects",
+  "blender_inspect_scene",
+  "blender_edit_scene",
   "dev_pi_execute_intent",
   "dev_pi_execution_status",
   ...chatgptPublicToolNames,
@@ -4801,7 +4872,6 @@ const chatgptDeveloperToolNames = new Set([
   "dev_git_push",
 ]);
 
-for (const name of trpgGMToolNames) chatgptDeveloperToolNames.add(name);
 
 const toolProfiles = new Map([
   ["full", null],
@@ -4812,20 +4882,98 @@ const toolProfiles = new Map([
 const activeToolProfileName = process.env.MCP_TOOL_PROFILE?.trim() || "full";
 const activeToolProfile = toolProfiles.get(activeToolProfileName);
 
+// Host-local Blender is an opt-in Nexa developer surface, not part of the core inventory.
+if (activeToolProfileName === "chatgpt_developer") {
+  const blenderSceneResult = async operation => {
+    let result;
+    try {
+      result = await operation();
+    } catch {
+      result = { ok: false, code: "BLENDER_COMPONENT_UNAVAILABLE", message: "The local Blender connector could not load." };
+    }
+    return result.ok ? jsonContent(result) : { ...jsonContent(result), isError: true };
+  };
+  const blenderTool = {
+    name: "blender_list_scene_objects",
+    description: "List object names and types in the current Blender scene via the local Blender Lab add-on. Read only, at most 256 objects. Requires an open Blender instance with the local server started.",
+    risk: "read",
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    inputSchema: baseSchema(),
+    handler: () => blenderSceneResult(async () => (await import("./mcp-blender-scene-read.mjs")).listBlenderSceneObjects()),
+  };
+  const inspectTool = {
+    name: "blender_inspect_scene",
+    description: "Inspect the active Blender scene, selected objects and active camera. Supply an exact object name to read transform, material/modifier names, and up to 128 local mesh vertices.",
+    risk: "read",
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    inputSchema: baseSchema({ object: { type: "string", maxLength: 63 } }),
+    handler: args => blenderSceneResult(async () => (await import("./mcp-blender-editor.mjs")).blenderEditor.inspect(args)),
+  };
+  const editTool = {
+    name: "blender_edit_scene",
+    description: "Edit the named active Blender scene in Object Mode, in order, without saving. Read scene, scene_id, and exact object names with blender_inspect_scene. Operations use {op,name}. collection creates a collection. primitive requires kind CUBE, PLANE, UV_SPHERE, ICO_SPHERE, CYLINDER, CONE or TORUS. mesh requires vertices ([[x,y,z]]), faces (index arrays), optional edges. light requires kind POINT, AREA, SUN or SPOT and power, optional color [r,g,b] and size. camera accepts lens. set_light adjusts power, color or size on a light. set_camera sets lens on a camera. assign_material uses an existing material_name. Creation except collection accepts collection, location, rotation in degrees and scale, each a triple. transform sets any of those triples. rename uses new_name. visibility uses hidden. material uses material_name and color [r,g,b,a], optional roughness and metallic. bevel uses width, segments and optional modifier_name. vertices uses updates [{index,co:[x,y,z]}]. active_camera chooses a camera. No arbitrary Python, files, saving, or deletion. Do not replay uncertain edits.",
+    risk: "low-risk-write",
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    inputSchema: baseSchema({
+      scene: { type: "string", minLength: 1, maxLength: 63 },
+      scene_id: { type: "string", pattern: "^[1-9][0-9]{0,19}$", maxLength: 20 },
+      operations: { type: "array", minItems: 1, maxItems: 24, items: { type: "object" } },
+    }, ["scene", "scene_id", "operations"]),
+    handler: args => blenderSceneResult(async () => (await import("./mcp-blender-editor.mjs")).blenderEditor.edit(args)),
+  };
+  for (const tool of [blenderTool, inspectTool, editTool]) {
+    toolDefinitions.push(tool);
+    toolRegistry.set(tool.name, tool);
+  }
+}
+
 if (!toolProfiles.has(activeToolProfileName)) {
   throw new Error(`Unknown MCP tool profile: ${activeToolProfileName}`);
 }
 
-async function ensureTRPGGMBridge(){
-  if(trpgGMBridge.tools.length||activeToolProfileName==='chatgpt_public'||process.argv.includes('--pi-worker')||process.env.WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL==='1')return;
-  trpgGMBridge=await loadTRPGGMBridge({disabled:false});
-  for(const tool of trpgGMBridge.tools){if(toolRegistry.has(tool.name))continue;toolDefinitions.push(tool);toolRegistry.set(tool.name,tool);trpgGMToolNames.add(tool.name);chatgptDeveloperToolNames.add(tool.name);}
+async function initializeTRPGGMBridge() {
+  if (activeToolProfileName === "chatgpt_public" || process.argv.includes("--pi-worker")
+    || process.env.WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL === "1") return;
+  const bridge = await loadTRPGGMBridge({ disabled: false });
+  if (!bridge.tools.length) throw new Error("TRPG_GATEWAY_UNAVAILABLE");
+  installTRPGGMBridge(bridge);
+}
+
+function installTRPGGMBridge(bridge) {
+  for (let index = toolDefinitions.length - 1; index >= 0; index -= 1) {
+    if (!trpgGMToolNames.has(toolDefinitions[index].name)) continue;
+    toolDefinitions.splice(index, 1);
+  }
+  for (const name of trpgGMToolNames) {
+    toolRegistry.delete(name);
+    chatgptDeveloperToolNames.delete(name);
+  }
+  trpgGMToolNames.clear();
+  trpgGMBridge = bridge;
+  for (const tool of bridge?.tools ?? []) {
+    if (toolRegistry.has(tool.name)) continue;
+    toolDefinitions.push(tool);
+    toolRegistry.set(tool.name, tool);
+    trpgGMToolNames.add(tool.name);
+    chatgptDeveloperToolNames.add(tool.name);
+  }
+}
+
+async function waitForTRPGGMBridge(timeoutMs) {
+  let timer;
+  try {
+    await Promise.race([runtimeComponents.ensure("trpg").catch(() => {}),
+      new Promise(resolve => { timer = setTimeout(resolve, timeoutMs); })]);
+  } finally { clearTimeout(timer); }
 }
 function isToolAllowed(toolName) {
   return workbenchTransportBoundary.isToolAllowed(toolName)&&(activeToolProfile === null || activeToolProfile.has(toolName));
 }
 
 const permissionSources = {
+  blender_list_scene_objects: ["local_blender_current_scene_object_names_and_types"],
+  blender_inspect_scene: ["local_blender_current_scene_geometry_and_object_properties"],
+  blender_edit_scene: ["local_blender_active_scene", "validated_scene_edit_operations"],
   dev_list_directory: ["repository_directory"],
   dev_read_file: ["repository_text_file"],
   dev_read_file_range: ["repository_large_text_file"],
@@ -5859,12 +6007,22 @@ async function callToolDirect(params) {
 
   const args = isObject(params.arguments) ? params.arguments : {};
   // TRPG owns its authorization and atomic audit. Keep confidential game payloads out of Writer journals.
-  if (trpgGMToolNames.has(name)) return trpgGMBridge.callTool(name, args);
+  if (trpgGMToolNames.has(name)) {
+    const bridge = trpgGMBridge;
+    const result = await bridge.callTool(name, args);
+    const fault = trpgGatewayFailureCode(result);
+    if (fault && trpgGMBridge === bridge) {
+      installTRPGGMBridge(null);
+      runtimeComponents.invalidate("trpg", new Error(fault));
+    }
+    return result;
+  }
   const actor = isObject(params._meta) && typeof params._meta.actor === "string"
     ? params._meta.actor
     : "mcp-client";
 
   if (tool.risk !== "read") {
+    await Promise.all(requiredRuntimeComponents(name).map(runtimeComponents.ensure));
     const mutationArgs = args;
     // MCP metadata carries transport identity without weakening strict tool argument schemas.
     const key = normalizeMcpReconciliationKey(params._meta?.reconciliation_key);
@@ -5878,6 +6036,7 @@ async function callToolDirect(params) {
       reconciliation_key: key,
       request_fingerprint_sha256: fingerprintMcpMutationRequest(tool.name, mutationArgs),
       tool_name: tool.name,
+      admission_details: journalMutationDetails(tool.name, effectiveArgs, isPiManagedMcpCall()),
     resolve_workspace_scope: async () => {
         if (!mutationArgs.workspace_id) {
           if(["dev_workspace_create_isolated","dev_workspace_update_workstream","dev_workspace_end_workstream"].includes(tool.name)) {
@@ -5931,7 +6090,10 @@ async function dispatch(message) {
     const {workbench_http_access_token:discardedProof,workbench_purpose:discardedPurpose,...safeMeta}=meta;
     message={...message,params:{...message.params,_meta:{...safeMeta,...authentication.local?{}:{actor:authentication.principal}}}};
   }
-  if(['initialize','tools/list'].includes(message.method)||message.method==='tools/call'&&typeof message.params?.name==='string'&&message.params.name.startsWith('trpg.gm.'))await ensureTRPGGMBridge();
+  if (message.method === "tools/list") await waitForTRPGGMBridge(350);
+  if (message.method === "tools/call" && typeof message.params?.name === "string" && message.params.name.startsWith("trpg.gm.")) {
+    await waitForTRPGGMBridge(5_000);
+  }
 
   if (!("id" in message)) {
     if (message.method === "notifications/initialized" || message.method.startsWith("notifications/")) {
@@ -5941,6 +6103,7 @@ async function dispatch(message) {
   }
 
   if (message.method === "initialize") {
+    void runtimeComponents.start();
     const requestedVersion = isObject(message.params) ? optionalString(message.params.protocolVersion, "protocolVersion") : "";
     return makeResult(message.id, {
       protocolVersion: requestedVersion || defaultProtocolVersion,
@@ -5954,7 +6117,7 @@ async function dispatch(message) {
         },
       },
       serverInfo,
-      instructions: "Use tools/list and tools/call. Engineering routing is governed by dev_pi_execution_status. When pi_default is active, submit exact GPT-authored ExecutionIntent JSON through dev_pi_execute_intent; GPT decides, Pi schedules and records, MCP executes. Direct engineering tools are explicit diagnostic/emergency fallback only and require params._meta.pi_fallback with purpose, reason and GPT decision_id; mutations also require a reconciliation_key. Never infer success or automatically fall back after a Pi failure. High-risk writes retain their explicit confirmation guards." + (trpgGMBridge.instruction ? " TRPG GM: " + trpgGMBridge.instruction : ""),
+      instructions: "Use tools/list and tools/call. Bounded development file and Git reads can run directly against their authorized workspace. Engineering routing is governed by dev_pi_execution_status. When pi_default is active, submit GPT-authored work through dev_pi_execute_intent with the operator-issued task_authorization_id when required. GPT decides, Pi schedules and records, MCP executes. Other direct engineering tools use diagnostic/emergency fallback metadata and mutations require a reconciliation_key. Consult persisted operation evidence after a Pi failure. High-risk writes retain their explicit confirmation guards." + (trpgGMBridge?.instruction ? " TRPG GM: " + trpgGMBridge.instruction : ""),
     });
   }
 
@@ -5970,14 +6133,13 @@ async function dispatch(message) {
     });
   }
 
-  if (!(message.method === "tools/call" && trpgGMToolNames.has(message.params?.name))) {
-    await traceSpan("runtime.readiness",()=>ensureRuntimeReady());
-  }
-
   if (message.method === "tools/call") {
     try {
       return makeResult(message.id, await callTool(message.params));
     } catch (error) {
+      if (isJournalIsolationFailure(error)) {
+        return makeResult(message.id, journalIsolationResult(error));
+      }
       return makeError(message.id, -32602, error.message);
     }
   }
@@ -6010,20 +6172,50 @@ async function dispatch(message) {
 }
 
 const maxPendingDispatchMessages = 256;
+const maxPendingPerDispatchLane = 48;
 const dispatchQueueOverloadMessage = (
   `Server overloaded: dispatch queue limit of ${maxPendingDispatchMessages} messages reached.`
 );
 
-let pending = Promise.resolve();
-let metadataPending = Promise.resolve();
-let piStatusPending = Promise.resolve();
+const dispatchLanes = new Map();
 let pendingDispatchMessages = 0;
 
+function requiredRuntimeComponents(tool) {
+  const sources = permissionSources[tool] ?? [];
+  return [
+    ...(sources.includes("development_checkpoint_store") ? ["checkpoint"] : []),
+    ...(sources.includes("development_transaction_store") ? ["transaction"] : []),
+  ];
+}
+
+function dispatchLaneFor(message) {
+  if (message?.method !== "tools/call") return "protocol";
+  const name = message.params?.name;
+  if (typeof name !== "string") return "invalid_tool";
+  if (name.startsWith("trpg.gm.")) return "external:trpg";
+  if (/^(?:blender[._]|dev_blender_)/u.test(name)) return "external:blender";
+  if (name === "dev_git_remote_status" || name === "dev_git_push") return "external:git";
+  if (name === "powershell_run" || name === "powershell_admin_run") return name;
+  const tool = toolRegistry.get(name);
+  if (!tool) return "invalid_tool";
+  if (tool.risk === "read" && tool.annotations?.readOnlyHint === true) return `read:${name}`;
+  const component = requiredRuntimeComponents(name).at(-1);
+  if (component) return `component:${component}`;
+  if (name === "dev_run_tests" || name === "dev_workspace_validate_integration") return "component:verification";
+  // Shared mutation workflows retain their existing order and effect locks.
+  return "mutation";
+}
+
 function enqueueMessage(message, framing) {
-  if (pendingDispatchMessages >= maxPendingDispatchMessages) {
+  const laneId = dispatchLaneFor(message);
+  const lane = dispatchLanes.get(laneId) ?? { pending: Promise.resolve(), count: 0 };
+  const globalOverload = pendingDispatchMessages >= maxPendingDispatchMessages;
+  const toolOverload = laneId !== "protocol" && lane.count >= maxPendingPerDispatchLane;
+  if (globalOverload || toolOverload) {
     if (isObject(message) && Object.hasOwn(message, "id")) {
       writeMessage(
-        makeError(message.id ?? null, -32000, dispatchQueueOverloadMessage),
+        makeError(message.id ?? null, -32000, globalOverload ? dispatchQueueOverloadMessage
+          : "Server overloaded: the requested tool execution queue is full."),
         framing,
       );
     }
@@ -6031,17 +6223,11 @@ function enqueueMessage(message, framing) {
   }
 
   pendingDispatchMessages += 1;
+  lane.count += 1;
+  dispatchLanes.set(laneId, lane);
   const correlation=traceId(message?.params?._meta?.[REQUEST_TRACE_META_KEY]);
   const queuedAt=performance.now();
-  // This exact handler reads only the immutable server-owned schema registry.
-  // Keep its own serial lane; arbitrary reads and every mutation retain the
-  // existing execution queue. dispatch still enforces readiness and profile.
-  const metadata = message?.method === "tools/call"
-    && message?.params?.name === "dev_capability_get_schema"
-    && toolRegistry.get("dev_capability_get_schema")?.risk === "read"
-    && toolRegistry.get("dev_capability_get_schema")?.annotations?.readOnlyHint === true;
-  const observational=message?.method==='tools/call'&&message?.params?.name==='dev_pi_execution_status';
-  const next = (metadata ? metadataPending : observational ? piStatusPending : pending)
+  lane.pending = lane.pending
     .then(async () => {
       publishTrace(correlation,"mcp.queue_wait",performance.now()-queuedAt);
       await runRequestTrace(correlation,async()=>{
@@ -6057,10 +6243,9 @@ function enqueueMessage(message, framing) {
     })
     .finally(() => {
       pendingDispatchMessages -= 1;
+      lane.count -= 1;
+      if (lane.count === 0) dispatchLanes.delete(laneId);
     });
-  if (metadata) metadataPending = next;
-  else if(observational) piStatusPending=next;
-  else pending = next;
   return true;
 }
 
@@ -6358,14 +6543,13 @@ function maybeFinalizeEndOfInput() {
   inputEndFinalized = true;
   const parseError = getEndOfInputParseError();
   if (parseError) {
-    pending = pending.then(async () => {
+    void Promise.allSettled([...dispatchLanes.values()].map(lane => lane.pending)).then(async () => {
       await writeMessage(
         makeError(null, -32700, parseError.message),
         parseError.framing,
       );
-    });
+    }).catch(() => {});
   }
-  pending.catch(() => {});
 }
 
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
@@ -6373,8 +6557,7 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
   process.exit(0);
 }
 
-// Discovery must not wait for potentially large on-disk recovery scans.
-// Every operation beyond protocol discovery still awaits the same fail-closed gate.
+// Protocol discovery reports component readiness without awaiting recovery.
 function publishRuntimeReadiness(status) {
   if (typeof process.send !== "function" || process.connected === false) return;
   try {
@@ -6386,15 +6569,26 @@ function publishRuntimeReadiness(status) {
   } catch {}
 }
 
-const ensureRuntimeReady = createRuntimeReadiness([
+const runtimeComponents = createRuntimeReadiness([
   ["journal", ()=>traceSpan("journal.readiness",initializeDevJournalRuntime)],
   ["checkpoint", ()=>traceSpan("checkpoint.readiness",initializeDevCheckpointRuntime)],
   ["transaction", ()=>traceSpan("transaction.readiness",initializeDevTransactionRuntime)],
-], () => {}, publishRuntimeReadiness);
+  ["trpg", initializeTRPGGMBridge],
+], publishRuntimeReadiness);
 
 if(process.argv.includes('--pi-worker')){
  const {runPiDurableWorker}=await import('./pi-durable-worker.mjs');
- await runPiDurableWorker({controller:piProductionController,ready:ensureRuntimeReady});
+ let detachInspection = () => {};
+ try {
+  await runPiDurableWorker({controller:piProductionController,ready:async()=>{
+   void runtimeComponents.start();
+   await runtimeComponents.ensure("journal");
+   detachInspection = attachPiInspector(process, view => view === 'route'
+     ? piProductionController.status() : dev_workspace_journal_status());
+  }});
+ } finally {
+  detachInspection();
+ }
  process.disconnect?.();
  process.exit(0);
 }else{

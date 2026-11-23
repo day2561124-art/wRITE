@@ -157,6 +157,7 @@ async function runWorker(storageRoot, mode, extra = {}) {
       JOURNAL_WORKER_PATH: extra.path ?? "fixture.txt",
       JOURNAL_WORKER_BEFORE: extra.before ?? "AAA",
       JOURNAL_WORKER_EXPECTED: extra.expected ?? "BBB",
+      JOURNAL_WORKER_WORKSPACE: extra.workspaceId ?? workspaceId,
     },
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
@@ -200,7 +201,7 @@ if (process.argv[2] === "--worker") {
   } : {
     operation_type: "filesystem_patch",
     tool_name: "dev_apply_patch",
-    workspace_id: workspaceId,
+    workspace_id: process.env.JOURNAL_WORKER_WORKSPACE ?? workspaceId,
     ...(mode === "start-only" ? { reconciliation_key: "worker-stable-recovery-key",
       request_fingerprint_sha256: sha256("worker-request") } : {}),
     targets: [{
@@ -568,6 +569,41 @@ for (const warm of [false, true]) {
   }
 }
 
+// A cold MCP status request can arrive while startup is reading the same Journal.
+{
+  const { fixture } = await completedFixture("concurrent-cold-status");
+  let markFirstRead;
+  let releaseReads;
+  const firstRead = new Promise(resolve => { markFirstRead = resolve; });
+  const readGate = new Promise(resolve => { releaseReads = resolve; });
+  let reads = 0;
+  const service = createDevOperationJournalService({
+    storageRoot: fixture.storageRoot,
+    backgroundRecovery: true,
+    eventReader: async (...args) => {
+      reads += 1;
+      markFirstRead();
+      await readGate;
+      return readFile(...args);
+    },
+  });
+  try {
+    const starting = service.initialize();
+    await firstRead;
+    const querying = service.status();
+    await delay(100);
+    releaseReads();
+    const [startup, query] = await Promise.all([starting, querying]);
+    assert.equal(query.latest_sequence, 2);
+    assert.equal(query.latest_event_hash, startup.latest_event_hash);
+    assert.equal(query.chain_verified, true);
+    assert.equal(reads, 2, "startup and status share one cold verification");
+  } finally {
+    releaseReads();
+    await clean(fixture);
+  }
+}
+
 // R6: startup still reconciles dead owners and returns read-only corruption diagnosis.
 {
   const fixture = await tempFixture("r6-initialize-recovery");
@@ -674,6 +710,153 @@ for (const warm of [false, true]) {
     const status = await service.status();
     assert.equal(status.health, "healthy");
     assert.equal(status.reconciliation_required, false);
+  } finally { await clean(fixture); }
+}
+
+// A failing workspace observation leaves the other orphan and independent
+// live mutations available while its read-only retry is pending.
+{
+  const fixture = await tempFixture("background-recovery");
+  try {
+    const missingWorkspace = "dev_workspace_" + "d".repeat(24);
+    const recoveredId = await runWorker(fixture.storageRoot, "start-only", { path: "healthy.txt" });
+    const delayedId = await runWorker(fixture.storageRoot, "start-only-scoped", { path: "delayed.txt", workspaceId: missingWorkspace });
+    await writeFile(path.join(fixture.workspaceRoot, "healthy.txt"), "BBB", "utf8");
+    await writeFile(path.join(fixture.workspaceRoot, "delayed.txt"), "AAA", "utf8");
+    let misses = 0;
+    let resolveDelayed = false;
+    const contextResolver = async (id) => {
+      if (id === missingWorkspace && !resolveDelayed) {
+        misses += 1;
+        throw Object.assign(new Error("workspace temporarily unavailable"), { code: "WORKSPACE_OFFLINE" });
+      }
+      return { root: fixture.workspaceRoot, current_head: zeroHead };
+    };
+    const service = createDevOperationJournalService({ storageRoot: fixture.storageRoot, backgroundRecovery: true,
+      resolutionContextResolver: contextResolver });
+    const peer = createDevOperationJournalService({ storageRoot: fixture.storageRoot });
+    const before = await service.verify();
+    assert.equal((await service.initialize()).isolated_operation_count, 2);
+    await peer.reconcileDangling({ contextResolver: async (id) => {
+      if (id === missingWorkspace) throw new Error("peer cannot observe delayed workspace");
+      return contextResolver(id);
+    } });
+    const related = await service.getOperation({ operation_id: recoveredId });
+    assert.equal(related.events.length, 2);
+    assert.equal(related.original_result.outcome, "intended_effect_observed");
+    const unrelated = await service.begin({ operation_type: "filesystem_patch", tool_name: "dev_apply_patch",
+      workspace_id: missingWorkspace, targets: [{ path: "unrelated.txt" }] });
+    await service.complete(unrelated.operation_id);
+    const deadline = Date.now() + 5000;
+    while (!misses && Date.now() < deadline) await delay(20);
+    assert.equal(misses, 1);
+    resolveDelayed = true;
+    let status = await service.status();
+    while (status.isolated_operation_count && Date.now() < deadline) {
+      await delay(25);
+      status = await service.status();
+    }
+    assert.equal(status.health, "healthy");
+    assert.equal(status.chain_verified, true);
+    assert.equal((await service.getOperation({ operation_id: delayedId })).original_result.outcome, "no_effect_observed");
+    const after = await service.verify();
+    assert.deepEqual(after.events.slice(0, before.events.length).map(event => event.event_hash),
+      before.events.map(event => event.event_hash));
+    const attempts = after.events.filter(event => event.operation_type === "journal_recovery_observation"
+      && event.stage === "operation_started" && event.result.logical_operation_id === delayedId);
+    assert.deepEqual(attempts.map(event => event.result.recovery_attempt), [1, 2]);
+    assert(after.events.some(event => event.operation_id === attempts[0].operation_id && event.result.recovery_error_code === "WORKSPACE_OFFLINE"));
+  } finally { await clean(fixture); }
+}
+
+// An ongoing observation in one workspace yields to independent orphans,
+// including ones discovered after the first observation has started.
+{
+  const fixture = await tempFixture("concurrent-background-recovery");
+  const heldWorkspace = "dev_workspace_" + "b".repeat(24);
+  let releaseHeld;
+  const held = new Promise(resolve => { releaseHeld = resolve; });
+  let heldStarted = false;
+  let service;
+  try {
+    for (const name of ["independent.txt", "held.txt", "late.txt"]) {
+      await writeFile(path.join(fixture.workspaceRoot, name), "BBB", "utf8");
+    }
+    const independent = await runWorker(fixture.storageRoot, "start-only-scoped", { path: "independent.txt" });
+    const blocked = await runWorker(fixture.storageRoot, "start-only-scoped", { path: "held.txt", workspaceId: heldWorkspace });
+    service = createDevOperationJournalService({ storageRoot: fixture.storageRoot, backgroundRecovery: true,
+      resolutionContextResolver: async id => {
+        if (id === heldWorkspace) {
+          heldStarted = true;
+          await held;
+        }
+        return { root: fixture.workspaceRoot, current_head: zeroHead };
+      } });
+    await service.initialize();
+    const deadline = Date.now() + 8000;
+    const waitFor = async inspect => {
+      while (!await inspect()) {
+        assert(Date.now() < deadline, "Independent Journal recovery did not advance while the observer was held");
+        await delay(25);
+      }
+    };
+    const terminal = async operation_id => (await service.getOperation({ operation_id })).terminal;
+    await waitFor(() => heldStarted);
+    await waitFor(() => terminal(independent));
+    assert.equal(await terminal(blocked), false);
+
+    const late = await runWorker(fixture.storageRoot, "start-only-scoped", { path: "late.txt" });
+    const write = await service.begin({ operation_type: "fixture", tool_name: "dev_unrelated" });
+    await service.complete(write.operation_id);
+    await waitFor(() => terminal(late));
+    const pending = await service.status();
+    assert.equal(pending.writes_available, true);
+    assert.equal(pending.isolated_operations.find(item => item.operation_id === blocked)?.recovery.state, "recovering");
+    releaseHeld();
+    await waitFor(async () => {
+      const status = await service.status();
+      return status.health === "healthy" && status.active_operation_count === 0;
+    });
+    const verified = await service.verify();
+    for (const operationId of [independent, blocked, late]) {
+      assert.equal(verified.events.filter(event => event.operation_id === operationId && event.stage === "operation_recovered").length, 1);
+    }
+  } finally {
+    releaseHeld();
+    await clean(fixture);
+  }
+}
+
+// A fresh instance observes the same exhausted budget and does not retry a
+// failed resource indefinitely or make up a terminal result for its effect.
+{
+  const fixture = await tempFixture("background-recovery-budget");
+  try {
+    const operationId = await runWorker(fixture.storageRoot, "start-only");
+    let observations = 0;
+    const options = { storageRoot: fixture.storageRoot, backgroundRecovery: true,
+      resolutionContextResolver: async () => {
+        observations += 1;
+        throw Object.assign(new Error("persistent fixture error"), { code: "WORKSPACE_OFFLINE" });
+      } };
+    const service = createDevOperationJournalService(options);
+    await service.initialize();
+    const end = Date.now() + 10_000;
+    let status;
+    do {
+      await delay(25);
+      status = await service.status();
+    } while (status.isolated_operations[0].recovery?.state !== "operator_review" && Date.now() < end);
+    assert.equal(observations, 3);
+    assert.equal(status.isolated_operations[0].recovery.last_error_code, "WORKSPACE_OFFLINE");
+    const fresh = createDevOperationJournalService(options);
+    assert.deepEqual((await fresh.initialize()).isolated_operations[0].recovery, status.isolated_operations[0].recovery);
+    const normal = await fresh.begin({ operation_type: "fixture", tool_name: "dev_unrelated", workspace_id: "dev_workspace_" + "9".repeat(24) });
+    await fresh.complete(normal.operation_id);
+    await delay(600);
+    assert.equal(observations, 3);
+    assert.equal((await fresh.getOperation({ operation_id: operationId })).terminal, false);
+    assert.equal((await fresh.status()).chain_verified, true);
   } finally { await clean(fixture); }
 }
 

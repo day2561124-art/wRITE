@@ -61,8 +61,8 @@ function transient(error) {
 function readinessFacts(payload) {
   const runtime = payload?.child?.runtime_readiness;
   return {
-    runtimeState: ['idle', 'unverified', 'running', 'ready', 'failed'].includes(runtime?.state) ? runtime.state : 'unknown',
-    runtimeStep: ['journal', 'checkpoint', 'transaction'].includes(runtime?.current_step) ? runtime.current_step : null,
+    runtimeState: ['idle', 'unverified', 'running', 'ready', 'degraded', 'failed'].includes(runtime?.state) ? runtime.state : 'unknown',
+    runtimeStep: ['journal', 'checkpoint', 'transaction', 'trpg'].includes(runtime?.current_step) ? runtime.current_step : null,
   };
 }
 

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { projectRoot } from "../project-paths.mjs";
 import {
   assertExactPath,
   projectPaths,
@@ -12,9 +12,7 @@ import {
   createTransactionId,
 } from "../file-transactions.mjs";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const rootDir = path.resolve(__dirname, "..", "..", "..");
+const rootDir = projectRoot;
 
 const defaultPendingPath = path.join(rootDir, "data", "feedback_db", "pending_error_reports.jsonl");
 const auditLogPath = path.join(rootDir, "data", "outputs", "logs", "error_report_commits.jsonl");

@@ -1,13 +1,15 @@
 import {AsyncLocalStorage} from "node:async_hooks";
 import {traceSpan} from "./mcp-request-tracing.mjs";
 import {admitPiLightweightRead} from "./pi-execution-policy.mjs";
-import {createExecutionIntent} from "./pi-execution-contract.mjs";
+import {createPiTaskPolicy} from "./pi-task-authorization.mjs";
+import {createExecutionIntent,hashExecutionInput} from "./pi-execution-contract.mjs";
 import {createPiReliableExecutionStore} from "./pi-reliable-execution-store.mjs";
 import {createPiReliableExecutionEngine} from "./pi-reliable-execution-engine.mjs";
 import {createPiReliableMcpAdapter} from "./pi-mcp-reliable-adapter.mjs";
 import {validatePiExecutionHistory} from "./pi-execution-state-store.mjs";
 import {createPiProductionRouteStore,validatePiProductionRouteHistory} from "./pi-production-execution-route.mjs";
-import {readDevExecutionProjections,appendDevExecutionProjection,recoverDevExecutionPublication,verifyDevJournal} from "./mcp-development-journal-tools.mjs";
+import {readDevExecutionProjections,appendDevExecutionProjection,recoverDevExecutionPublication,verifyDevJournal,
+ beginDevJournalOperation,completeDevJournalOperation} from "./mcp-development-journal-tools.mjs";
 import {reliableFailure,stableJson} from "./pi-reliable-execution-state.mjs";
 const managed=new AsyncLocalStorage();
 export const isPiManagedMcpCall=()=>typeof managed.getStore()==="function";
@@ -20,19 +22,54 @@ export const runPiManagedMcpCall=async(callback,authorizeDispatch)=>{
  await authorizeDispatch();
  return managed.run(authorizeDispatch,callback);
 };
-export async function guardPiDirectExecution({route,tool,mutation=false,params={},auditFallback,resolveWorkspace}){
+export async function guardPiDirectExecution({route,tool,mutation=false,params={},auditFallback,resolveWorkspace,
+ requireTaskAuthorization=process.env.NEXA_PI_REQUIRE_TASK_AUTHORIZATION==='1'}){
  const authorizeDispatch=managed.getStore();
  if(typeof authorizeDispatch==="function"){await authorizeDispatch();return;}
- if((await route.inspect()).revision===0)return;
- if(await admitPiLightweightRead({tool,mutation,params,resolveWorkspace}))return;
+ if(mutation&&requireTaskAuthorization)reliableFailure("PI_EXECUTION_INTENT_REQUIRED");
  const p=params._meta?.pi_fallback;
+ if(p===undefined){
+  try {if(await admitPiLightweightRead({tool,mutation,params,resolveWorkspace}))return;}
+  catch(error){if((await route.inspect().catch(()=>null))?.revision===0)return;throw error;}
+ }
+ if((await route.inspect()).revision===0)return;
  if(!p||Object.keys(p).sort().join(",")!=="decision_id,purpose,reason"||!["diagnostic","emergency"].includes(p.purpose)
   ||typeof p.reason!=="string"||!p.reason.trim()||p.reason.length>256||!/^gpt-[A-Za-z0-9._:-]{1,120}$/u.test(p.decision_id))reliableFailure("PI_EXECUTION_INTENT_REQUIRED");
  if(mutation&&!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(params._meta?.reconciliation_key??""))reliableFailure("FALLBACK_IDEMPOTENCY_REQUIRED");
  if(typeof auditFallback!=="function")reliableFailure("FALLBACK_AUDIT_REQUIRED");
  await auditFallback({tool,decision_owner:"GPT",...p});
 }
-const defaultJournal={readExecutionProjections:readDevExecutionProjections,appendExecutionProjection:appendDevExecutionProjection,recoverExecutionPublication:recoverDevExecutionPublication};
+const defaultJournal={readExecutionProjections:readDevExecutionProjections,appendExecutionProjection:appendDevExecutionProjection,
+ recoverExecutionPublication:recoverDevExecutionPublication,verify:verifyDevJournal,begin:beginDevJournalOperation,complete:completeDevJournalOperation};
+const workerFaultType = "pi_worker_deferral";
+const workerRetryLimit = 3;
+
+function workerProgress(record) {
+ return hashExecutionInput({status:record.state.status,completed:record.state.completed_steps,next:record.state.pending_steps[0]??null});
+}
+
+function workerDeferrals(events) {
+ const deferrals=new Map();
+ for(const event of events){
+  // Admission durably records the deferral. A late terminal publication
+  // cannot replace a newer attempt's scheduling decision.
+  if(event.operation_type!==workerFaultType||event.tool_name!=="pi.worker.defer"||event.stage!=="operation_started")continue;
+  const fact=event.result;
+  if(!/^pi_operation_[a-f0-9]{32}$/u.test(fact?.logical_operation_id??"")
+    ||!/^[a-f0-9]{64}$/u.test(fact.progress_sha256??"")||!Number.isSafeInteger(fact.attempt)||fact.attempt<1||fact.attempt>workerRetryLimit
+    ||!/^[A-Z][A-Z0-9_]{0,63}$/u.test(fact.code??"")
+    ||(fact.retry_after_ms===null)!==(fact.attempt===workerRetryLimit)
+    ||(fact.retry_after_ms!==null&&(!Number.isSafeInteger(fact.retry_after_ms)||fact.retry_after_ms<0)))reliableFailure("CORRUPT_WORKER_DEFERRAL");
+  deferrals.set(fact.logical_operation_id,{...fact,workspace_id:event.workspace_id,workstream_id:event.workstream_id});
+ }
+ return deferrals;
+}
+
+function matchingWorkerDeferral(deferrals, record) {
+ const fault=deferrals.get(record.state.operation_id);
+ return fault&&fault.progress_sha256===workerProgress(record)&&fault.workspace_id===record.state.workspace_id
+  &&fault.workstream_id===record.state.workstream_id?fault:null;
+}
 // This helper accepts already VERIFIED Journal events. It is not a hash-chain
 // validator, a reusable authorization token, or a cross-request cache.
 export function projectVerifiedPiJournalHistory(events){
@@ -46,9 +83,10 @@ export function projectVerifiedPiJournalHistory(events){
  }
  validatePiExecutionHistory(projections);
  const route=validatePiProductionRouteHistory(routes);
- return {projections,routes,route};
+ return {projections,routes,route,workerDeferrals:workerDeferrals(events)};
 }
-export function createPiProductionExecutionController({journal=defaultJournal,route=null,transport,retryPolicy,executionHook,pendingLimit=128}={}){
+export function createPiProductionExecutionController({journal=defaultJournal,route=null,transport,retryPolicy,executionHook,pendingLimit=128,
+ workerClock=Date.now,authorizeTask=createPiTaskPolicy()}={}){
   if(!Number.isSafeInteger(pendingLimit)||pendingLimit<1||pendingLimit>128)reliableFailure('INVALID_PENDING_LIMIT');
   const boundJournal=journal;
   // Avoid substituting the global Journal route for a test/client-supplied
@@ -89,20 +127,26 @@ export function createPiProductionExecutionController({journal=defaultJournal,ro
   const admissionGuard=async({history,latest,existing,allEvents})=>{
    const enrolled=new Set(history.filter(e=>e.execution_projection.command?.production_binding?.worker_protocol
      ||e.execution_projection.runtime?.durable_worker).map(e=>e.execution_projection.state.operation_id));
+   const deferrals=durable&&!existing?workerDeferrals(allEvents):null;
    if(!existing&&durable&&[...latest.values()].filter(e=>enrolled.has(e.execution_projection.state.operation_id))
-    .filter(e=>!['COMPLETED','FAILED','CANCELLED','DECISION_REQUIRED','BLOCKED'].includes(e.execution_projection.state.status)).length>=pendingLimit)
+    .filter(e=>!['COMPLETED','FAILED','CANCELLED','DECISION_REQUIRED','BLOCKED'].includes(e.execution_projection.state.status)
+      &&matchingWorkerDeferral(deferrals,e.execution_projection)?.retry_after_ms!==null).length>=pendingLimit)
      reliableFailure('PI_DURABLE_QUEUE_FULL');
    if(existing){const first=history.find(e=>e.execution_projection.state.operation_id===existing.execution_projection.state.operation_id&&e.execution_projection.revision===1);
     if(stableJson(first?.execution_projection.command.production_binding)!==stableJson(binding))reliableFailure("PRODUCTION_ENROLLMENT_CONFLICT");return;}
+   await authorizeTask(intent);
    const current=validatePiProductionRouteHistory(allEvents.filter(e=>e.operation_type==="pi_production_route"&&e.stage==="operation_completed"));
    if(current.mode!=="pi_default"||current.revision!==binding.route_revision||current.route_hash!==binding.route_hash)reliableFailure("PRODUCTION_ROUTE_DISABLED");
   };
   const store=createPiReliableExecutionStore({journal:readJournal,productionBinding:binding,admissionGuard});
-  const adapter=createPiReliableMcpAdapter({...transport,callTool:async (params,{authorizeDispatch}={})=>{
+  const adapter=createPiReliableMcpAdapter({...transport,callTool:async (params,{authorizeDispatch,action}={})=>{
    if((await route.inspect()).mode!=="pi_default")reliableFailure("PERMISSION_DENIED");
    if(typeof authorizeDispatch!=="function")reliableFailure("DISPATCH_AUTHORITY_REQUIRED");
    await authorizeDispatch();
-   return runPiManagedMcpCall(()=>transport.callTool(params),authorizeDispatch);
+   return runPiManagedMcpCall(async()=>{
+    await authorizeTask(intent,[action]);
+    return transport.callTool(params);
+   },authorizeDispatch);
   }});
   return {intent,store,engine:createPiReliableExecutionEngine({store,adapter,...(retryPolicy?{retryPolicy}:{}),executionHook})};
  }
@@ -131,7 +175,40 @@ export function createPiProductionExecutionController({journal=defaultJournal,ro
   const latest=new Map(),enrolled=new Set();
   for(const event of history){const r=event.execution_projection;latest.set(r.state.operation_id,r);
    if(r.command?.production_binding?.worker_protocol==='writer-workbench/pi-durable-worker/v1'||r.runtime?.durable_worker)enrolled.add(r.state.operation_id);}
-  return [...latest.values()].filter(r=>r.schema_version===2&&enrolled.has(r.state.operation_id)&&!stopped(r)).slice(0,limit);
+  const deferrals=combined?.workerDeferrals??(journal.verify?workerDeferrals((await journal.verify()).events):new Map());
+  return [...latest.values()].filter(r=>{
+   if(r.schema_version!==2||!enrolled.has(r.state.operation_id)||stopped(r))return false;
+   const fault=matchingWorkerDeferral(deferrals,r);
+   return !fault||fault.retry_after_ms!==null&&fault.retry_after_ms<=workerClock();
+  }).slice(0,limit);
+ }
+ async function deferExecutionFailure(args,error){
+  if(!journal.verify||!journal.begin||!journal.complete)throw error;
+  const operation=await inspectOperation(args,false,{recoverOnReadFailure:false});
+  if(stopped(operation))return null;
+  // Exit the owning process if it abandoned a claim. Another worker can
+  // then reconcile the actual physical effect before dispatching again.
+  if(operation.runtime.owner||operation.runtime.active_call)throw error;
+  const snapshot=await journal.verify();
+  const prior=matchingWorkerDeferral(workerDeferrals(snapshot.events),operation);
+  const now=workerClock();
+  if(prior&&(prior.retry_after_ms===null||prior.retry_after_ms>now))return prior;
+  const attempt=(prior?.attempt??0)+1;
+  const fault={logical_operation_id:operation.state.operation_id,progress_sha256:workerProgress(operation),
+   code:/^[A-Z][A-Z0-9_]{0,63}$/u.test(error?.code??"")?error.code:"WORKER_OPERATION_FAILED",
+   attempt,retry_after_ms:attempt<workerRetryLimit?now+1000*2**(attempt-1):null};
+  const fingerprint=hashExecutionInput({operation_id:fault.logical_operation_id,progress:fault.progress_sha256,attempt});
+  let started;
+  try {
+   started=await journal.begin({operation_type:workerFaultType,tool_name:"pi.worker.defer",
+    workspace_id:operation.state.workspace_id,workstream_id:operation.state.workstream_id,result:fault,
+    reconciliation_key:`pi-worker-deferral-${fingerprint}`,request_fingerprint_sha256:fingerprint});
+  } catch (admissionError) {
+   if(admissionError?.code!=="RECONCILIATION_EXISTING_OPERATION")throw admissionError;
+   return matchingWorkerDeferral(workerDeferrals((await journal.verify()).events),operation);
+  }
+  await journal.complete(started.operation_id,{result:fault});
+  return fault;
  }
  function output(r){return {...r,result:{...r.result,phase:"F",mode:"production_default",production_default_changed:true,legacy_migration:false,engineering_review_required:true}};}
  async function inspectOperation(args,includeRoute=false,{recoverOnReadFailure=false}={}){
@@ -146,11 +223,42 @@ export function createPiProductionExecutionController({journal=defaultJournal,ro
   const r=await createPiReliableExecutionStore({journal:readJournal,recoverOnReadFailure}).inspect({...args,operation_id});
   const routeEvents=combined?.routes??await traceSpan("journal.route_read",()=>route.history());
   await prepare(r.intent,{readJournal,events:history,routeEvents});
-  const operation=output(r);
+  const deferrals=combined?.workerDeferrals??(journal.verify?workerDeferrals((await journal.verify()).events):new Map());
+  const fault=matchingWorkerDeferral(deferrals,r);
+  const operation=output(fault?{...r,worker_deferral:fault}:r);
   return includeRoute?{route:combined?.route??validatePiProductionRouteHistory(routeEvents),operation}:operation;
  }
+ async function listOperations({context,limit=10,before_sequence=Number.MAX_SAFE_INTEGER}){
+  if(!Number.isSafeInteger(limit)||limit<1||limit>25||!Number.isSafeInteger(before_sequence)||before_sequence<1)
+   reliableFailure("INVALID_PI_HISTORY_PAGE");
+  const combined=unifiedDefault?await unifiedSnapshot():null;
+  const history=combined?.projections??await createPiReliableExecutionStore({journal,recoverOnReadFailure:false}).readHistory();
+  const deferrals=combined?.workerDeferrals??(journal.verify?workerDeferrals((await journal.verify()).events):new Map());
+  const operations=new Map();
+  const contextKey=stableJson(context);
+  for(const {sequence,execution_projection:record} of history){
+   if(stableJson(record.intent.context)!==contextKey)continue;
+   const started_sequence=operations.get(record.state.operation_id)?.started_sequence??sequence;
+   if(started_sequence<before_sequence)operations.set(record.state.operation_id,{started_sequence,record});
+  }
+  const page=[...operations.values()].reverse().slice(0,limit);
+  return {
+   operations:page.map(({started_sequence,record})=>{
+    const fault=matchingWorkerDeferral(deferrals,record);
+    return {
+    started_sequence,operation_id:record.state.operation_id,intent_id:record.intent.intent_id,
+    task_authorization_id:record.intent.task_authorization_id??null, goal:record.intent.goal,
+    status:record.state.status,completed_steps:record.state.completed_steps,
+    ...(record.state.recovery ? { recovery: record.state.recovery } : {}),
+    next_step:record.state.pending_steps[0]??null,last_error:record.state.last_error,
+    ...(fault?{worker_deferral:fault}:{}),
+    };
+   }),
+   next_before_sequence:operations.size>limit?page.at(-1).started_sequence:null,
+  };
+ }
  return Object.freeze({
-  submit,discover,
+  submit,discover,listOperations,deferExecutionFailure,
   status:async()=>{if(unifiedDefault)return (await unifiedSnapshot()).route;
    await createPiReliableExecutionStore({journal,recoverOnReadFailure:false}).readHistory();return route.inspect();},
   admit:async source=>{const {intent,store}=await prepare(source);return output(await store.admit(intent,...(retryPolicy?[{retry_policy:retryPolicy}]:[])));},

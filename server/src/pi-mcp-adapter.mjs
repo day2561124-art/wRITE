@@ -27,12 +27,40 @@ export function createMcpCapabilityAdapter({ callTool, resolveWorkspace } = {}) 
     const definition = registry.resolve(action.capability);
     if(binding && intent.bootstrap!==true) failure("UNEXPECTED_BOOTSTRAP_BINDING");
     const context=piBootstrapContext(binding,intent.context);
-    const args = { ...action.input };
+    const args = action.capability === "windows.service.ensure_running" ? {
+      command: [
+        "$ErrorActionPreference = 'Stop'",
+        "$env:PSModulePath = [IO.Path]::Combine($PSHOME, 'Modules')",
+        `$service = Microsoft.PowerShell.Management\\Get-Service -Name '${action.input.service_name}' -ErrorAction Stop`,
+        "if ($service.Status -eq 'Stopped') { Microsoft.PowerShell.Management\\Start-Service -InputObject $service -ErrorAction Stop }",
+        "$service.WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Running, [TimeSpan]::FromSeconds(15))",
+        "Write-Output 'service_running'",
+      ].join("\n"),
+      cwd: ".",
+      timeoutMs: 30000,
+      service_authorization: {
+        task_authorization_id: intent.task_authorization_id,
+        workstream_id: context.workstream_id,
+        goal: intent.goal,
+        service_name: action.input.service_name,
+      },
+    } : action.capability === "windows.powershell.run_approved" ? {
+      command: `approved_script:${action.input.script_id}:${action.input.script_sha256}`,
+      cwd: ".",
+      timeoutMs: 60000,
+      script_authorization: {
+        task_authorization_id: intent.task_authorization_id,
+        workstream_id: context.workstream_id,
+        goal: intent.goal,
+        ...action.input,
+      },
+    } : { ...action.input };
     if(intent.bootstrap && action.capability==="workspace.create_isolated") {
       if(!binding || binding.workspace_id!=="dev_workspace_shared_repository_v1") failure("BOOTSTRAP_BINDING_REQUIRED");
       args.workstream_id=binding.workstream_id;args.expected_workstream_revision=binding.workstream_revision;
     }
     if (definition.scope === "workspace" || definition.scope === "workspace_shell") args.workspace_id = context.workspace_id;
+    if (action.capability === "workspace.powershell_isolated") args.sandbox = true;
     if (definition.scope === "host_maintenance") args.workspace_id = "dev_workspace_shared_repository_v1";
     if (definition.scope === "operation_list") {
       args.workspace_id = context.workspace_id;

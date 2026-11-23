@@ -17,7 +17,7 @@ import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { promisify } from "node:util";
-import { controlledProcessEnvironment } from "./process-control.mjs";
+import { controlledProcessEnvironment, redactProcessOutput } from "./process-control.mjs";
 import {ISOLATION_RESOLUTION,ISOLATION_RESOLUTION_TOOL,inspectIsolationEvidence,validateIsolationResolution,isolationTarget,assertIsolationOwnerDead,isolationJson} from './mcp-workspace-isolation-resolution.mjs';
 import { readIsolationBeforeDispatchProof } from './mcp-workstream-prewrite-failure.mjs';
 import { isWorkstreamPrewriteFailure } from "./mcp-workstream-prewrite-failure.mjs";
@@ -25,7 +25,13 @@ import { WORKSTREAM_STALE_RESOLUTION, validateWorkstreamStaleResolution, inspect
 import { WORKSTREAM_METADATA_LIMIT_RESOLUTION, validateWorkstreamMetadataLimitResolution, inspectWorkstreamMetadataLimitResolution } from "./mcp-workstream-metadata-limit-resolution.mjs";
 import { WORKSTREAM_COMMITTED_RESOLUTION, validateWorkstreamCommittedResolution, inspectWorkstreamCommittedResolution } from "./mcp-workstream-committed-resolution.mjs";
 import { POWERSHELL_EFFECT_RESOLUTION, REVIEWED_POWERSHELL_EFFECT_PROFILE, isPowerShellOperation, isUnprovenPowerShellRecovery, validatePowershellEffectResolution, inspectPowershellEffectResolution, archivedPowerShellCwdResolution } from "./mcp-powershell-recovery-resolution.mjs";
+import { REVIEWED_PI_WORKER_REFRESH, isReviewedPiWorkerRefresh, reviewedPiWorkerRefreshResult } from "./mcp-pi-worker-refresh-recovery.mjs";
+import { TRPG_LAUNCH_RESOLUTION, TRPG_LAUNCH_RESOLUTION_TOOL, TRPG_LAUNCH_OUTCOME, validateTrpgLaunchResolution } from "./mcp-trpg-interrupted-launch-resolution.mjs";
+import { restartResolutionKind, restartResolutionTool, restartParentId, restartChildId, validateRestartProof, validateRestartResolution } from "./mcp-trpg-gateway-restart-resolution.mjs";
+import { TRPG_RESUME_KIND, TRPG_RESUME_TOOL, TRPG_RESUME_RESULT, trpgResumeProofs, validateTrpgResumeResolution, verifyTrpgResumeEvidence } from "./mcp-trpg-supervisor-resume-resolution.mjs";
 import { isPowerShellPreDispatchFailure } from "./mcp-powershell-predispatch-failure.mjs";
+import { isJournalIsolationFailure, journalIncident, journalIsolationError, journalIsolationOverlaps,
+  journalOperationScope } from "./mcp-development-journal-isolation.mjs";
 import { projectPaths, projectRoot } from "./project-paths.mjs";
 import { createWorkspaceSnapshotAuthorityIpcClient } from "./mcp-workspace-snapshot-authority-ipc.mjs";
 import { normalizeExactWorkspaceSnapshot } from "./mcp-workspace-snapshot-authority.mjs";
@@ -62,7 +68,11 @@ export function isReviewedInterruptedLauncherReceipt(started,done,input) {
     &&done.result?.execution_ok===true&&done.result?.exit_code===0&&input.observed_exit_code===0;
 }
 export const INTEGRATION_PREFLIGHT_RESOLUTION = "integration_preflight_before_completion";
-const INTEGRATION_PREFLIGHT_SOURCE = "115451a8cfb65c097ff3db87c5618997e13bf3bb11463c447884c97e7e2233be";
+const reviewedIntegrationPreflightSources = new Set([
+  "115451a8cfb65c097ff3db87c5618997e13bf3bb11463c447884c97e7e2233be",
+  // Scoped terminal publication alone changed in this reviewed revision.
+  "aa8ac6a2facf3083bd75463d591c5c51f508d525a9c3548ffb49408d7f4200b4",
+]);
 export const DEV_JOURNAL_SCHEMA_VERSION = 1;
 export const DEV_JOURNAL_HEALTH = Object.freeze(["healthy", "recovering", "degraded", "corrupt"]);
 export const DEV_JOURNAL_STAGES = Object.freeze([
@@ -118,6 +128,63 @@ const gitSha1Pattern = /^[a-f0-9]{40}$/u;
 const stageSet = new Set(DEV_JOURNAL_STAGES);
 const linkTypeSet = new Set(DEV_JOURNAL_LINK_TYPES);
 const terminalStageSet = new Set(["operation_completed", "operation_failed", "operation_recovered"]);
+const recoveryAttemptLimit = 3;
+const recoveryConcurrency = 4;
+const recoveryObservationType = "journal_recovery_observation";
+const recoveryObservationTool = "nexa.journal.observe_recovery";
+const manualRecoveryTypes = new Set(["pi_terminal_resolution", "integration_validation", "test_evidence"]);
+
+function alreadyTerminal(operationId) {
+  return Object.assign(new Error(`Operation already has a terminal event: ${operationId}.`), {
+    code: "JOURNAL_OPERATION_ALREADY_TERMINAL",
+  });
+}
+
+function scopedAdminChildOutcome(started, terminal) {
+  const before = started.result;
+  const after = terminal?.result;
+  if (started.tool_name !== "powershell_admin_run" || started.operation_type !== "powershell_admin_maintenance"
+    || !/^[a-f0-9]{32}$/u.test(before?.scoped_admin_scope_binding ?? "") || !after
+    || !["operation_completed", "operation_recovered"].includes(terminal.stage)
+    || after.command_sha256 !== before.command_sha256 || after.scoped_admin_scope_binding !== before.scoped_admin_scope_binding
+    || after.scoped_request_id !== started.operation_id.slice("dev_operation_".length)
+    || after.task_authorization_id !== before.task_authorization_id || after.service_name !== before.service_name
+    || after.script_id !== before.script_id || after.script_sha256 !== before.script_sha256
+    || typeof after.scoped_admin_dispatch_started !== "boolean"
+    || (terminal.stage === "operation_recovered" && !/^[a-f0-9]{64}$/u.test(after.scoped_admin_receipt_sha256 ?? ""))) return null;
+  if (after.execution_ok === true && after.exit_code === 0) return "intended_effect_observed";
+  if (after.scoped_admin_dispatch_started === false && after.execution_ok === false
+    && ["SCOPED_ADMIN_AUTHORIZATION_DENIED", "SCOPED_ADMIN_SERVICE_FAILED", "SCOPED_ADMIN_SCRIPT_FAILED"].includes(after.reason)) return "failed_no_effect";
+  return null;
+}
+
+function completedAppContainerChild(started, terminal) {
+  const before = started.result;
+  const after = terminal?.result;
+  return started.tool_name === "powershell_run" && started.operation_type === "powershell_maintenance"
+    && terminal?.stage === "operation_completed" && after?.command_sha256 === before?.command_sha256
+    && before?.isolation_mode === "appcontainer" && before.workspace_writes === false
+    && after.isolation_mode === "appcontainer" && after.workspace_writes === false
+    && /^[a-f0-9]{64}$/u.test(before.input_manifest_sha256 ?? "") && after.input_manifest_sha256 === before.input_manifest_sha256
+    && after.job_terminated === true && after.cleanup_pending === false;
+}
+
+function verifiedAppContainerFailureResult(events, started, terminal) {
+  if (started.operation_type !== "mcp_mutation" || started.tool_name !== "powershell_run"
+    || terminal?.stage !== "operation_failed" || terminal.result.outcome !== "failed_no_effect"
+    || terminal.result.reconciliation_required !== false) return null;
+  const children = events.filter(event => event.parent_operation_id === started.operation_id && event.stage === "operation_started");
+  if (children.length !== 1) return null;
+  const [child] = children;
+  const done = events.find(event => event.operation_id === child.operation_id && event.stage === "operation_completed");
+  if (!completedAppContainerChild(child, done) || child.workspace_id !== started.workspace_id
+    || child.workstream_id !== started.workstream_id || done.sequence >= terminal.sequence) return null;
+  const { execution_ok, exit_code, timed_out, reason, isolation_mode, workspace_writes,
+    input_manifest_sha256, job_terminated, cleanup_pending } = done.result;
+  if (execution_ok !== true || timed_out !== false || reason !== null || !Number.isSafeInteger(exit_code) || exit_code === 0) return null;
+  return { execution_ok, exit_code, timed_out, reason, isolation_mode, workspace_writes,
+    input_manifest_sha256, job_terminated, cleanup_pending, shell_terminal_event_id: done.journal_event_id };
+}
 const fixedGitExecutable = process.platform === "win32" ? "git.exe" : "git";
 const explicitWorkspaceMutationOperationTypes = new Set(["git_commit", "integration_apply"]);
 
@@ -437,6 +504,14 @@ async function ensureStorageRoot(storageRoot) {
   const parent = path.dirname(storageRoot);
   if (!await assertSafeDirectory(parent, { allowMissing: true })) {
     const grandparent = path.dirname(parent);
+    if (grandparent === projectPaths.outputLogs) {
+      // A fresh installation may not contain generated runtime directories.
+      // Create the known project-owned chain without following a junction.
+      await assertSafeDirectory(projectRoot);
+      for (const directory of [path.dirname(projectPaths.outputs), projectPaths.outputs, grandparent]) {
+        await createSafeDirectoryIfMissing(directory);
+      }
+    }
     await assertSafeDirectory(grandparent);
     await createSafeDirectoryIfMissing(parent);
   }
@@ -644,6 +719,7 @@ export function createDevOperationJournalService({
   lockAcquireTimeoutMs = DEV_JOURNAL_LOCK_ACQUIRE_TIMEOUT_MS,
   executionPublicationHook,
   lifecycleEffectInspector,
+  scopedAdminEffectInspector,
   resolutionContextResolver,
   resolutionEvidenceRoot = projectRoot,
   isolationRecoveryAuthority,
@@ -651,6 +727,7 @@ export function createDevOperationJournalService({
   powershellResolutionPublicationHook,
   powershellEffectProfile = REVIEWED_POWERSHELL_EFFECT_PROFILE,
   indexRefreshRecoveryProfile = REVIEWED_INDEX_REFRESH,
+  backgroundRecovery = false,
 } = {}) {
   if (!Number.isSafeInteger(lockAcquireTimeoutMs) || lockAcquireTimeoutMs < 1) {
     throw new Error("lockAcquireTimeoutMs must be a positive safe integer.");
@@ -663,7 +740,12 @@ export function createDevOperationJournalService({
   let explicitDegraded = false;
   // Only successfully classified snapshots are cached; public results never alias them.
   let verifiedSnapshot = null;
+  let verificationInFlight = null;
   const workspaceMutationState = new Map();
+  const recoveringOperations = new Map();
+  let recoveryTimer = null;
+  let recoveryWakeAt = Infinity;
+  let recoveryRunning = false;
 
   function mutationStateFor(workspaceId) {
     let state = workspaceMutationState.get(workspaceId);
@@ -848,7 +930,7 @@ export function createDevOperationJournalService({
       ||!sha256Pattern.test(input.expected_command_sha256??"")||!Number.isSafeInteger(input.observed_exit_code)
       ||child.result?.command_sha256!==input.expected_command_sha256||done.result?.command_sha256!==input.expected_command_sha256
       ||child.result?.cwd!==done.result?.cwd||child.result?.elevated!==expectedElevated||done.result?.elevated!==expectedElevated
-      ||child.result?.timeout_ms!==done.result?.timeout_ms||done.result?.execution_ok!==true||(done.result?.timed_out!==false&&!isReviewedInterruptedLauncherReceipt(started,done,input))
+      ||child.result?.timeout_ms!==done.result?.timeout_ms||done.result?.execution_ok!==true||(done.result?.timed_out!==false&&!isReviewedInterruptedLauncherReceipt(started,done,input)&&!isReviewedPiWorkerRefresh(events,started,terminal,child,done,input))
       ||done.result?.exit_code!==input.observed_exit_code
       ||events.some(e=>e.parent_operation_id===child.operation_id&&e.stage==="operation_started")
       ||input.decision_owner!=="GPT"||!/^gpt-[A-Za-z0-9._:-]{1,120}$/u.test(input.decision_id??"")
@@ -947,7 +1029,7 @@ export function createDevOperationJournalService({
       ||w.workstream_id!==r.workstream_id||w.state!=="active"||w.revision!==r.expected_workstream_revision
       ||!Number.isFinite(Date.parse(w.updated_at))||Date.parse(w.updated_at)>=Date.parse(started.timestamp)
       ||!sha256Pattern.test(input.registry_sha256??"")||!sha256Pattern.test(input.integration_registry_sha256??"")
-      ||input.source_contract_sha256!==INTEGRATION_PREFLIGHT_SOURCE
+      ||!reviewedIntegrationPreflightSources.has(input.source_contract_sha256)
       ||started.diagnostic.hostname!==terminal.diagnostic.hostname||started.diagnostic.owner_pid!==terminal.diagnostic.owner_pid
       ||!Number.isFinite(Date.parse(started.timestamp))||!Number.isFinite(Date.parse(terminal.timestamp))
       ||Date.parse(terminal.timestamp)<Date.parse(started.timestamp)||Date.parse(terminal.timestamp)-Date.parse(started.timestamp)>60000
@@ -1005,7 +1087,11 @@ export function createDevOperationJournalService({
     if(head.stdout.trim()!=="570563664d351017d87dd0f13961ed5f7d34e4ab")fail();
   }
 
-  const validateResolution=(events,input)=>input?.resolution_kind===INTEGRATION_PREFLIGHT_RESOLUTION
+  const validateResolution=(events,input)=>input?.resolution_kind===TRPG_RESUME_KIND
+    ?validateTrpgResumeResolution(events,input)
+    :input?.resolution_kind===TRPG_LAUNCH_RESOLUTION
+    ?validateTrpgLaunchResolution(events,input)
+    :input?.resolution_kind===INTEGRATION_PREFLIGHT_RESOLUTION
     ?validateIntegrationPreflightResolution(events,input)
     :input?.resolution_kind===POWERSHELL_EFFECT_RESOLUTION
     ?validatePowershellEffectResolution(events,input,powershellEffectProfile)
@@ -1030,14 +1116,27 @@ export function createDevOperationJournalService({
       if(event.operation_type!=="pi_terminal_resolution"||!terminalStageSet.has(event.stage))continue;
       if(event.stage!=="operation_completed")continue;
       const proof=JSON.parse(event.result?.resolution_record??"null");
-      const {started,terminal,archived}=validateResolution(events,proof??{});
+      if (proof?.resolution_kind === restartResolutionKind) {
+        validateRestartProof(proof);
+        validateRestartResolution({ events, receipt: event,
+          admission: events.find(e => e.operation_id === event.operation_id && e.stage === "operation_started"),
+          proofText: canonicalJson(proof), proofHash: sha256Text(canonicalJson(proof)) });
+        if (resolved.has(restartParentId) || resolved.has(restartChildId)) throw Error("DUPLICATE_TRPG_RESTART_RESOLUTION");
+        resolved.set(restartParentId, event);
+        resolved.set(restartChildId, event);
+        continue;
+      }
+      const {started,terminal,archived}=validateResolution(
+        proof?.resolution_kind === TRPG_RESUME_KIND ? events.filter(entry => entry.sequence < event.sequence) : events,
+        proof??{});
       const admission=events.find(e=>e.operation_id===event.operation_id&&e.stage==="operation_started");
+      const workerRefresh=proof.resolution_kind==="completed_powershell_observation"&&proof.operation_id===REVIEWED_PI_WORKER_REFRESH.operation_id;
       if (archived && (event !== archived.receipt || admission !== archived.admission))
         throw new Error("INVALID_TERMINAL_RESOLUTION");
-      if((["completed_git_commit", WORKSTREAM_STALE_RESOLUTION, WORKSTREAM_COMMITTED_RESOLUTION, WORKSTREAM_METADATA_LIMIT_RESOLUTION, ISOLATION_RESOLUTION, POWERSHELL_EFFECT_RESOLUTION, INTEGRATION_PREFLIGHT_RESOLUTION].includes(proof.resolution_kind) || proof.resolution_kind==="completed_powershell_observation"&&proof.operation_id===REVIEWED_INTERRUPTED_LAUNCHER.operation_id) && (
+      if((["completed_git_commit", WORKSTREAM_STALE_RESOLUTION, WORKSTREAM_COMMITTED_RESOLUTION, WORKSTREAM_METADATA_LIMIT_RESOLUTION, ISOLATION_RESOLUTION, POWERSHELL_EFFECT_RESOLUTION, INTEGRATION_PREFLIGHT_RESOLUTION, TRPG_LAUNCH_RESOLUTION, TRPG_RESUME_KIND].includes(proof.resolution_kind) || proof.resolution_kind==="completed_powershell_observation"&&[REVIEWED_INTERRUPTED_LAUNCHER.operation_id,REVIEWED_PI_WORKER_REFRESH.operation_id].includes(proof.operation_id)) && (
         admission?.reconciliation_key !== "resolution:" + started.operation_id
         || admission?.request_fingerprint_sha256 !== sha256Text(canonicalJson(proof))
-        || admission?.tool_name !== (proof.resolution_kind === "completed_powershell_observation" ? "pi.journal.resolve_completed_powershell" : proof.resolution_kind === INTEGRATION_PREFLIGHT_RESOLUTION ? "pi.journal.resolve_integration_preflight" : proof.resolution_kind === ISOLATION_RESOLUTION ? ISOLATION_RESOLUTION_TOOL : proof.resolution_kind === POWERSHELL_EFFECT_RESOLUTION ? "pi.journal.resolve_powershell_effect" : proof.resolution_kind === WORKSTREAM_COMMITTED_RESOLUTION
+        || admission?.tool_name !== (proof.resolution_kind === TRPG_RESUME_KIND ? TRPG_RESUME_TOOL : proof.resolution_kind === TRPG_LAUNCH_RESOLUTION ? TRPG_LAUNCH_RESOLUTION_TOOL : proof.resolution_kind === "completed_powershell_observation" ? "pi.journal.resolve_completed_powershell" : proof.resolution_kind === INTEGRATION_PREFLIGHT_RESOLUTION ? "pi.journal.resolve_integration_preflight" : proof.resolution_kind === ISOLATION_RESOLUTION ? ISOLATION_RESOLUTION_TOOL : proof.resolution_kind === POWERSHELL_EFFECT_RESOLUTION ? "pi.journal.resolve_powershell_effect" : proof.resolution_kind === WORKSTREAM_COMMITTED_RESOLUTION
           ? "pi.journal.resolve_workstream_committed" : proof.resolution_kind === WORKSTREAM_METADATA_LIMIT_RESOLUTION ? "pi.journal.resolve_workstream_metadata_limit" : proof.resolution_kind === WORKSTREAM_STALE_RESOLUTION
           ? "pi.journal.resolve_workstream_stale" : "pi.journal.resolve_completed_git_commit")
         || event.tool_name !== admission.tool_name || admission.sequence <= terminal.sequence || event.sequence <= admission.sequence
@@ -1049,11 +1148,16 @@ export function createDevOperationJournalService({
         || event.parent_operation_id!==started.operation_id || admission.parent_operation_id!==started.operation_id
         || event.workspace_id!==started.workspace_id || admission.workspace_id!==started.workspace_id
         || event.workstream_id!==started.workstream_id || admission.workstream_id!==started.workstream_id
-        || event.reconciles_event_id!==terminal.journal_event_id || event.result.outcome!==(
+        || event.reconciles_event_id!==terminal.journal_event_id || event.result.outcome!==(proof.resolution_kind===TRPG_RESUME_KIND ? TRPG_RESUME_RESULT.outcome : proof.resolution_kind===TRPG_LAUNCH_RESOLUTION ? TRPG_LAUNCH_OUTCOME : workerRefresh?"failed_intended_effect_observed":
           (["completed_child_create","completed_powershell_observation","completed_git_commit",WORKSTREAM_COMMITTED_RESOLUTION,POWERSHELL_EFFECT_RESOLUTION].includes(proof.resolution_kind) || proof.resolution_kind===ISOLATION_RESOLUTION&&proof.observation.classification==="completed")
             ?"intended_effect_observed":"no_effect_observed")
+        || (workerRefresh&&Object.entries(reviewedPiWorkerRefreshResult).some(([key,value])=>event.result[key]!==value))
         || (proof.resolution_kind===POWERSHELL_EFFECT_RESOLUTION && (event.result.observed_effect!=="detached_all_gate_completed"
           ||event.result.shell_exit_code_observed!==false||Object.hasOwn(event.result,"exit_code")))
+        || (proof.resolution_kind===TRPG_LAUNCH_RESOLUTION &&
+          (event.result.shell_exit_code_observed!==false || Object.hasOwn(event.result,"exit_code")))
+        || (proof.resolution_kind===TRPG_RESUME_KIND && (Object.hasOwn(event.result,"exit_code")
+          || Object.entries(TRPG_RESUME_RESULT).some(([key,value]) => event.result[key] !== value)))
         || resolved.has(started.operation_id))throw new Error("INVALID_TERMINAL_RESOLUTION");
       resolved.set(started.operation_id,event);
     }
@@ -1095,11 +1199,24 @@ export function createDevOperationJournalService({
     const resolutions = resolvedTerminals(events);
     // Legacy shell declarations remain legal history, never fresh physical
     // proof. getOperation independently refuses their replay/reinitiation.
-    const ambiguousTerminal = events.some((event) => (
+    const ambiguousTerminalEvents = events.filter((event) => (
       !resolutions.has(event.operation_id) &&
       terminalStageSet.has(event.stage)
       && (event.result?.outcome === "ambiguous_effect" || event.result?.reconciliation_required === true)
     ));
+    const ambiguousTerminal = ambiguousTerminalEvents.length > 0;
+    const ambiguousByOperation = new Map(ambiguousTerminalEvents.map(event => [event.operation_id, event]));
+    const incidentIds = [...dangling, ...ambiguousByOperation.keys()];
+    const incidentIdSet = new Set(incidentIds);
+    const relatedStarts = new Map();
+    for (const started of incidentIds.length ? events : []) {
+      if (started.stage !== "operation_started" || !incidentIdSet.has(started.parent_operation_id)) continue;
+      const related = relatedStarts.get(started.parent_operation_id) ?? [];
+      related.push(started);
+      relatedStarts.set(started.parent_operation_id, related);
+    }
+    const incidents = incidentIds.map(id => journalIncident(byOperation.get(id)[0], ambiguousByOperation.get(id), relatedStarts.get(id)));
+    incidents.sort((left, right) => left.event_sequence - right.event_sequence);
     const chainDegraded = dangling.length > 0 || ambiguousTerminal;
     runtimeHealth = explicitDegraded || chainDegraded ? "degraded" : "healthy";
     reconciliationRequired = explicitDegraded || chainDegraded;
@@ -1113,11 +1230,22 @@ export function createDevOperationJournalService({
       events,
       dangling_operations: dangling,
       active_operations: active,
+      isolated_operations: incidents,
       ambiguous_terminal: ambiguousTerminal,
+      ambiguous_terminal_count: ambiguousTerminalEvents.length,
+      ambiguous_terminal_operations: ambiguousTerminalEvents.slice(0, DEV_JOURNAL_MAX_QUERY_RESULTS).map(event => ({
+        operation_id: event.operation_id,
+        operation_type: event.operation_type,
+        tool_name: event.tool_name,
+        workspace_id: event.workspace_id,
+        workstream_id: event.workstream_id,
+        terminal_event_id: event.journal_event_id,
+        terminal_sequence: event.sequence,
+      })),
     };
   }
 
-  async function verify() {
+  async function verifyStableSnapshot() {
     try {
       const { eventsPath } = await ensureStorageRoot(storageRoot);
       let verified = verifiedSnapshot ?? { head: emptyHead(), files: [], events: [], versions: [] };
@@ -1127,11 +1255,8 @@ export function createDevOperationJournalService({
         const confirmation = await captureSnapshot(eventsPath);
         if (snapshotsEqual(snapshot, confirmation)) {
           const result = classifyVerifiedSnapshot(verified);
-          // An overlapping older verification must not roll the cache backwards.
-          if (!verifiedSnapshot || verifiedSnapshot.head.latest_sequence <= verified.head.latest_sequence) {
-            verifiedSnapshot = verified;
-          }
-          return structuredClone(result);
+          verifiedSnapshot = verified;
+          return result;
         }
         snapshot = confirmation;
       }
@@ -1146,6 +1271,15 @@ export function createDevOperationJournalService({
     }
   }
 
+  async function verify() {
+    // The initial readiness check and the first tool call can overlap. Share the
+    // in-progress disk verification, including its live head confirmation.
+    verificationInFlight ??= verifyStableSnapshot().finally(() => {
+      verificationInFlight = null;
+    });
+    return structuredClone(await verificationInFlight);
+  }
+
   async function append(input, {beforeAppend} = {}) {
     if (runtimeHealth === "corrupt") throw new Error(`JOURNAL_CORRUPT: ${lastHealthError ?? "journal integrity failure"}`);
     const { eventsPath } = await ensureStorageRoot(storageRoot);
@@ -1158,10 +1292,7 @@ export function createDevOperationJournalService({
         const head = await readHead(headPath);
         if (canonicalJson(head) !== canonicalJson(verification.head)) continue;
         await beforeAppend?.(verification);
-        // Ordinary admissions must honor a newly observed degraded Gate too.
-        // The existing explicit terminal-resolution contract remains available.
-        if (input.stage === "operation_started" && input.operation_type !== "pi_terminal_resolution"
-          && runtimeHealth !== "healthy") {
+        if (input.stage === "operation_started" && input.operation_type !== "pi_terminal_resolution" && explicitDegraded) {
           const error = new Error(`JOURNAL_${runtimeHealth.toUpperCase()}: development mutation is blocked until journal reconciliation succeeds.`);
           error.code = `JOURNAL_${runtimeHealth.toUpperCase()}`;
           throw error;
@@ -1184,7 +1315,7 @@ export function createDevOperationJournalService({
             const event = verification.events[index];
             if (event.operation_id === input.operation_id && event.stage === "operation_started") break;
             if (event.operation_id === input.operation_id && terminalStageSet.has(event.stage)) {
-              throw new Error("Operation already has a terminal event: " + input.operation_id);
+              throw alreadyTerminal(input.operation_id);
             }
           }
         }
@@ -1198,6 +1329,11 @@ export function createDevOperationJournalService({
           eventId,
           timestamp,
         });
+        if (event.stage === "operation_started" && event.operation_type !== "pi_terminal_resolution") {
+          const scope = journalOperationScope(event);
+          const conflict = verification.isolated_operations.find(incident => journalIsolationOverlaps(incident.scope, scope));
+          if (conflict) throw journalIsolationError(conflict);
+        }
         const encoded = `${canonicalJson(event)}\n`;
         if (Buffer.byteLength(encoded, "utf8") > DEV_JOURNAL_MAX_EVENT_BYTES) throw new Error(`Journal event exceeds ${DEV_JOURNAL_MAX_EVENT_BYTES} bytes.`);
         const eventPath = path.join(eventsPath, eventFilename(sequence, eventId));
@@ -1250,8 +1386,7 @@ export function createDevOperationJournalService({
       const prefixTail = prefix.at(-1);
       if (head.latest_event_id !== (prefixTail?.journal_event_id ?? null)
         || head.latest_event_hash !== (prefixTail?.event_hash ?? null)) throw new Error("CORRUPT_STATE");
-      const health = classifyVerifiedSnapshot({ head, events: prefix });
-      if (health.dangling_operations.length || health.ambiguous_terminal) throw new Error("CORRUPT_STATE");
+      classifyVerifiedSnapshot({ head, events: prefix });
       const history = executionProjectionEvents(prefix);
       const latest = validateHistory(history);
       const tail = verified.events.slice(head.latest_sequence);
@@ -1483,19 +1618,222 @@ export function createDevOperationJournalService({
   async function reconcileDangling({ contextResolver } = {}) {
     const verification = await verify();
     if (verification.dangling_operations.length === 0) return verification;
-    runtimeHealth = "recovering";
-    reconciliationRequired = true;
-    const resolveContext = contextResolver ?? (async (workspaceId) => {
-      const { resolveDevWorkspaceExecutionContext } = await import("./mcp-development-workstream-tools.mjs");
-      return resolveDevWorkspaceExecutionContext({ workspace_id: workspaceId }, { mutation: false });
-    });
+    await recoverDanglingSnapshot(verification, contextResolver);
+    return verify();
+  }
 
+  const resolveRecoveryContext = async (workspaceId) => {
+    const { resolveDevWorkspaceExecutionContext } = await import("./mcp-development-workstream-tools.mjs");
+    return resolveDevWorkspaceExecutionContext({ workspace_id: workspaceId }, { mutation: false });
+  };
+
+  function recoveryGraph(verification) {
+    const dangling = new Set(verification.dangling_operations);
+    const unsettled = new Set([...dangling, ...verification.active_operations]);
+    const starts = [];
+    const children = new Map();
+    for (const event of verification.events) {
+      if (event.stage !== "operation_started" || !unsettled.has(event.operation_id)) continue;
+      if (dangling.has(event.operation_id)) starts.push(event);
+      if (!event.parent_operation_id) continue;
+      const siblings = children.get(event.parent_operation_id) ?? [];
+      siblings.push(event.operation_id);
+      children.set(event.parent_operation_id, siblings);
+    }
+    return { starts, unsettled, children };
+  }
+
+  function recoveryAttemptsFrom(verification) {
+    const attempts = new Map();
+    const admitted = new Map();
+    for (const event of verification.events) {
+      if (event.operation_type !== recoveryObservationType || event.tool_name !== recoveryObservationTool) continue;
+      if (event.stage === "operation_started") {
+        const { logical_operation_id: original, recovery_attempt: count, retry_after_ms: due } = event.result;
+        if (!operationIdPattern.test(original ?? "") || !Number.isSafeInteger(count) || count < 1 || count > recoveryAttemptLimit
+          || !Number.isSafeInteger(due) || due < 0) continue;
+        const record = { count, due, id: event.operation_id, code: null };
+        attempts.set(original, record);
+        admitted.set(event.operation_id, record);
+      } else {
+        const record = admitted.get(event.operation_id);
+        const code = event.result.recovery_error_code;
+        if (record && /^[A-Z][A-Z0-9_]{0,63}$/u.test(code ?? "")) record.code = code;
+      }
+    }
+    return attempts;
+  }
+
+  function activeRecoveryScopes(starts, attempts, active) {
+    return starts.filter(started => active.has(attempts.get(started.operation_id)?.id))
+      .map(journalOperationScope);
+  }
+
+  async function observeScheduledRecovery(started, resolveContext, prior) {
+    const operationId = started.operation_id;
+    if (started.operation_type === recoveryObservationType) {
+      // This orphan records a previous inspection of some other operation.
+      // Close its observation without repeating that inspection here.
+      return terminal(operationId, "operation_recovered", {
+        reconciles_event_id: started.journal_event_id,
+        result: { outcome: "no_effect_observed", recovery_error_code: "RECOVERY_OBSERVATION_INTERRUPTED" },
+      });
+    }
+    const observationId = operationIdGenerator();
+    if (!operationIdPattern.test(observationId)) throw new Error("Operation ID generator returned an invalid ID.");
+    if (!isLocalOrphan(started)) throw new Error("JOURNAL_RECOVERY_OWNER_NOT_PROVEN_DEAD");
+    const count = (prior?.count ?? 0) + 1;
+    const observation = await append({
+      operation_id: observationId,
+      stage: "operation_started",
+      operation_type: recoveryObservationType,
+      tool_name: recoveryObservationTool,
+      workspace_id: started.workspace_id,
+      workstream_id: started.workstream_id,
+      links: [{ relation: "related_to", operation_id: operationId }],
+      result: { logical_operation_id: operationId, recovery_attempt: count, retry_after_ms: Date.now() + 500 * 2 ** (count - 1) },
+    }, { beforeAppend: current => {
+      const attempts = recoveryAttemptsFrom(current);
+      const latest = attempts.get(operationId);
+      if (!current.dangling_operations.includes(operationId) || latest?.id !== prior?.id
+        || current.active_operations.includes(latest?.id)
+        || activeRecoveryScopes(recoveryGraph(current).starts, attempts, new Set(current.active_operations))
+          .some(scope => journalIsolationOverlaps(scope, journalOperationScope(started)))) {
+        throw Object.assign(new Error("The operation already has a current observer."), { code: "JOURNAL_RECOVERY_OBSERVER_CHANGED" });
+      }
+    } });
+    let observed;
+    try {
+      observed = await recoverDanglingOperation(started, resolveContext);
+    } catch (error) {
+      const code = /^[A-Z][A-Z0-9_]{0,63}$/u.test(error?.code ?? "") ? error.code : "RECOVERY_OBSERVATION_FAILED";
+      await fail(observation.operation_id, { result: { recovery_error_code: code, outcome: "failed_no_effect" } });
+      throw error;
+    }
+    await complete(observation.operation_id, { result: { observed_terminal_event_id: observed.journal_event_id,
+      observed_outcome: observed.result.outcome } });
+  }
+
+  function trackRecovery(started, observe) {
+    const id = started.operation_id;
+    let entry = recoveringOperations.get(id);
+    if (!entry) {
+      entry = { scope: journalOperationScope(started),
+        promise: observe().finally(() => recoveringOperations.delete(id)) };
+      recoveringOperations.set(id, entry);
+    }
+    return entry.promise;
+  }
+
+  async function recoverDanglingSnapshot(verification, resolveContext = resolveRecoveryContext) {
+    if (explicitDegraded) return;
+    const { starts, unsettled, children } = recoveryGraph(verification);
     // Recover inner operations before their boundary admission.
-    for (const operationId of [...verification.dangling_operations].reverse()) {
-      const started = verification.events.find((event) => event.operation_id === operationId && event.stage === "operation_started");
-      if (!started) continue;
-      if(started.operation_type==="pi_terminal_resolution"&&[ISOLATION_RESOLUTION_TOOL,"pi.journal.resolve_powershell_effect"].includes(started.tool_name))continue;
-      if(started.operation_type==="pi_terminal_resolution"&&started.tool_name==="pi.journal.resolve_workstream_metadata_limit")continue;
+    for (const started of starts.reverse()) {
+      const operationId = started.operation_id;
+      if (!canObserveRecovery(started) || children.get(operationId)?.some(id => unsettled.has(id))) continue;
+      try {
+        await trackRecovery(started, () => recoverDanglingOperation(started, resolveContext));
+      } catch (error) {
+        if (runtimeHealth === "corrupt") throw error;
+        if (error?.code !== "JOURNAL_OPERATION_ALREADY_TERMINAL") continue;
+        // Another process may have appended a receipt from the same observation.
+        // Re-verify its terminal before dropping this recovery attempt.
+        const current = await verify();
+        if (current.dangling_operations.includes(operationId)) throw error;
+      }
+      unsettled.delete(operationId);
+    }
+  }
+
+  function isLocalOrphan(started) {
+    const owner = started.diagnostic;
+    return owner?.hostname === os.hostname() && Number.isSafeInteger(owner.owner_pid)
+      && owner.owner_pid > 0 && !isProcessRunning(owner.owner_pid);
+  }
+
+  function canObserveRecovery(started) {
+    // Interrupted validation and reviewed resolution have separate evidence
+    // owners, and cannot be concluded from a generic workspace snapshot.
+    const interruptedGc = started.operation_type === "checkpoint_gc" && started.result?.dry_run !== true;
+    return !interruptedGc && !manualRecoveryTypes.has(started.operation_type) && isLocalOrphan(started);
+  }
+
+  function recoveryPlan(verification) {
+    const ready = [];
+    let due = Infinity;
+    const capacity = recoveryConcurrency - recoveringOperations.size;
+    if (capacity <= 0 || verification.dangling_operations.length === 0) return { ready, due };
+    const { starts, children, unsettled } = recoveryGraph(verification);
+    const attempts = recoveryAttemptsFrom(verification);
+    const occupied = [...recoveringOperations.values()].map(entry => entry.scope);
+    const active = new Set(verification.active_operations);
+    const remoteScopes = activeRecoveryScopes(starts, attempts, active);
+    const now = Date.now();
+    for (const started of starts.reverse()) {
+      const id = started.operation_id;
+      if (recoveringOperations.has(id) || children.has(id) || !canObserveRecovery(started)) continue;
+      const prior = attempts.get(id);
+      if (active.has(prior?.id)) {
+        due = Math.min(due, now + 30_000);
+        continue;
+      }
+      if ((prior?.count ?? 0) >= recoveryAttemptLimit || unsettled.has(prior?.id)) continue;
+      const scope = journalOperationScope(started);
+      if (occupied.some(other => journalIsolationOverlaps(other, scope))) continue;
+      if (remoteScopes.some(other => journalIsolationOverlaps(other, scope))) {
+        due = Math.min(due, now + 30_000);
+        continue;
+      }
+      if ((prior?.due ?? 0) > now) {
+        due = Math.min(due, prior.due);
+        continue;
+      }
+      ready.push({ started, prior });
+      occupied.push(scope);
+      due = now;
+      if (ready.length >= capacity) break;
+    }
+    return { ready, due };
+  }
+
+  function revisitRecovery() {
+    void verify().then(scheduleRecovery).catch(() => {
+      // A verified admission or restart can recheck the queue if storage is unavailable.
+    });
+  }
+
+  function scheduleRecovery(verification) {
+    if (!backgroundRecovery || recoveryRunning || explicitDegraded) return;
+    const { due } = recoveryPlan(verification);
+    if (due >= recoveryWakeAt) return;
+    clearTimeout(recoveryTimer);
+    recoveryWakeAt = due;
+    recoveryTimer = setTimeout(async () => {
+      recoveryTimer = null;
+      recoveryWakeAt = Infinity;
+      recoveryRunning = true;
+      let latest;
+      try {
+        latest = await verify();
+        if (explicitDegraded) return;
+        for (const { started, prior } of recoveryPlan(latest).ready) {
+          const recovery = trackRecovery(started, () =>
+            observeScheduledRecovery(started, resolutionContextResolver ?? resolveRecoveryContext, prior));
+          void recovery.then(revisitRecovery, revisitRecovery);
+        }
+      } catch {
+        // Storage/integrity failures keep the existing shared write gate.
+      } finally {
+        recoveryRunning = false;
+      }
+      if (latest) scheduleRecovery(latest);
+    }, Math.max(25, due - Date.now()));
+    recoveryTimer.unref();
+  }
+
+  async function recoverDanglingOperation(started, resolveContext) {
+      const operationId = started.operation_id;
       const transactionOperation = started.operation_type === "checkpoint_restore_transaction_create"
         || started.operation_type.startsWith("transaction_");
       const requiresWorkspaceContext = !started.operation_type.startsWith("checkpoint_")
@@ -1506,24 +1844,7 @@ export function createDevOperationJournalService({
         );
       let context = null;
       if (requiresWorkspaceContext) {
-        try {
-          context = await resolveContext(started.workspace_id);
-        } catch (error) {
-          runtimeHealth = "degraded";
-          reconciliationRequired = true;
-          lastHealthError = `Could not resolve dangling operation workspace ${started.workspace_id}: ${error.message}`;
-          return verify();
-        }
-      }
-
-      // Test execution and integration worktree creation have effects outside
-      // artifact targets. Only the integration service can bind their cleanup
-      // to the candidate and runner ownership; do not manufacture no-effect.
-      if (["integration_validation", "test_evidence"].includes(started.operation_type)) {
-        lastHealthError = `Interrupted validation requires scoped recovery: ${operationId}.`;
-        runtimeHealth = "degraded";
-        reconciliationRequired = true;
-        return verify();
+        context = await resolveContext(started.workspace_id);
       }
 
       let outcome = "no_effect_observed";
@@ -1535,6 +1856,29 @@ export function createDevOperationJournalService({
         // A legacy child's declaration cannot prove a future shell had no effect.
         outcome = "ambiguous_effect";
         ambiguous = true;
+        if (started.tool_name === "powershell_admin_run" && started.result?.scoped_admin_scope_binding) {
+          try {
+            const { inspectScopedAdminRecovery } = await import("./mcp-powershell-maintenance-tools.mjs");
+            const result = await (scopedAdminEffectInspector ?? inspectScopedAdminRecovery)(started);
+            const observed = scopedAdminChildOutcome(started, { stage: "operation_recovered", result });
+            if (observed) { outcome = observed; ambiguous = false; lifecycleFacts = result; }
+          } catch { /* Preserve ambiguity if the protected result is unavailable. */ }
+        } else if (started.tool_name === "powershell_admin_run" && started.operation_type === "mcp_mutation") {
+          const current = await verify();
+          const children = current.events.filter(event => event.parent_operation_id === operationId && event.stage === "operation_started");
+          if (children.length === 1 && children[0].workspace_id === started.workspace_id && children[0].workstream_id === started.workstream_id) {
+            const child = children[0];
+            const childTerminal = current.events.find(event => event.operation_id === child.operation_id && terminalStageSet.has(event.stage));
+            const observed = scopedAdminChildOutcome(child, childTerminal);
+            if (observed) {
+              outcome = observed;
+              ambiguous = false;
+              lifecycleFacts = { scoped_admin_child_terminal_id: childTerminal.journal_event_id,
+                execution_ok: childTerminal.result.execution_ok, exit_code: childTerminal.result.exit_code,
+                reason: childTerminal.result.reason, timed_out: false };
+            }
+          }
+        }
       } else if (started.operation_type === "mcp_mutation") {
         // Absence of child evidence never proves that an arbitrary handler had no effect.
         const current = await verify();
@@ -1612,7 +1956,15 @@ export function createDevOperationJournalService({
         }
       }
 
-      await terminal(operationId, "operation_recovered", {
+      return terminal(operationId, "operation_recovered", {
+        beforeAppend: latest => {
+          if (!isLocalOrphan(started)) throw new Error("JOURNAL_RECOVERY_OWNER_NOT_PROVEN_DEAD");
+          const pending = new Set([...latest.active_operations, ...latest.dangling_operations]);
+          if (latest.events.some(event => event.parent_operation_id === operationId
+            && event.stage === "operation_started" && pending.has(event.operation_id))) {
+            throw new Error("JOURNAL_CHILD_RECOVERY_PENDING");
+          }
+        },
         reconciles_event_id: started.journal_event_id,
         targets: observedTargets.length > 0 ? observedTargets : started.targets,
         links: started.links,
@@ -1623,23 +1975,16 @@ export function createDevOperationJournalService({
           ...lifecycleFacts,
         },
       });
-      if (ambiguous) {
-        runtimeHealth = "degraded";
-        reconciliationRequired = true;
-        lastHealthError = `Ambiguous durable effect for operation ${operationId}.`;
-        return verify();
-      }
-    }
-    return verify();
   }
 
   async function assertMutationAllowed() {
-    await reconcileDangling();
-    if (runtimeHealth !== "healthy") {
+    const verified = await verify();
+    if (explicitDegraded) {
       const error = new Error(`JOURNAL_${runtimeHealth.toUpperCase()}: development mutation is blocked until journal reconciliation succeeds.`);
       error.code = `JOURNAL_${runtimeHealth.toUpperCase()}`;
       throw error;
     }
+    scheduleRecovery(verified);
   }
 
   async function begin(input = {}) {
@@ -1671,7 +2016,7 @@ export function createDevOperationJournalService({
     const operationEvents = verification.events.filter((event) => event.operation_id === operationId);
     const started = operationEvents.find((event) => event.stage === "operation_started");
     if (!started) throw new Error(`Unknown operation: ${operationId}.`);
-    if (operationEvents.some((event) => terminalStageSet.has(event.stage))) throw new Error(`Operation already has a terminal event: ${operationId}.`);
+    if (operationEvents.some((event) => terminalStageSet.has(event.stage))) throw alreadyTerminal(operationId);
     const event = await append({
       operation_id: operationId,
       stage,
@@ -1689,11 +2034,6 @@ export function createDevOperationJournalService({
       result: input.result ?? {},
     }, {beforeAppend:input.beforeAppend});
     noteMutationTerminal(event);
-    if (!explicitDegraded) {
-      runtimeHealth = "healthy";
-      reconciliationRequired = false;
-      lastHealthError = null;
-    }
     return event;
   }
 
@@ -1734,27 +2074,44 @@ export function createDevOperationJournalService({
   // Publish only an exact, semantically valid resolver event already durable on
   // disk. Recheck original identities, dead owners, profile and frozen physical
   // evidence before head CAS. No generic missing-file/no-child inference.
-  async function recoverPowershellResolutionTail(proof){
+  async function recoverTerminalResolutionTail(proofs, { tool, assertEvidence }) {
     const {eventsPath}=await ensureStorageRoot(storageRoot);
     const handle=await acquireJournalLock(lockPath,{timeoutMs:lockAcquireTimeoutMs});
     try{
       const head=await readHead(headPath),files=await listEventFiles(eventsPath);
-      if(files.length!==head.latest_sequence+1)throw Error('UNSAFE_POWERSHELL_PUBLICATION_TAIL');
+      if(files.length!==head.latest_sequence+1)throw Error('UNSAFE_TERMINAL_RESOLUTION_PUBLICATION_TAIL');
       const last=parseEvent(await eventReader(path.join(eventsPath,files.at(-1)),'utf8'));
+      const proof=proofs.find(item=>canonicalJson(item)===last.result?.resolution_record);
+      if(!proof)throw Error('UNSAFE_TERMINAL_RESOLUTION_PUBLICATION_TAIL');
       const physicalHead={schema_version:DEV_JOURNAL_SCHEMA_VERSION,latest_sequence:last.sequence,latest_event_id:last.journal_event_id,latest_event_hash:last.event_hash};
       const snapshot=await verifySnapshotExtension({eventsPath,base:{head:emptyHead(),files:[],events:[],versions:[]},snapshot:{head:physicalHead,files}});
       const prefix=snapshot.events.slice(0,head.latest_sequence),prefixLast=prefix.at(-1);
       if(head.latest_event_hash!==(prefixLast?.event_hash??null)||head.latest_event_id!==(prefixLast?.journal_event_id??null)
-        ||last.operation_type!=='pi_terminal_resolution'||last.tool_name!=="pi.journal.resolve_powershell_effect"
+        ||last.operation_type!=='pi_terminal_resolution'||last.tool_name!==tool
         ||last.result?.resolution_record!==canonicalJson(proof)||last.parent_operation_id!==proof.operation_id
         ||last.diagnostic.hostname!==os.hostname()||isProcessRunning(last.diagnostic.owner_pid)
-        ||!['operation_started','operation_completed'].includes(last.stage))throw Error('UNSAFE_POWERSHELL_PUBLICATION_TAIL');
-      assertPowershellResolutionQuiescent(classifyVerifiedSnapshot({head,events:prefix}),proof);
-      await inspectPowershellTarget(snapshot.events,proof);
+        ||!['operation_started','operation_completed'].includes(last.stage))throw Error('UNSAFE_TERMINAL_RESOLUTION_PUBLICATION_TAIL');
+      await assertEvidence(classifyVerifiedSnapshot({head,events:prefix}),snapshot.events,proof);
       classifyVerifiedSnapshot({head:physicalHead,events:snapshot.events});
       await verifySnapshotExtension({eventsPath,base:snapshot,snapshot:{head:physicalHead,files}});
       await atomicWriteJson(headPath,physicalHead);verifiedSnapshot=null;
     }finally{await releaseJournalLock(handle,lockPath);}
+  }
+
+  async function assertTrpgResumeEvidence(snapshot, proof, options) {
+    const facts = validateTrpgResumeResolution(snapshot.events, proof, options);
+    const hostname = os.hostname().toLowerCase();
+    if (facts.owners.some(event => event.diagnostic.hostname.toLowerCase() !== hostname
+      || isProcessRunning(event.diagnostic.owner_pid))) throw new Error("RESOLUTION_OWNER_STILL_ACTIVE");
+    for (const id of [...snapshot.active_operations, ...snapshot.dangling_operations]) {
+      const start = snapshot.events.find(event => event.operation_id === id && event.stage === "operation_started");
+      if (start?.tool_name !== TRPG_RESUME_TOOL || start.parent_operation_id !== proof.operation_id
+        || start.result.resolution_record !== canonicalJson(proof) || start.diagnostic.hostname.toLowerCase() !== hostname
+        || start.diagnostic.owner_pid !== process.pid && isProcessRunning(start.diagnostic.owner_pid)) {
+        throw new Error("RESOLUTION_OWNER_STILL_ACTIVE");
+      }
+    }
+    await verifyTrpgResumeEvidence();
   }
 
   async function resolveTerminalMutation(input={}, resolutionKind=null, {dryRun=false,isolationLease=null}={}) {
@@ -1766,10 +2123,11 @@ export function createDevOperationJournalService({
     const workstreamStale=workstreamMetadata||resolutionKind===WORKSTREAM_STALE_RESOLUTION;
     const workstreamCommitted=resolutionKind===WORKSTREAM_COMMITTED_RESOLUTION;
     const powershellEffect=resolutionKind===POWERSHELL_EFFECT_RESOLUTION;
+    const trpgResume=resolutionKind===TRPG_RESUME_KIND;
     const integrationPreflight=resolutionKind===INTEGRATION_PREFLIGHT_RESOLUTION;
     const interruptedLauncher=completedPowershell&&input.operation_id===REVIEWED_INTERRUPTED_LAUNCHER.operation_id;
     const evidenceBound=completedGit||workstreamStale||workstreamCommitted||powershellEffect||integrationPreflight||interruptedLauncher;
-    const resolutionFields=isolation?["resolution_kind","original_request","observation","observation_sha256","authority_receipt"]:completedChild?["resolution_kind","expected_child_terminal_hash","observed_sha256"]
+    const resolutionFields=trpgResume?["resolution_kind","supervisor_log_sha256"]:isolation?["resolution_kind","original_request","observation","observation_sha256","authority_receipt"]:completedChild?["resolution_kind","expected_child_terminal_hash","observed_sha256"]
       :completedPowershell?["resolution_kind","expected_child_terminal_hash","expected_command_sha256","observed_exit_code"]
         :powershellEffect?["resolution_kind","parent_operation_id","parent_terminal_hash","child_operation_id","child_terminal_hash",
           "pi_claim_event_hash","test_started_event_hash","test_terminal_event_hash","profile_id"]
@@ -1806,8 +2164,10 @@ export function createDevOperationJournalService({
       if(existing.result.resolution_record!==canonicalJson(input))throw new Error("RESOLUTION_DECISION_CONFLICT");
       return {reconciled:true,event:existing};
     }
+    const checkTrpgResume = snapshot => assertTrpgResumeEvidence(snapshot, input);
+    if (trpgResume) await checkTrpgResume(verification);
     await checkIsolation(verification);
-    if(terminal.diagnostic.hostname!==os.hostname()||isProcessRunning(terminal.diagnostic.owner_pid))
+    if(!trpgResume&&(terminal.diagnostic.hostname!==os.hostname()||isProcessRunning(terminal.diagnostic.owner_pid)))
       throw new Error("RESOLUTION_OWNER_STILL_ACTIVE");
     const checkRecoveryEvidence=async snapshot=>{
       if(!integrationPreflight&&!interruptedLauncher)return;
@@ -1856,7 +2216,7 @@ export function createDevOperationJournalService({
       if(canonicalJson(actual)!==canonicalJson(childDone.targets[0].after))throw new Error("RESOLUTION_PHYSICAL_STATE_CHANGED");
     }
     if(dryRun)return {verified:true,operation_id:started.operation_id,
-      ...(powershellEffect?{observed_effect:"detached_all_gate_completed",shell_exit_code_observed:false}
+      ...(trpgResume?TRPG_RESUME_RESULT:powershellEffect?{observed_effect:"detached_all_gate_completed",shell_exit_code_observed:false}
         :(workstreamStale||workstreamCommitted)?{transaction_id:input.transaction_id}:{observed_commit:input.observed_commit})};
     const key="resolution:"+started.operation_id;
     const fingerprint=sha256Text(canonicalJson(input));
@@ -1864,13 +2224,13 @@ export function createDevOperationJournalService({
     let admission=verification.events.find(e=>e.reconciliation_key===key&&e.stage==="operation_started");
     if(!admission)try {
       admission=await append({operation_id:operationIdGenerator(),stage:"operation_started",
-        operation_type:"pi_terminal_resolution",tool_name:integrationPreflight?"pi.journal.resolve_integration_preflight":isolation?ISOLATION_RESOLUTION_TOOL:powershellEffect?"pi.journal.resolve_powershell_effect":completedChild?"pi.journal.resolve_completed_child_create"
+        operation_type:"pi_terminal_resolution",tool_name:trpgResume?TRPG_RESUME_TOOL:integrationPreflight?"pi.journal.resolve_integration_preflight":isolation?ISOLATION_RESOLUTION_TOOL:powershellEffect?"pi.journal.resolve_powershell_effect":completedChild?"pi.journal.resolve_completed_child_create"
           :completedPowershell?"pi.journal.resolve_completed_powershell"
             :completedGit?"pi.journal.resolve_completed_git_commit"
               :workstreamCommitted?"pi.journal.resolve_workstream_committed"
               :workstreamMetadata?"pi.journal.resolve_workstream_metadata_limit":workstreamStale?"pi.journal.resolve_workstream_stale":"pi.journal.resolve_no_child_create",
         workspace_id:started.workspace_id,workstream_id:started.workstream_id,parent_operation_id:started.operation_id,
-        reconciliation_key:key,request_fingerprint_sha256:fingerprint,result:{resolution_record:canonicalJson(input)}}, {beforeAppend:(integrationPreflight||interruptedLauncher)?checkRecoveryEvidence:powershellEffect?checkShell:checkIsolation});
+        reconciliation_key:key,request_fingerprint_sha256:fingerprint,result:{resolution_record:canonicalJson(input)}}, {beforeAppend:trpgResume?checkTrpgResume:(integrationPreflight||interruptedLauncher)?checkRecoveryEvidence:powershellEffect?checkShell:checkIsolation});
       if(isolation)await isolationResolutionPublicationHook?.("after_admission");
       if(powershellEffect)await powershellResolutionPublicationHook?.("after_admission");
     }catch(error){if(error.code!=="RECONCILIATION_EXISTING_OPERATION")throw error;
@@ -1897,9 +2257,10 @@ export function createDevOperationJournalService({
     let event;
     try{event=await complete(admission.operation_id,{reconciles_event_id:terminal.journal_event_id,
       result:{outcome:(completedChild||completedPowershell||completedGit||workstreamCommitted||powershellEffect||isolation&&input.observation.classification==='completed')?"intended_effect_observed":"no_effect_observed",reconciliation_required:false,resolution_record:canonicalJson(input),
+        ...(trpgResume?TRPG_RESUME_RESULT:{}),
         ...(isolation&&input.observation.classification==='completed'?input.observation.witness.binding:{}),
         ...(powershellEffect?{observed_effect:"detached_all_gate_completed",shell_exit_code_observed:false}:{})},
-      ...((integrationPreflight||interruptedLauncher)?{beforeAppend:checkRecoveryEvidence}:isolation?{beforeAppend:checkIsolation}:powershellEffect?{beforeAppend:checkShell}:{}),
+      ...(trpgResume?{beforeAppend:checkTrpgResume}:(integrationPreflight||interruptedLauncher)?{beforeAppend:checkRecoveryEvidence}:isolation?{beforeAppend:checkIsolation}:powershellEffect?{beforeAppend:checkShell}:{}),
       ...(completedGit?{links:[{relation:"committed_by",commit:input.observed_commit}]}:{})});}
     catch(error){verification=await verify();event=resolvedTerminals(verification.events).get(started.operation_id);if(!event)throw error;}
     if(isolation)await isolationResolutionPublicationHook?.("after_completed");
@@ -1984,23 +2345,81 @@ export function createDevOperationJournalService({
     if(!isObject(input)||Object.keys(input).sort().join(',')!==fields.sort().join(',')||input.resolution_kind!==POWERSHELL_EFFECT_RESOLUTION)throw Error('INVALID_TERMINAL_RESOLUTION');
     input=JSON.parse(canonicalJson(input));
     const freeze=value=>{if(value&&typeof value==='object'){Object.values(value).forEach(freeze);Object.freeze(value);}return value;};freeze(input);
-    try{await verify();}catch(error){if(isTransientJournalVerificationError(error))throw error;await recoverPowershellResolutionTail(input);}
+    try{await verify();}catch(error){if(isTransientJournalVerificationError(error))throw error;
+      await recoverTerminalResolutionTail([input],{tool:"pi.journal.resolve_powershell_effect",assertEvidence:async(snapshot,events)=>{
+        assertPowershellResolutionQuiescent(snapshot,input);await inspectPowershellTarget(events,input);
+      }});}
     return resolveTerminalMutation(input,POWERSHELL_EFFECT_RESOLUTION);
   }
   const inspectPowershellEffectMutation=input=>resolveTerminalMutation(input,POWERSHELL_EFFECT_RESOLUTION,{dryRun:true});
 
-  async function markDegraded(reason = "terminal_journal_append_failed") {
+  async function reconcileTrpgResume({ apply = false } = {}) {
+    const proofs = trpgResumeProofs();
+    if (!apply) {
+      const snapshot = await verify();
+      const resolved = resolvedTerminals(snapshot.events);
+      for (const proof of proofs) {
+        if (!resolved.has(proof.operation_id)) await assertTrpgResumeEvidence(snapshot, proof, { requireChildReceipt: false });
+      }
+      return { observations: proofs.map(proof => ({ operation_id: proof.operation_id,
+        resolution_event_id: resolved.get(proof.operation_id)?.journal_event_id ?? null })), status: statusFromVerification(snapshot) };
+    }
+    try { await verify(); }
+    catch (error) {
+      if (isTransientJournalVerificationError(error)) throw error;
+      await recoverTerminalResolutionTail(proofs,{tool:TRPG_RESUME_TOOL,
+        assertEvidence:(snapshot,events,proof)=>assertTrpgResumeEvidence(snapshot,proof)});
+    }
+    const observations = [];
+    for (const proof of proofs) {
+      const result = await resolveTerminalMutation(proof, TRPG_RESUME_KIND);
+      observations.push({ operation_id: proof.operation_id, resolution_event_id: result.event?.journal_event_id ?? null });
+    }
+    return { observations, status: await status() };
+  }
+
+  async function markDegraded(reason = "terminal_journal_append_failed", operationId) {
+    const details = redactProcessOutput(String(reason)).slice(0, 512);
+    if (typeof operationId === "string" && operationIdPattern.test(operationId)) {
+      try {
+        const first = await getOperation({ operation_id: operationId });
+        if (first.terminal) return;
+        if (first.operation_id) {
+          try {
+            await fail(operationId, { result: { outcome: "ambiguous_effect", reconciliation_required: true,
+              failure_code: "TERMINAL_PUBLICATION_FAILED", reason: details } });
+            return;
+          } catch {
+            // Another writer may have published the terminal before our failed append.
+            if ((await getOperation({ operation_id: operationId })).terminal) return;
+          }
+        }
+      } catch { /* Shared integrity or availability is unconfirmed. */ }
+    }
     explicitDegraded = true;
     runtimeHealth = "degraded";
     reconciliationRequired = true;
-    lastHealthError = String(reason).slice(0, 1024);
+    lastHealthError = details;
   }
 
   function statusFromVerification(verification) {
+    const recoveryAttempts = verification.dangling_operations.length ? recoveryAttemptsFrom(verification) : new Map();
+    const isolated = verification.isolated_operations.slice(0, DEV_JOURNAL_MAX_QUERY_RESULTS).map(incident => {
+      const attempt = recoveryAttempts.get(incident.operation_id);
+      if (incident.code !== "DANGLING_OPERATION") return { ...incident, recovery: { state: "operator_review" } };
+      if (recoveringOperations.has(incident.operation_id) || attempt && verification.active_operations.includes(attempt.id)) return {
+        ...incident, recovery: { state: "recovering", attempt: attempt?.count ?? null },
+      };
+      if (!attempt) return incident;
+      const exhausted = attempt.count >= recoveryAttemptLimit;
+      return { ...incident, recovery: { state: exhausted ? "operator_review" : "scheduled", attempt: attempt.count,
+        retry_after_ms: exhausted ? null : attempt.due, last_error_code: attempt.code ?? null } };
+    });
     return {
       schema_version: DEV_JOURNAL_SCHEMA_VERSION,
       health: runtimeHealth,
       chain_verified: runtimeHealth !== "corrupt",
+      writes_available: !explicitDegraded && runtimeHealth !== "corrupt",
       latest_sequence: verification.head.latest_sequence,
       latest_event_id: verification.head.latest_event_id,
       latest_event_hash: verification.head.latest_event_hash,
@@ -2008,6 +2427,10 @@ export function createDevOperationJournalService({
       dangling_operations: verification.dangling_operations.slice(0, DEV_JOURNAL_MAX_QUERY_RESULTS),
       active_operation_count: verification.active_operations.length,
       active_operations: verification.active_operations.slice(0, DEV_JOURNAL_MAX_QUERY_RESULTS),
+      ambiguous_terminal_count: verification.ambiguous_terminal_count,
+      ambiguous_terminal_operations: verification.ambiguous_terminal_operations,
+      isolated_operation_count: verification.isolated_operations.length,
+      isolated_operations: isolated,
       reconciliation_required: reconciliationRequired,
       last_health_error: lastHealthError,
       storage: "server_owned_per_event_files",
@@ -2016,6 +2439,11 @@ export function createDevOperationJournalService({
 
   async function initialize() {
     try {
+      if (backgroundRecovery) {
+        const verification = await verify();
+        scheduleRecovery(verification);
+        return statusFromVerification(verification);
+      }
       return statusFromVerification(await reconcileDangling());
     } catch {
       // Preserve read-only diagnosis and mutation gates on recovery failure.
@@ -2032,6 +2460,7 @@ export function createDevOperationJournalService({
           schema_version: DEV_JOURNAL_SCHEMA_VERSION,
           health: runtimeHealth === "degraded" ? "degraded" : "recovering",
           chain_verified: false,
+          writes_available: false,
           latest_sequence: null,
           latest_event_id: null,
           latest_event_hash: null,
@@ -2039,6 +2468,8 @@ export function createDevOperationJournalService({
           dangling_operations: [],
           active_operation_count: null,
           active_operations: [],
+          ambiguous_terminal_count: null,
+          ambiguous_terminal_operations: [],
           reconciliation_required: reconciliationRequired,
           last_health_error: `${error.code}: ${error.message}`,
           storage: "server_owned_per_event_files",
@@ -2048,6 +2479,7 @@ export function createDevOperationJournalService({
         schema_version: DEV_JOURNAL_SCHEMA_VERSION,
         health: "corrupt",
         chain_verified: false,
+        writes_available: false,
         latest_sequence: null,
         latest_event_id: null,
         latest_event_hash: null,
@@ -2055,6 +2487,8 @@ export function createDevOperationJournalService({
         dangling_operations: [],
         active_operation_count: null,
         active_operations: [],
+        ambiguous_terminal_count: null,
+        ambiguous_terminal_operations: [],
         reconciliation_required: true,
         last_health_error: lastHealthError,
         storage: "server_owned_per_event_files",
@@ -2123,20 +2557,23 @@ function verifiedMcpTestResult(events,started,terminal) {
     const observedTerminal = resolution ?? terminal;
     const ambiguous = !resolution && (terminal?.result?.outcome === "ambiguous_effect" || terminal?.result?.reconciliation_required === true || isUnprovenPowerShellRecovery(terminal));
     const noEffect = ["failed_no_effect", "no_effect_observed"].includes(observedTerminal?.result?.outcome);
-    const intended = terminal?.stage === "operation_completed"
-      || ["intended_effect_observed", "failed_intended_effect_observed"].includes(observedTerminal?.result?.outcome);
-    const state = ambiguous ? "recovery_required" : noEffect ? "no_effect" : intended ? "completed"
+    const observedFailedRefresh = resolution?.result?.observed_effect === reviewedPiWorkerRefreshResult.observed_effect;
+    const intended = !observedFailedRefresh && (terminal?.stage === "operation_completed"
+      || ["intended_effect_observed", "failed_intended_effect_observed"].includes(observedTerminal?.result?.outcome));
+    const state = ambiguous ? "recovery_required" : observedFailedRefresh ? "failed_observed" : noEffect ? "no_effect" : intended ? "completed"
       : terminal ? "recovery_required" : verification.active_operations.includes(started.operation_id) ? "active" : "dangling";
-    const childTestResult = state === "completed" && !resolution ? verifiedMcpTestResult(verification.events,started,terminal) : null;
-    const originalResult = childTestResult ? {...observedTerminal.result,...childTestResult} : observedTerminal?.result ?? null;
+    const childResult = resolution ? null : state === "completed" ? verifiedMcpTestResult(verification.events, started, terminal)
+      : state === "no_effect" ? verifiedAppContainerFailureResult(verification.events, started, terminal) : null;
+    const originalResult = childResult ? {...observedTerminal.result,...childResult} : observedTerminal?.result ?? null;
     return {
       operation_id: started.operation_id, operation_type: started.operation_type, tool_name: started.tool_name,
       workstream_id: started.workstream_id, workspace_id: started.workspace_id,
       reconciliation_key: started.reconciliation_key ?? null,
       request_fingerprint_sha256: started.request_fingerprint_sha256 ?? null,
       terminal: Boolean(terminal), outcome: terminal?.stage ?? "dangling",
-      reconciliation_state: state, recovered: terminal?.stage === "operation_recovered",
-      safe_to_reinitiate: noEffect && !ambiguous, reinitiate_requires_new_key: noEffect && !ambiguous,
+      reconciliation_state: resolution?.tool_name === TRPG_RESUME_TOOL ? "partial_effect_observed"
+        : resolution?.tool_name === restartResolutionTool ? "failed_observed" : state, recovered: terminal?.stage === "operation_recovered",
+      safe_to_reinitiate: resolution?.tool_name !== restartResolutionTool && noEffect && !ambiguous, reinitiate_requires_new_key: resolution?.tool_name !== restartResolutionTool && noEffect && !ambiguous,
       automatic_replay_allowed: false, original_result: originalResult,
       resolution_event_id: resolution?.journal_event_id ?? null, events,
     };
@@ -2154,7 +2591,8 @@ function verifiedMcpTestResult(events,started,terminal) {
       try {
         const scope = typeof context.resolve_workspace_scope === "function" ? await context.resolve_workspace_scope() : {};
         admission = await begin({ operation_type: "mcp_mutation", tool_name: context.tool_name,
-          workspace_id: scope.workspace_id, workstream_id: scope.workstream_id });
+          workspace_id: scope.workspace_id, workstream_id: scope.workstream_id,
+          targets: context.admission_details?.targets, result: context.admission_details?.result });
       } catch (error) {
         if (error.code !== "RECONCILIATION_EXISTING_OPERATION") throw error;
         return { reconciled: true, operation: await getOperation({ operation_id: error.operation_id }) };
@@ -2163,13 +2601,22 @@ function verifiedMcpTestResult(events,started,terminal) {
       const shell = isPowerShellOperation({tool_name: context.tool_name, operation_type: "mcp_mutation"});
       const childStarts = events => events.filter(event => event.parent_operation_id === admission.operation_id
         && event.stage === "operation_started");
+      const witnessedNoEffectChild = (events, children) => {
+        if (children.length !== 1) return false;
+        const [child] = children;
+        const terminal = events.find(event => event.operation_id === child.operation_id && event.stage === "operation_completed");
+        if (!terminal || terminal.result.command_sha256 !== child.result?.command_sha256) return false;
+        if (child.tool_name === "powershell_admin_run") return scopedAdminChildOutcome(child, terminal) === "failed_no_effect";
+        return completedAppContainerChild(child, terminal);
+      };
       const dispatchEvidenceChanged = new Error("POWERSHELL_DISPATCH_EVIDENCE_CHANGED");
-      const recordFailure = async noEffect => {
+      const recordFailure = async (noEffect, childWitness = false) => {
         try {
           return await fail(admission.operation_id, {
             result: { outcome: noEffect ? "failed_no_effect" : "ambiguous_effect", reconciliation_required: !noEffect },
             beforeAppend: shell && noEffect ? snapshot => {
-              if (childStarts(snapshot.events).length) throw dispatchEvidenceChanged;
+              const children = childStarts(snapshot.events);
+              if (childWitness ? !witnessedNoEffectChild(snapshot.events, children) : children.length !== 0) throw dispatchEvidenceChanged;
             } : undefined,
           });
         } catch (error) {
@@ -2190,31 +2637,36 @@ function verifiedMcpTestResult(events,started,terminal) {
         }
         const verification = await verify();
         if (shell) {
-          await recordFailure(isPowerShellPreDispatchFailure(error, admission) && !childStarts(verification.events).length);
+          await recordFailure((isPowerShellPreDispatchFailure(error, admission) || isJournalIsolationFailure(error))
+            && !childStarts(verification.events).length);
           throw error;
         }
         const beforeChild = ["dev_create_file", "dev_apply_patch"].includes(context.tool_name) && !verification.events.some(event =>
           event.parent_operation_id === admission.operation_id && event.stage === "operation_started");
         const registryPrewrite = isWorkstreamPrewriteFailure(error, {tool_name: context.tool_name, operation_id: admission.operation_id})
           && !verification.events.some(event => event.parent_operation_id === admission.operation_id && event.stage === "operation_started");
-        const noEffect = beforeChild || registryPrewrite || !!barrier;
+        const noEffect = beforeChild || registryPrewrite || !!barrier
+          || (isJournalIsolationFailure(error) && !childStarts(verification.events).length);
         await recordFailure(noEffect);
         throw error;
       }
       let payload;
       try { payload = JSON.parse(value?.content?.[0]?.text ?? "{}"); } catch { payload = {}; }
       const completedCommandObservation=shell
-        && payload?.execution_ok===true&&payload?.timed_out===false&&Number.isSafeInteger(payload?.exit_code);
+        && payload?.execution_ok===true&&payload?.timed_out===false&&Number.isSafeInteger(payload?.exit_code)
+        && (payload.isolation_mode !== "appcontainer" || payload.ok === true);
       if (value?.isError === true || (!completedCommandObservation && (payload?.ok === false || payload?.execution_ok === false))) {
         const verification = await verify();
         const children = childStarts(verification.events);
-        const noEffect = shell ? children.length === 0 && isPowerShellPreDispatchFailure(value, admission)
+        const childWitness = shell && witnessedNoEffectChild(verification.events, children);
+        const isolationRejected = children.length === 0 && isJournalIsolationFailure(value);
+        const noEffect = isolationRejected || (shell ? childWitness || children.length === 0 && isPowerShellPreDispatchFailure(value, admission)
           : (children.length === 0 && ["dev_create_file", "dev_apply_patch"].includes(context.tool_name))
           || (children.length === 0 && isWorkstreamPrewriteFailure(value, {tool_name: context.tool_name, operation_id: admission.operation_id}))
           || children.length > 0 && children.every((child) => verification.events.some((event) =>
           event.operation_id === child.operation_id && terminalStageSet.has(event.stage)
-          && ["failed_no_effect", "no_effect_observed"].includes(event.result?.outcome)));
-        await recordFailure(noEffect);
+          && ["failed_no_effect", "no_effect_observed"].includes(event.result?.outcome))));
+        await recordFailure(noEffect, childWitness);
       } else {
         const verification = await verify();
         const children = verification.events.filter((event) => event.parent_operation_id === admission.operation_id
@@ -2432,6 +2884,7 @@ function verifiedMcpTestResult(events,started,terminal) {
     resolveWorkspaceIsolationMutation,
     resolvePowershellEffectMutation,
     inspectPowershellEffectMutation,
+    reconcileTrpgResume,
     markDegraded,
     getOperation,
     executeReconciled,
@@ -2447,7 +2900,7 @@ function verifiedMcpTestResult(events,started,terminal) {
   };
 }
 
-const defaultJournal = createDevOperationJournalService();
+const defaultJournal = createDevOperationJournalService({ backgroundRecovery: true });
 export const recoverDevExecutionPublication = options => defaultJournal.recoverExecutionPublication(options);
 export const readDevProductionRoutes = () => defaultJournal.readProductionRoutes();
 export const appendDevProductionRoute = (record, options) => defaultJournal.appendProductionRoute(record, options);
@@ -2613,7 +3066,7 @@ export const failDevJournalOperation = (operationId, input) => defaultJournal.fa
 export const recoverDevJournalOperation = (operationId, input) => defaultJournal.recover(operationId, input);
 export const verifyDevJournal = () => defaultJournal.verify();
 export const assertDevJournalMutationAllowed = () => defaultJournal.assertMutationAllowed();
-export const markDevJournalDegraded = (reason) => defaultJournal.markDegraded(reason);
+export const markDevJournalDegraded = (reason, operationId) => defaultJournal.markDegraded(reason, operationId);
 
 async function captureDevArtifactStateWithinRoot(repositoryRoot, realRepositoryRoot, relativePath) {
   const target = path.resolve(repositoryRoot, relativePath);

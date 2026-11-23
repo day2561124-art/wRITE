@@ -30,13 +30,13 @@ test('head change after pure validation is caught up before publication without 
  try{const p=await createPiReliableExecutionStore({journal:f.journal}).admit(intent());assert.equal(p.revision,1);}finally{fs.promises.open=original;syncBuiltinESMExports();}
  assert(injected);const v=await f.journal.verify();assert.equal(v.events.length,6);assert.equal((await f.journal.status()).health,'healthy');
 });
-test('new degraded history during the head race rejects projection on the next pass',async t=>{
+test('a new isolated incident during the head race leaves unrelated projections writable',async t=>{
  const f=await scope(t);const b=createDevOperationJournalService({storageRoot:f.root});
  const seed=await b.begin({operation_type:'private_seed',tool_name:'private_test'});await b.complete(seed.operation_id);
  const original=fs.promises.open;let injected=false,inside=false;
  fs.promises.open=async function(file,...args){if(!inside&&!injected&&String(file)===path.join(f.root,'append.lock')&&args[0]==='wx'){injected=true;inside=true;try{const x=await b.begin({operation_type:'private_ambiguous',tool_name:'private_test'});await b.fail(x.operation_id,{result:{outcome:'ambiguous_effect',reconciliation_required:true}});}finally{inside=false;}}return original.call(this,file,...args);};syncBuiltinESMExports();
- try{await assert.rejects(createPiReliableExecutionStore({journal:f.journal}).admit(intent()),e=>e.code==='JOURNAL_DEGRADED');}finally{fs.promises.open=original;syncBuiltinESMExports();}
- assert(injected);const v=await f.journal.verify();assert.equal(v.events.length,4);assert.equal(v.events.some(e=>e.execution_projection),false);
+ try{const admitted=await createPiReliableExecutionStore({journal:f.journal}).admit(intent());assert.equal(admitted.revision,1);}finally{fs.promises.open=original;syncBuiltinESMExports();}
+ assert(injected);const v=await f.journal.verify();assert.equal(v.events.length,6);assert.equal(v.events.filter(e=>e.execution_projection).length,1);
 });
 test('rejected candidate cannot publish and preserves locked Admission order',async t=>{
  const f=await scope(t);let admissions=0;
