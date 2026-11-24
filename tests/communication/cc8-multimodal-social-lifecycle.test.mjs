@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
-import { rm } from "node:fs/promises";
+import { rm, readFile } from "node:fs/promises";
 import path from "node:path";
 import { projectRoot } from "../../server/src/project-paths.mjs";
 import { createWorldSimulationCharacterRuntimeManager, runWorldSimulationTurn } from "../../server/src/world-simulation-loop-service.mjs";
 import { beginWorldSimulationSession } from "../../server/src/world-simulation-session-service.mjs";
-import { getWorldSimulationHistory, getWorldSimulationState } from "../../server/src/world-simulation-state-service.mjs";
+import { getWorldSimulationHistory, getWorldSimulationState, worldSimulationStatePaths } from "../../server/src/world-simulation-state-service.mjs";
+import { createWorldSimulationResolutionController } from "../../server/src/world-simulation-resolution-controller-service.mjs";
 
 const statement = "男孩已離開房子";
 const spoken = "男孩離開了房子。";
-async function runScenario({ label, bFacing, bHasCue }) {
+async function runScenario({ label, bFacing, bHasCue, offscreen = false }) {
 const fixtureRoot = path.join(projectRoot, "tests", ".tmp",
   `cc8p-${label}-${process.pid}-${Date.now()}`);
 const options = { fixtureRoot };
@@ -105,9 +106,39 @@ try {
     }),
   });
   const sid = session.world_simulation_session_id;
-  const first = await runWorldSimulationTurn({
-    world_simulation_session_id: sid, event_id: "speak",
-  }, { ...options, characterRuntimeManager: runtimeManager,
+  const controller = offscreen ? createWorldSimulationResolutionController(sid, options) : null;
+  const pin = snapshot => ({
+    expected_revision: snapshot.revision, expected_state_hash: snapshot.state_hash,
+  });
+  const paths = worldSimulationStatePaths(sid, options);
+  const durable = () => Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
+  if (controller) {
+    const initial = await getWorldSimulationState(sid, options);
+    const bytes = await durable();
+    const selected = await controller.switchResolution({ ...pin(initial), mode: "offscreen" });
+    assert.equal(selected.mode, "offscreen");
+    assert.equal(selected.brain_invoked, false);
+    assert.equal(selected.world_mutation_performed, false);
+    assert.deepEqual(await durable(), bytes);
+  }
+  const runStep = async (event_id, turnOptions) => {
+    if (!controller) return runWorldSimulationTurn({
+      world_simulation_session_id: sid, event_id,
+    }, turnOptions);
+    const snapshot = await getWorldSimulationState(sid, options);
+    assert.equal(snapshot.state.event_queue[0].event_id, event_id);
+    const result = await controller.runWorldStep({ ...pin(snapshot), max_turns: 1 }, turnOptions);
+    if (controller.getMode() === "offscreen") {
+      assert.equal(result.execution_path, "bounded_offscreen_world_batch");
+      assert.equal(result.result.committed_turn_count, 1);
+      assert.equal(result.result.state_reconciliation_required, false);
+      assert.equal(result.result.automatic_replay_allowed, false);
+      return { committed: true };
+    }
+    assert.equal(result.execution_path, "foreground_world_turn");
+    return result.result;
+  };
+  const first = await runStep("speak", { ...options, characterRuntimeManager: runtimeManager,
     characterBrain: async (packet) => {
       if (packet.character !== "A") return "reject_all";
       const candidate = packet.candidate_action_intents.find(
@@ -126,9 +157,7 @@ try {
 
   const cueAccess = new Map();
   const saw = new Map();
-  const second = await runWorldSimulationTurn({
-    world_simulation_session_id: sid, event_id: "hear",
-  }, {
+  const second = await runStep("hear", {
     ...options, characterRuntimeManager: runtimeManager,
     characterCommunicationListenerInterpretationResolver: async (view) => {
       if (view.observer === "D") {
@@ -242,10 +271,29 @@ try {
   assert.equal(stateAtT1.memories.D.filter(
     (item) => item.memory_type === "episodic_social_experience").length, 0);
 
+  // Preserve actual source-specific social evidence across a host resolution
+  // change. The pending later turn stays pending; promotion is not perception.
+  const beforePromotion = await getWorldSimulationState(sid, options);
+  const beforePromotionHistory = await getWorldSimulationHistory(sid, options);
+  const bytes = await durable();
+  if (controller) {
+    assert.equal(beforePromotion.state.event_queue[0].event_id, "later");
+    assert.equal(controller.getMode(), "offscreen");
+    const promoted = await controller.switchResolution({
+      ...pin(beforePromotion), mode: "foreground",
+    });
+    assert.equal(promoted.previous_mode, "offscreen");
+    assert.equal(promoted.mode, "foreground");
+    assert.equal(promoted.reached_simulation_time, beforePromotion.state.simulation_time);
+    assert.equal(promoted.brain_invoked, false);
+    assert.equal(promoted.world_mutation_performed, false);
+    assert.deepEqual(await durable(), bytes);
+    assert.deepEqual(await getWorldSimulationHistory(sid, options), beforePromotionHistory);
+    assert.deepEqual(await getWorldSimulationState(sid, options), beforePromotion);
+  }
+
   const decisions = new Map();
-  const third = await runWorldSimulationTurn({
-    world_simulation_session_id: sid, event_id: "later",
-  }, { ...options, characterRuntimeManager: runtimeManager,
+  const third = await runStep("later", { ...options, characterRuntimeManager: runtimeManager,
     characterBrain: async (packet) => {
       const relationship = packet.cognition.relationship_cognition.A;
       if (packet.character === "D") {
@@ -275,7 +323,42 @@ try {
   assert.equal(final.characters.D.relationships.A, "熟人");
   assert.equal(final.characters.B.relationships.A.social_evidence.length, 1);
   assert.equal(final.characters.C.relationships.A.social_evidence.length, 1);
-  return Object.fromEntries(decisions);
+  assert.deepEqual(history.turns.map(turn => turn.event.event_id), ["speak", "hear", "later"]);
+  const finalSnapshot = await getWorldSimulationState(sid, options);
+  for (let index = 0; index < history.turns.length; index++) {
+    const turn = history.turns[index];
+    assert.equal(turn.previous_state_hash, index === 0
+      ? session.world_state_hash : history.turns[index - 1].next_state_hash);
+  }
+  assert.equal(history.turns.at(-1).next_state_hash, finalSnapshot.state_hash);
+  // Compare semantic outcomes, not session-specific opaque provenance IDs.
+  // Per-session immutable lineage is independently checked above.
+  const socialProjection = (state, name) => {
+    const relationship = state.characters[name].relationships.A;
+    return {
+      prior_label: typeof relationship === "string" ? relationship : null,
+      appraisals: (relationship?.social_evidence ?? []).map(item => item.appraisal_kind),
+      memories: (state.memories[name] ?? [])
+        .filter(item => item.memory_type === "episodic_social_experience")
+        .map(item => ({
+          appraisal_kind: item.content.appraisal_kind,
+          subjective: item.subjective_memory_not_world_truth,
+          world_truth_claimed: item.content.world_truth_claimed,
+          target_identity_verified: item.content.target_identity_verified,
+        })),
+      goal: state.characters[name].current_goal,
+    };
+  };
+  return {
+    decisions: Object.fromEntries(decisions),
+    time_before_promotion: beforePromotion.state.simulation_time,
+    final_time: final.simulation_time,
+    source_observers: Object.fromEntries(cueAccess),
+    before: Object.fromEntries(["B", "C", "D"].map(name => [name, socialProjection(stateAtT1, name)])),
+    after: Object.fromEntries(["B", "C", "D"].map(name => [name, socialProjection(final, name)])),
+    body: Object.fromEntries(["A", "B", "C", "D"].map(name => [name, final.characters[name].physical_state])),
+    queue_empty: final.event_queue.length === 0,
+  };
 } finally {
   await rm(fixtureRoot, { recursive: true, force: true });
 }
@@ -284,7 +367,21 @@ try {
 // other observers and subjective resolver rules remain identical.
 const visible = await runScenario({ label: "visible", bFacing: 180, bHasCue: true });
 const turnedAway = await runScenario({ label: "turned-away", bFacing: 0, bHasCue: false });
-assert.notEqual(visible.B, turnedAway.B);
-assert.equal(visible.C, turnedAway.C);
-assert.equal(visible.D, turnedAway.D);
+assert.notEqual(visible.decisions.B, turnedAway.decisions.B);
+assert.equal(visible.decisions.C, turnedAway.decisions.C);
+assert.equal(visible.decisions.D, turnedAway.decisions.D);
 console.log("CC-8P multimodal subjective social lifecycle tests passed.");
+
+// C6-F integration: run the existing CC8 source-aware fixture under a real
+// offscreen policy for the speech and interpretation turns, then promote
+// before the later independent Brain decision. The same horizon and admitted
+// evidence must produce the same controlled decisions as ordinary execution.
+const offscreenVisible = await runScenario({
+  label: "c6-offscreen-visible", bFacing: 180, bHasCue: true, offscreen: true,
+});
+const offscreenTurnedAway = await runScenario({
+  label: "c6-offscreen-turned-away", bFacing: 0, bHasCue: false, offscreen: true,
+});
+assert.deepEqual(offscreenVisible, visible);
+assert.deepEqual(offscreenTurnedAway, turnedAway);
+console.log("CB-C6-F social resolution reentry: actual observer-specific memory and relationship evidence, same horizons, read-only promotion and later foreground choice PASS.");
