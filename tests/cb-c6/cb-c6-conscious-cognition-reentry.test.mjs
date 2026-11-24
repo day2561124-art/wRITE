@@ -215,8 +215,8 @@ try {
   assert.equal(wakeTransitions.length, 1, "waking requires an actual World/Body commit");
   assert.equal(wakeTransitions[0].to.condition, "awake");
   assert.equal(committed.state.characters.aria.physical_state.sleep_arousal.condition, "awake");
-  assert.deepEqual(committed.state.memories, old.state.memories,
-    "an actual wake alone cannot invent a subjective experience or autobiography");
+  assert.deepEqual(committed.state.memories?.aria, old.state.memories?.aria,
+    "an actual wake alone cannot invent aria's subjective autobiography; real keeper experience remains legal");
 
   const resumed = await scheduleWorldSimulationAutonomousCognitionOpportunities({
     ...params, simulation_time: committed.state.simulation_time,
