@@ -263,6 +263,7 @@ console.log("CB-C6-D Brain reentry: committed sleep defers, true wake resumes on
 // The paired offscreen path executes queued events at canonical fidelity;
 // this is NOT evidence for a lower-fidelity independent thought generator.
 import { runWorldSimulationOffscreenEventBatch } from "../../server/src/world-simulation-offscreen-event-batch-service.mjs";
+import { createWorldSimulationResolutionController } from "../../server/src/world-simulation-resolution-controller-service.mjs";
 import { hashAgentRunValue } from "../../server/src/agent-run-service.mjs";
 import { buildWorldSimulationSubjectiveClaims } from "../../server/src/world-simulation-subjective-claim-projection-service.mjs";
 import { resolveWorldSimulationSubjectiveBeliefs } from "../../server/src/world-simulation-subjective-belief-resolution-service.mjs";
@@ -341,18 +342,45 @@ try {
     const params = { world_simulation_session_id: sid,
       runtime_context_by_character: { aria: { idle: true } } };
     const before = await getWorldSimulationState(sid, opts);
+    const controller = createWorldSimulationResolutionController(sid, opts);
+    const pin = snapshot => ({
+      expected_revision: snapshot.revision, expected_state_hash: snapshot.state_hash,
+    });
+    const initialHistory = await getWorldSimulationHistory(sid, opts);
+    assert.equal(controller.getMode(), "foreground");
+    if (route === "offscreen") {
+      await assert.rejects(controller.switchResolution({
+        ...pin(before), expected_state_hash: "wrong", mode: "offscreen",
+      }), { code: "C6_RESOLUTION_FRONTIER_CHANGED" });
+      assert.equal(controller.getMode(), "foreground");
+      const switched = await controller.switchResolution({ ...pin(before), mode: "offscreen" });
+      assert.equal(switched.previous_mode, "foreground");
+      assert.equal(switched.mode, "offscreen");
+      assert.equal(switched.reached_simulation_time, before.state.simulation_time);
+      assert.equal(switched.world_mutation_performed, false);
+      assert.equal(switched.brain_invoked, false);
+      assert.deepEqual(await getWorldSimulationState(sid, opts), before);
+      assert.deepEqual(await getWorldSimulationHistory(sid, opts), initialHistory);
+    }
     const dispatchForRoute = async (input, options) => {
-      if (route === "foreground") {
-        return dispatchWorldSimulationAutonomousCognitionOpportunities(input, options);
-      }
       const frontier = await getWorldSimulationState(sid, opts);
-      const result = await runWorldSimulationOffscreenCognitionStep({
-        ...input, expected_revision: frontier.revision,
-        expected_state_hash: frontier.state_hash, max_opportunities: 1,
+      const currentMode = controller.getMode();
+      const output = await controller.runCognitionStep({
+        runtime_context_by_character: input.runtime_context_by_character,
+        consumed_opportunity_ids: input.consumed_opportunity_ids,
+        ...pin(frontier),
+        ...(currentMode === "offscreen" ? { max_opportunities: 1 } : {}),
       }, options);
-      assert.equal(result.offscreen_cognition_step, true);
-      assert.equal(result.world_time_advanced_by_cognition, false);
-      assert.equal(result.offscreen_budget_exhausted, false);
+      assert.equal(output.mode, currentMode);
+      const result = output.result;
+      if (currentMode === "offscreen") {
+        assert.equal(output.execution_path, "bounded_offscreen_cognition");
+        assert.equal(result.offscreen_cognition_step, true);
+        assert.equal(result.world_time_advanced_by_cognition, false);
+        assert.equal(result.offscreen_budget_exhausted, false);
+      } else {
+        assert.equal(output.execution_path, "foreground_cognition");
+      }
       return result;
     };
     if (route === "offscreen") {
@@ -387,18 +415,18 @@ try {
         return { action_id: "cb-c6d-keeper-wait" };
       },
     };
+    const worldStep = await controller.runWorldStep({
+      ...pin(before), max_turns: 1,
+      target_horizon: new Date(Date.parse(now) + 500).toISOString(),
+    }, turnOpts);
     if (route === "foreground") {
-      assert.equal((await runWorldSimulationTurn({
-        world_simulation_session_id: sid,
-      }, turnOpts)).committed, true);
+      assert.equal(worldStep.execution_path, "foreground_world_turn");
+      assert.equal(worldStep.result.committed, true);
     } else {
-      const batch = await runWorldSimulationOffscreenEventBatch({
-        world_simulation_session_id: sid, max_turns: 1,
-        target_horizon: new Date(Date.parse(now) + 500).toISOString(),
-      }, turnOpts);
-      assert.equal(batch.committed_turn_count, 1);
-      assert.equal(batch.target_horizon_claimed, true);
-      assert.equal(batch.state_reconciliation_required, false);
+      assert.equal(worldStep.execution_path, "bounded_offscreen_world_batch");
+      assert.equal(worldStep.result.committed_turn_count, 1);
+      assert.equal(worldStep.result.target_horizon_claimed, true);
+      assert.equal(worldStep.result.state_reconciliation_required, false);
     }
     const wake = await getWorldSimulationState(sid, opts);
     assert.equal(wake.revision, 1);
@@ -530,8 +558,19 @@ try {
     }
     const paths = worldSimulationStatePaths(sid, opts);
     const bytes = await Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
-    // Recreate the runtime manager, no caller-supplied consumed IDs.
-    // The exact committed goal and plan receipts must survive reentry.
+    // Promote the same session from offscreen to foreground. Neither mode
+    // selection nor read-only reentry may invent autobiographical history.
+    if (route === "offscreen") {
+      const promoted = await controller.switchResolution({ ...pin(end), mode: "foreground" });
+      assert.equal(promoted.previous_mode, "offscreen");
+      assert.equal(promoted.mode, "foreground");
+      assert.equal(promoted.reached_simulation_time, end.state.simulation_time);
+      assert.equal(promoted.world_mutation_performed, false);
+      assert.equal(promoted.brain_invoked, false);
+      assert.deepEqual(await Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]), bytes);
+    }
+    // No caller-supplied consumed IDs. Actual committed goal and plan
+    // receipts must survive the transition back to foreground execution.
     for (const input of [adoption, planParams]) {
       const replay = await dispatchForRoute(input, {
         ...opts, characterBrain: async () => assert.fail("committed cognitive operation cannot replay"),
@@ -560,6 +599,7 @@ try {
 console.log("CB-C6-F paired subjective wake reentry: memory/claim/belief provenance, goal adoption, plan and durable replay PASS.");
 
 console.log("CB-C6 quiet frontier: explicit offscreen cognition, bounded admission, stale frontier rejection and canonical goal/plan replay PASS.");
+console.log("CB-C6 resolution controller: foreground/offscreen execution selection, exact frontier, committed cognition, and read-only promotion PASS.");
 
 const quietRoot = path.join(projectRoot, "tests", ".tmp",
   "cb-c6-quiet-sleep-" + process.pid + "-" + Date.now());

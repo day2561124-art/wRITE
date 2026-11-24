@@ -98,3 +98,10 @@ possible slow process, physics combination, or consumer-specific host loop.
 General World/Body expansion and consumer integration remain separately owned.
 C7 Formal/Native parity and C8 cross-day continuity remain their own gates.
 **C6-F is not sealed.**
+
+
+### Resolution controller candidate — 2026-11-24
+
+PR #87 post-merge main run [45320992205](https://github.com/day2561124-art/wRITE/actions/runs/45320992205) completed all required jobs successfully. The finite gate inventory was merged in PR #88 (`5d45ccb178df86d4e61f6d00b48239bb9c028e65`).
+
+The next candidate introduces `createWorldSimulationResolutionController` as a host-owned, session-bound, explicitly selected execution policy. It starts in foreground, can select offscreen at an exact revision/hash, routes ordinary foreground turns to the existing Native loop and offscreen work to the existing bounded event/physical batch, and routes cognition to the existing foreground dispatcher or quiet-frontier bounded dispatcher. The host can promote back to foreground at the actual committed horizon. Selection alone changes no World/Body/Brain state or history. Mode is intentionally nonpersistent host policy; recreating the controller requires explicit reselection, not a fictional persisted Body condition. Each controller serializes its own operations; it is not a cross-process lock. Existing authoritative commit CAS remains the mutation owner. Host pins are checked at actual Native preparation/cognition scheduling and each canonical queued batch step. The candidate does not autonomously select which actors are offscreen or implement all process-specific fidelity policies. Paired goal/plan lifecycle and read-only promotion tests are pending CI; an observer-specific social reentry and subsequent admitted foreground decision still require positive acceptance. Formal C6-F seal remains open.

@@ -5047,6 +5047,14 @@ async function dispatchWorldSimulationAutonomousCognitionInternal(
 ) {
   const scheduled =
     await scheduleWorldSimulationAutonomousCognitionOpportunities(input, options);
+  const expectedFrontier = options.worldSimulationExpectedFrontier;
+  if (expectedFrontier !== undefined
+      && (expectedFrontier?.revision !== scheduled.state_revision
+        || expectedFrontier?.state_hash !== scheduled.world_state_hash)) {
+    const error = new Error("Host cognition execution lost its exact committed World frontier.");
+    error.code = "C6_RESOLUTION_FRONTIER_CHANGED";
+    throw error;
+  }
   if (offscreenFrontier && (scheduled.state_revision !== offscreenFrontier.revision
       || scheduled.world_state_hash !== offscreenFrontier.state_hash)) {
     const error = new Error("Offscreen cognition lost its admitted World frontier.");
@@ -16670,6 +16678,14 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
         historicalDependency, options);
   }
   const prepared = await prepareWorldSimulationTurn(input, options);
+  const expectedFrontier = options.worldSimulationExpectedFrontier;
+  if (expectedFrontier !== undefined
+      && (expectedFrontier?.revision !== prepared.state_revision
+        || expectedFrontier?.state_hash !== prepared.world_state_hash)) {
+    const error = new Error("Host World execution lost its exact committed frontier.");
+    error.code = "C6_RESOLUTION_FRONTIER_CHANGED";
+    throw error;
+  }
   // The Brain's goal handles must come from precisely the committed World
   // revision used by the prepared action turn. A concurrent change fails
   // before any Character Brain receives an obsolete decision view.
