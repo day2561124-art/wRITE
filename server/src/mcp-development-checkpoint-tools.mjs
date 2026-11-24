@@ -711,26 +711,29 @@ export function createDevCheckpointService({
   }
 
   async function listBlobRecordsUnlocked({ verifyDigests = false } = {}) {
-    const records = [];
+    const candidates = [];
     const prefixes = await readdir(paths.blobs, { withFileTypes: true });
     for (const prefix of prefixes) {
       if (!prefix.isDirectory() || prefix.isSymbolicLink() || !/^[a-f0-9]{2}$/u.test(prefix.name)) throw checkpointError("CHECKPOINT_STORE_CORRUPT", `Unexpected checkpoint blob prefix: ${prefix.name}.`);
       const entries = await readdir(path.join(paths.blobs, prefix.name), { withFileTypes: true });
       for (const entry of entries) {
         if (!entry.isFile() || entry.isSymbolicLink() || !sha256Pattern.test(entry.name) || entry.name.slice(0, 2) !== prefix.name) throw checkpointError("CHECKPOINT_STORE_CORRUPT", `Unexpected checkpoint blob entry: ${prefix.name}/${entry.name}.`);
-        const blobFilePath = path.join(paths.blobs, prefix.name, entry.name);
-        const info = await lstat(blobFilePath);
-        if (info.isSymbolicLink() || !info.isFile()) throw checkpointError("CHECKPOINT_STORE_CORRUPT", `Unexpected checkpoint blob type: ${entry.name}.`);
-        if (verifyDigests) {
-          const content = await readFile(blobFilePath);
-          if (content.length !== info.size || sha256Buffer(content) !== entry.name) {
-            throw checkpointError("CHECKPOINT_STORE_CORRUPT", `Checkpoint blob filename/digest mismatch: ${entry.name}.`);
-          }
-        }
-        records.push({ sha256: entry.name, bytes: info.size, path: blobFilePath });
+        candidates.push({ sha256: entry.name, path: path.join(paths.blobs, prefix.name, entry.name) });
       }
     }
-    return records;
+    // Bounded read-only fanout; mapCheckpointReads drains all in-flight reads
+    // before the maintenance lock can be released, including on corruption.
+    return mapCheckpointReads(candidates, async (candidate) => {
+      const info = await lstat(candidate.path);
+      if (info.isSymbolicLink() || !info.isFile()) throw checkpointError("CHECKPOINT_STORE_CORRUPT", `Unexpected checkpoint blob type: ${candidate.sha256}.`);
+      if (verifyDigests) {
+        const content = await readFile(candidate.path);
+        if (content.length !== info.size || sha256Buffer(content) !== candidate.sha256) {
+          throw checkpointError("CHECKPOINT_STORE_CORRUPT", `Checkpoint blob filename/digest mismatch: ${candidate.sha256}.`);
+        }
+      }
+      return { ...candidate, bytes: info.size };
+    });
   }
 
   async function validateCheckpointManifestsUnlocked(registry, identityManifests = new Map()) {
