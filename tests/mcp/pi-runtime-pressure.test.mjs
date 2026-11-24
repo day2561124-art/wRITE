@@ -217,3 +217,32 @@ test('full status detects missing active blobs and corrupt retired-only blobs', 
   await writeFile(activeFile,active);
   assert.equal((await f.service.status()).health,'healthy');
 });
+
+
+test('production-sized shared health observation reads identities once and never caches corruption', async t=>{
+  const f=await fixture(t,314);
+  const identityDir=path.join(f.storageRoot,'manifests','checkpoints');
+  const original=fs.promises.readFile;
+  let identityReads=0;
+  fs.promises.readFile=async function(file,...args) {
+    if(typeof file==='string'&&path.dirname(file)===identityDir)identityReads++;
+    return original.call(this,file,...args);
+  };
+  syncBuiltinESMExports();
+  try {
+    const observation=await f.service.inspectStatusWithRecoveryOwners();
+    assert.equal(observation.status.health,'healthy');
+    assert.equal(observation.status.checkpoint_count,314);
+    assert.equal(observation.activeRecoveryOwners.size,0);
+    assert.equal(identityReads,314);
+    assert.equal('activeRecoveryOwners' in observation.status,false);
+    const name=(await readdir(identityDir))[0];
+    const file=path.join(identityDir,name), saved=await readFile(file);
+    await writeFile(file,'{}\\n'.replace('\\n','\n'));
+    const failed=await f.service.inspectStatusWithRecoveryOwners();
+    assert.equal(failed.status.health,'corrupt');
+    assert.equal(failed.activeRecoveryOwners,null);
+    await writeFile(file,saved);
+    assert.equal((await f.service.status()).health,'healthy');
+  } finally {fs.promises.readFile=original;syncBuiltinESMExports();}
+});
