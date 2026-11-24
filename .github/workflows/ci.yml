@@ -110,6 +110,42 @@ jobs:
       - name: Verify real Pi Codemode bridge
         run: node --test tests/mcp/mcp-pi-codemode-bridge.test.mjs
 
+  pi-manual-release-prep:
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Refuse installation into a Git working tree
+        shell: pwsh
+        run: |
+          $attempt = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', '.\scripts\prepare-pi-manual-release.ps1') -Wait -PassThru -NoNewWindow
+          if ($attempt.ExitCode -eq 0) { throw 'Manual release preparation accepted a live Git checkout.' }
+      - name: Prepare and verify a fresh manual release candidate
+        shell: pwsh
+        run: |
+          $candidate = Join-Path $env:RUNNER_TEMP 'pi-manual-release-candidate'
+          $runtime = Join-Path $candidate 'scripts\pi-runtime'
+          New-Item -ItemType Directory -Path $runtime -Force | Out-Null
+          foreach ($file in @('package.json', 'package-lock.json')) {
+            Copy-Item -LiteralPath $file -Destination (Join-Path $candidate $file)
+          }
+          Copy-Item -LiteralPath 'scripts\prepare-pi-manual-release.ps1' -Destination (Join-Path $candidate 'scripts')
+          foreach ($file in @('package.json', 'package-lock.json', 'runner.mjs', 'release-preflight.mjs')) {
+            Copy-Item -LiteralPath (Join-Path 'scripts\pi-runtime' $file) -Destination (Join-Path $runtime $file)
+          }
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $candidate 'scripts\prepare-pi-manual-release.ps1')
+          if ($LASTEXITCODE -ne 0) { throw 'Manual release candidate failed installation or real Pi preflight.' }
+          $preparedScript = Join-Path $candidate 'scripts\prepare-pi-manual-release.ps1'
+          $attempt = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $preparedScript + '"')) -Wait -PassThru -NoNewWindow
+          if ($attempt.ExitCode -eq 0) { throw 'Already installed release candidate was not rejected.' }
+
   main-regression:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
