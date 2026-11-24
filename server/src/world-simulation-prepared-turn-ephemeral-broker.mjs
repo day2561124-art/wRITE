@@ -120,6 +120,35 @@ function requiredRevision(value) {
   return value;
 }
 
+// C7: a private replay envelope or raw trusted recovery view must never
+// enter character_input (the broker returns that object verbatim in receipts).
+// This is defense in depth, not proof of model-context isolation. The actual
+// trusted recovery route must still be independently isolated before adoption.
+function assertNoPrivateRetrievalArtifact(characterInput) {
+  const pending = [characterInput];
+  const visited = new WeakSet();
+  while (pending.length > 0) {
+    const value = pending.pop();
+    if (!value || typeof value !== "object" || visited.has(value)) continue;
+    visited.add(value);
+    if (!Array.isArray(value) && (
+      (value.identity?.version === "c7-private-retrieval-replay-v1"
+        && (Object.hasOwn(value, "trusted_stage_input") || Object.hasOwn(value, "response")))
+      || (value.stage === "recovery"
+        && isObject(value.current_frontier)
+        && Object.hasOwn(value.current_frontier, "candidate_memory_records"))
+    )) {
+      fail(
+        "WORLD_SIMULATION_PREPARED_TURN_PRIVATE_RETRIEVAL_EXPOSURE",
+        "Private retrieval artifacts are forbidden in formal character decisions.",
+      );
+    }
+    for (const child of Object.values(value)) {
+      if (child && typeof child === "object") pending.push(child);
+    }
+  }
+}
+
 function publicDecision(record) {
   if (record.lifecycle_status !== "prepared") return null;
   const decision = record.decisions[record.current_decision_index];
@@ -341,6 +370,7 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
           `decision_inputs[${index}] is invalid.`,
         );
       }
+      assertNoPrivateRetrievalArtifact(item.character_input);
       const character = requiredString(
         item.character_input.character,
         `decision_inputs[${index}].character_input.character`,

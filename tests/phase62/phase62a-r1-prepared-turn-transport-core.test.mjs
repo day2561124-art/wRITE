@@ -402,6 +402,52 @@ try {
     world_state_hash: "ipc-state-hash",
   });
   assert.equal(competingReservation.acquired, false);
+  // C7: reject engine-private recovery packets on both the parent broker
+  // and the actual IPC route; never turn a pending search into a public receipt.
+  const privateRecoveryView = {
+    stage: "recovery",
+    current_frontier: { candidate_memory_records: [{ content: unretrievedSecret }] },
+  };
+  const privateRequest = {
+    identity: { version: "c7-private-retrieval-replay-v1", stage: "recovery" },
+    trusted_stage_input: privateRecoveryView,
+  };
+  const privateResponse = {
+    identity: { version: "c7-private-retrieval-replay-v1", stage: "recovery" },
+    response: { recovered_selections: [] },
+  };
+  const rejectedPrivateExposure = (error) =>
+    error?.code === "WORLD_SIMULATION_PREPARED_TURN_PRIVATE_RETRIEVAL_EXPOSURE"
+    && !String(error.message).includes(unretrievedSecret);
+  const attemptPrivateStore = (artifact) => ({
+    prepared_turn_handle: ipcReservation.receipt.prepared_turn_handle,
+    prepared_turn: {
+      world_simulation_session_id: "agent_run_20260825-073100-1234abcd",
+      state_revision: 0,
+      world_state_hash: "ipc-state-hash",
+    },
+    decision_inputs: [{
+      character_input: {
+        character: actor,
+        nested: [artifact],
+        candidate_action_intents: [{ action_id: "wait", intent: "等待" }],
+      },
+    }],
+  });
+  assert.throws(() => ipcBroker.storePrepared({
+    ...attemptPrivateStore(privateRequest),
+    preparer_owner_id: "ipc-owner-step4b1",
+  }), rejectedPrivateExposure);
+  for (const artifact of [privateRequest, privateRecoveryView, privateResponse]) {
+    await assert.rejects(() => ipcClient.storePrepared(attemptPrivateStore(artifact)),
+      rejectedPrivateExposure);
+    const safeReceipt = await ipcClient.getReceipt({
+      prepared_turn_handle: ipcReservation.receipt.prepared_turn_handle,
+    });
+    assert.equal(safeReceipt.lifecycle_status, "preparing");
+    assert.equal(safeReceipt.current_decision, null);
+    assert.equal(JSON.stringify(safeReceipt).includes(unretrievedSecret), false);
+  }
   const ipcStored = await ipcClient.storePrepared({
     prepared_turn_handle: ipcReservation.receipt.prepared_turn_handle,
     prepared_turn: {
