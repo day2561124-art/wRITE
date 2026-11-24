@@ -6574,7 +6574,7 @@ const runtimeComponents = createRuntimeReadiness([
   ["checkpoint", ()=>traceSpan("checkpoint.readiness",initializeDevCheckpointRuntime)],
   ["transaction", ()=>traceSpan("transaction.readiness",initializeDevTransactionRuntime)],
   ["trpg", initializeTRPGGMBridge],
-], publishRuntimeReadiness);
+], publishRuntimeReadiness, { dependencies: { transaction: ["checkpoint"] } });
 
 if(process.argv.includes('--pi-worker')){
  const {runPiDurableWorker}=await import('./pi-durable-worker.mjs');
