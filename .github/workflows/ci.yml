@@ -125,8 +125,8 @@ jobs:
       - name: Refuse installation into a Git working tree
         shell: pwsh
         run: |
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\prepare-pi-manual-release.ps1
-          if ($LASTEXITCODE -eq 0) { throw 'Manual release preparation accepted a live Git checkout.' }
+          $attempt = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', '.\scripts\prepare-pi-manual-release.ps1') -Wait -PassThru -NoNewWindow
+          if ($attempt.ExitCode -eq 0) { throw 'Manual release preparation accepted a live Git checkout.' }
       - name: Prepare and verify a fresh manual release candidate
         shell: pwsh
         run: |
@@ -142,8 +142,9 @@ jobs:
           }
           & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $candidate 'scripts\prepare-pi-manual-release.ps1')
           if ($LASTEXITCODE -ne 0) { throw 'Manual release candidate failed installation or real Pi preflight.' }
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $candidate 'scripts\prepare-pi-manual-release.ps1')
-          if ($LASTEXITCODE -eq 0) { throw 'Already installed release candidate was not rejected.' }
+          $preparedScript = Join-Path $candidate 'scripts\prepare-pi-manual-release.ps1'
+          $attempt = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $preparedScript + '"')) -Wait -PassThru -NoNewWindow
+          if ($attempt.ExitCode -eq 0) { throw 'Already installed release candidate was not rejected.' }
 
   main-regression:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
