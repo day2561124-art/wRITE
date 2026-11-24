@@ -66,8 +66,9 @@ function Assert-FreshCandidate {
 }
 
 Assert-FreshCandidate
-$node = (Get-Command 'node.exe' -CommandType Application -ErrorAction Stop).Source
-$npm = (Get-Command 'npm.cmd' -CommandType Application -ErrorAction Stop).Source
+# Several Node installations may be on PATH. Match PowerShell command precedence.
+$node = (Get-Command 'node.exe' -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+$npm = (Get-Command 'npm.cmd' -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 $versionText = (& $node --version).Trim()
 if ($LASTEXITCODE -ne 0 -or $versionText -notmatch '^v?(\d+)\.(\d+)\.(\d+)$') {
     throw 'Cannot verify the local Node version.'
