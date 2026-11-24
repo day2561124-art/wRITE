@@ -1,8 +1,8 @@
+import { checkpointPrivateWorldRetrievalPreparation } from "../../server/src/world-simulation-private-retrieval-preparation-service.mjs";
 import { getWorldSimulationState } from "../../server/src/world-simulation-state-service.mjs";
 import {
   bindPrivateRetrievalStageResponse,
   replayPrivateRetrievalStages,
-  replayPrivateWorldPreparationStages,
 } from "../../server/src/world-simulation-private-retrieval-replay-service.mjs";
 import assert from "node:assert/strict";
 import {
@@ -1048,7 +1048,9 @@ try {
   };
   const worldTranscript = [];
   const checkpointWorld = (scope = worldScope, transcript = worldTranscript) =>
-    replayPrivateWorldPreparationStages({ scope, transcript, prepare: prepareLoop });
+    checkpointPrivateWorldRetrievalPreparation({ scope, transcript, event_id: eventId }, {
+      fixtureRoot, memoryRetrievalTechnicalStepBudget: 4,
+    });
   for (let round = 0; round < 5; round += 1) {
     const checkpoint = await checkpointWorld();
     assert.equal(checkpoint.status, "pending");
