@@ -133,6 +133,7 @@ async function harness(label, { hooks = {} } = {}) {
   });
   const checkpointApi = {
     status: () => checkpointService.status(),
+    inspectStatusWithRecoveryOwners: () => checkpointService.inspectStatusWithRecoveryOwners(),
     captureRecovery: (input) => checkpointService.captureInternalTransactionRecovery(input),
     load: (checkpointId, options) => checkpointService.loadInternalTransactionCheckpoint(checkpointId, options),
     readBlob: (descriptor) => checkpointService.readInternalBlob(descriptor),
@@ -263,6 +264,30 @@ async function runTests() {
       const plan = JSON.parse(await readFile(path.join(h.transactionRoot, "records", transaction.transaction_id, "plan.json"), "utf8"));
       assert(plan.transitions.some((item) => item.move_role === "source"));
       assert(plan.transitions.some((item) => item.move_role === "destination"));
+
+      // Health inspection shares one full checkpoint scan, rather than scanning
+      // the registry again for each terminal recovery owner.
+      let sharedScans = 0;
+      const inspect = h.checkpointApi.inspectStatusWithRecoveryOwners;
+      h.checkpointApi.inspectStatusWithRecoveryOwners = async () => { sharedScans++; return inspect(); };
+      const listOwner = h.checkpointApi.listRecoveryByOwner;
+      h.checkpointApi.listRecoveryByOwner = async () => { throw new Error("Unexpected redundant owner scan"); };
+      try {
+        const healthy = await h.makeTransactionService().status();
+        assert.equal(healthy.health, "healthy");
+        assert.equal(sharedScans, 1);
+        const orphan = await h.checkpointService.captureInternalTransactionRecovery({ context: await h.contextResolver(), transactionId: transaction.transaction_id });
+        const degraded = await h.makeTransactionService().status();
+        assert.equal(degraded.health, "degraded");
+        assert(degraded.integrity_issues.some(issue => issue.transaction_id === transaction.transaction_id && issue.code === "TRANSACTION_RECOVERY_CHECKPOINT_CLEANUP_PENDING"));
+        assert.equal(sharedScans, 2);
+        await h.checkpointService.retireInternalTransactionCheckpoint(orphan.checkpoint_id);
+        assert.equal((await h.makeTransactionService().status()).health, "healthy");
+        assert.equal(sharedScans, 3);
+      } finally {
+        h.checkpointApi.listRecoveryByOwner = listOwner;
+        h.checkpointApi.inspectStatusWithRecoveryOwners = inspect;
+      }
     } finally { await h.cleanup(); }
   }
 
