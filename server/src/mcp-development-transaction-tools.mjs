@@ -20,6 +20,7 @@ import { promisify } from "node:util";
 import {
   captureDevTransactionRecoveryCheckpoint,
   dev_workspace_checkpoint_status,
+  inspectDevCheckpointStatusWithRecoveryOwners,
   loadDevCheckpointInternal,
   listDevTransactionRecoveryCheckpointsByOwner,
   readDevCheckpointBlobInternal,
@@ -732,6 +733,7 @@ function journalDefaults() {
 function checkpointDefaults() {
   return {
     status: dev_workspace_checkpoint_status,
+    inspectStatusWithRecoveryOwners: inspectDevCheckpointStatusWithRecoveryOwners,
     captureRecovery: captureDevTransactionRecoveryCheckpoint,
     load: loadDevCheckpointInternal,
     readBlob: readDevCheckpointBlobInternal,
@@ -1379,7 +1381,7 @@ export function createDevTransactionService({
     return { total: records.length, returned: Math.min(records.length, limit), truncated: records.length > limit, transactions: records.slice(0, limit) };
   }
 
-  async function inspectRecordHealth(record) {
+  async function inspectRecordHealth(record, { deferRecoveryOwnerScan = false } = {}) {
     const issues = [];
     const addIssue = (severity, code, message, checkpointErrorCode = null) => issues.push({
       severity, code, message: String(message).slice(0, 512),
@@ -1464,14 +1466,16 @@ export function createDevTransactionService({
       }
     }
 
-    try {
-      const ownedRecovery = await checkpoint.listRecoveryByOwner(record.transaction_id);
-      const activeOwnedRecovery = ownedRecovery.filter((entry) => entry.state === "active");
-      if (terminalStateSet.has(record.state) && activeOwnedRecovery.length > 0) {
-        addIssue("degraded", "TRANSACTION_RECOVERY_CHECKPOINT_CLEANUP_PENDING", `Terminal transaction still owns ${activeOwnedRecovery.length} active internal recovery checkpoint(s).`);
+    if (!deferRecoveryOwnerScan) {
+      try {
+        const ownedRecovery = await checkpoint.listRecoveryByOwner(record.transaction_id);
+        const activeOwnedRecovery = ownedRecovery.filter((entry) => entry.state === "active");
+        if (terminalStateSet.has(record.state) && activeOwnedRecovery.length > 0) {
+          addIssue("degraded", "TRANSACTION_RECOVERY_CHECKPOINT_CLEANUP_PENDING", `Terminal transaction still owns ${activeOwnedRecovery.length} active internal recovery checkpoint(s).`);
+        }
+      } catch (error) {
+        addIssue("degraded", "TRANSACTION_RECOVERY_CHECKPOINT_OWNER_SCAN_FAILED", error.message, error.code ?? null);
       }
-    } catch (error) {
-      addIssue("degraded", "TRANSACTION_RECOVERY_CHECKPOINT_OWNER_SCAN_FAILED", error.message, error.code ?? null);
     }
 
     return { issues, reclaimable_prepared_false_staging: reclaimablePreparedFalseStaging };
@@ -1502,16 +1506,36 @@ export function createDevTransactionService({
     }
 
     const inspections = [];
+    const terminalOwners = new Set();
+    const useSharedCheckpointInspection = typeof checkpoint.inspectStatusWithRecoveryOwners === "function";
     for (const transaction of listed.transactions) {
       try {
         const { record } = await readRecord(transaction.transaction_id);
-        inspections.push({ transaction_id: record.transaction_id, ...(await inspectRecordHealth(record)) });
+        if (terminalStateSet.has(record.state)) terminalOwners.add(record.transaction_id);
+        inspections.push({ transaction_id: record.transaction_id, ...(await inspectRecordHealth(record, { deferRecoveryOwnerScan: useSharedCheckpointInspection })) });
       } catch (error) {
         inspections.push({ transaction_id: transaction.transaction_id, issues: [{ severity: "corrupt", code: error.code ?? "TRANSACTION_STORE_CORRUPT", message: String(error.message).slice(0, 512) }], reclaimable_prepared_false_staging: false });
       }
     }
-    const checkpointStatus = await checkpoint.status().catch((error) => ({ health: "corrupt", last_health_error: String(error.message).slice(0, 512), last_health_error_code: error.code ?? null }));
+    // Use a single fresh checkpoint-store observation for both health and owner cleanup.
+    // Active transaction recovery and mutation still use their individual live checks.
+    const failedCheckpointStatus = (error) => ({ health: error.code === "CHECKPOINT_STORE_BUSY" ? "degraded" : "corrupt", last_health_error: String(error.message).slice(0, 512), last_health_error_code: error.code ?? null });
+    const checkpointInspection = useSharedCheckpointInspection
+      ? await checkpoint.inspectStatusWithRecoveryOwners().catch((error) => ({ status: failedCheckpointStatus(error), activeRecoveryOwners: null }))
+      : { status: await checkpoint.status().catch(failedCheckpointStatus), activeRecoveryOwners: null };
+    const checkpointStatus = checkpointInspection.status;
     const integrityIssues = inspections.flatMap((inspection) => inspection.issues.map((issue) => ({ transaction_id: inspection.transaction_id, ...issue })));
+    if (useSharedCheckpointInspection && checkpointStatus.health === "healthy") {
+      if (!(checkpointInspection.activeRecoveryOwners instanceof Map)) {
+        // An incomplete dependency observation must never be interpreted as no owners.
+        integrityIssues.push({ transaction_id: null, severity: "corrupt", code: "TRANSACTION_RECOVERY_OWNER_OBSERVATION_MISSING", message: "Healthy checkpoint inspection did not return recovery ownership evidence." });
+      } else {
+        for (const transactionId of terminalOwners) {
+          const count = checkpointInspection.activeRecoveryOwners.get(transactionId) ?? 0;
+          if (count > 0) integrityIssues.push({ transaction_id: transactionId, severity: "degraded", code: "TRANSACTION_RECOVERY_CHECKPOINT_CLEANUP_PENDING", message: `Terminal transaction still owns ${count} active internal recovery checkpoint(s).` });
+        }
+      }
+    }
     if (checkpointStatus.health !== "healthy") integrityIssues.push({
       transaction_id: null,
       severity: checkpointStatus.health === "corrupt" ? "corrupt" : "degraded",
