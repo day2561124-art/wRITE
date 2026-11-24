@@ -219,7 +219,7 @@ test('full status detects missing active blobs and corrupt retired-only blobs', 
 });
 
 
-test('production-sized shared health observation reads identities once and never caches corruption', async t=>{
+test('production-sized shared health observation retains bounded identity reuse and never caches corruption', async t=>{
   const f=await fixture(t,314);
   const identityDir=path.join(f.storageRoot,'manifests','checkpoints');
   const original=fs.promises.readFile;
@@ -234,11 +234,11 @@ test('production-sized shared health observation reads identities once and never
     assert.equal(observation.status.health,'healthy');
     assert.equal(observation.status.checkpoint_count,314);
     assert.equal(observation.activeRecoveryOwners.size,0);
-    assert.equal(identityReads,314);
+    assert.equal(identityReads,314+Math.max(0,314-DEV_CHECKPOINT_MANIFEST_CACHE_ENTRIES));
     assert.equal('activeRecoveryOwners' in observation.status,false);
     const name=(await readdir(identityDir))[0];
     const file=path.join(identityDir,name), saved=await readFile(file);
-    await writeFile(file,'{}\\n'.replace('\\n','\n'));
+    await writeFile(file,'{}\n');
     const failed=await f.service.inspectStatusWithRecoveryOwners();
     assert.equal(failed.status.health,'corrupt');
     assert.equal(failed.activeRecoveryOwners,null);
