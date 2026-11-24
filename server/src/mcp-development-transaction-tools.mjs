@@ -1481,7 +1481,7 @@ export function createDevTransactionService({
     return { issues, reclaimable_prepared_false_staging: reclaimablePreparedFalseStaging };
   }
 
-  async function status() {
+  async function status({ startup = false } = {}) {
     let listed;
     try { listed = await list({ limit: DEV_TRANSACTION_MAX_LIST_RESULTS }); }
     catch (error) {
@@ -1521,7 +1521,7 @@ export function createDevTransactionService({
     // Active transaction recovery and mutation still use their individual live checks.
     const failedCheckpointStatus = (error) => ({ health: error.code === "CHECKPOINT_STORE_BUSY" ? "degraded" : "corrupt", last_health_error: String(error.message).slice(0, 512), last_health_error_code: error.code ?? null });
     const checkpointInspection = useSharedCheckpointInspection
-      ? await checkpoint.inspectStatusWithRecoveryOwners().catch((error) => ({ status: failedCheckpointStatus(error), activeRecoveryOwners: null }))
+      ? await checkpoint.inspectStatusWithRecoveryOwners({ startup }).catch((error) => ({ status: failedCheckpointStatus(error), activeRecoveryOwners: null }))
       : { status: await checkpoint.status().catch(failedCheckpointStatus), activeRecoveryOwners: null };
     const checkpointStatus = checkpointInspection.status;
     const integrityIssues = inspections.flatMap((inspection) => inspection.issues.map((issue) => ({ transaction_id: inspection.transaction_id, ...issue })));
@@ -1662,7 +1662,9 @@ export function createDevTransactionService({
         lastHealthError = `${record.transaction_id}: ${error.message}`;
       }
     }
-    const current = await status();
+    // Only the final read-only observation receives the startup wait budget.
+    // Recovery actions above are never retried or granted a longer mutation wait.
+    const current = await status({ startup: true });
     if (current.health === "healthy") runtimeHealth = "healthy";
     return { ...current, recovered_transactions: recovered, abandoned_prepared_false_transactions: abandoned };
   }
