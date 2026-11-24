@@ -1381,7 +1381,10 @@ export function createDevTransactionService({
 
   async function inspectRecordHealth(record) {
     const issues = [];
-    const addIssue = (severity, code, message) => issues.push({ severity, code, message: String(message).slice(0, 512) });
+    const addIssue = (severity, code, message, checkpointErrorCode = null) => issues.push({
+      severity, code, message: String(message).slice(0, 512),
+      ...(checkpointErrorCode !== null ? { checkpoint_error_code: checkpointErrorCode } : {}),
+    });
     let markerState = { prepared: false, commit: false };
     try {
       markerState = await markers(record.transaction_id);
@@ -1468,7 +1471,7 @@ export function createDevTransactionService({
         addIssue("degraded", "TRANSACTION_RECOVERY_CHECKPOINT_CLEANUP_PENDING", `Terminal transaction still owns ${activeOwnedRecovery.length} active internal recovery checkpoint(s).`);
       }
     } catch (error) {
-      addIssue("degraded", "TRANSACTION_RECOVERY_CHECKPOINT_OWNER_SCAN_FAILED", error.message);
+      addIssue("degraded", "TRANSACTION_RECOVERY_CHECKPOINT_OWNER_SCAN_FAILED", error.message, error.code ?? null);
     }
 
     return { issues, reclaimable_prepared_false_staging: reclaimablePreparedFalseStaging };
@@ -1577,7 +1580,12 @@ export function createDevTransactionService({
     // Dependency observations still close admission, but must not permanently
     // taint this store after the dependency is independently verified healthy.
     // Persistent transaction/barrier defects retain the existing sticky state.
-    const ownIssues = integrityIssues.filter((issue) => issue.code !== "CHECKPOINT_STORE_NOT_HEALTHY");
+    const ownIssues = integrityIssues.filter((issue) => issue.code !== "CHECKPOINT_STORE_NOT_HEALTHY"
+      // A timed-out owner scan is unknown for this observation, not evidence of
+      // a persistent transaction defect. Keep the current status degraded until
+      // a later full inspection succeeds; other owner-scan failures stay sticky.
+      && !(issue.code === "TRANSACTION_RECOVERY_CHECKPOINT_OWNER_SCAN_FAILED"
+        && issue.checkpoint_error_code === "CHECKPOINT_STORE_BUSY"));
     if (runtimeHealth === "corrupt" || ownIssues.some((issue) => issue.severity === "corrupt")) runtimeHealth = "corrupt";
     else if (ownIssues.some((issue) => issue.severity === "degraded") || recoveryRequired.length > 0) runtimeHealth = "degraded";
     if (integrityIssues.length > 0) lastHealthError = `${integrityIssues[0].code}: ${integrityIssues[0].message}`.slice(0, 1024);
