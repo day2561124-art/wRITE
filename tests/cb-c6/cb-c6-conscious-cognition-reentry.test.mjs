@@ -613,3 +613,158 @@ try {
   await rm(quietRoot, { recursive: true, force: true });
 }
 console.log("CB-C6 quiet frontier sleep: awake actor independent, sleeping cue retained, read-only receipt replay suppressed PASS.");
+
+
+// The entire C2 goal/plan transaction is speculative until its authoritative
+// writer commits. A later participant's failed ingress must never issue a
+// consumed receipt for an earlier participant's still-uncommitted intention.
+const abortRoot = path.join(projectRoot, "tests", ".tmp",
+  "cb-c6-abort-" + process.pid + "-" + Date.now());
+try {
+  for (const intentKind of ["goal", "plan"]) {
+    for (const fault of ["incomplete", "duplicate"]) {
+      const opts = { fixtureRoot: path.join(abortRoot, intentKind, fault) };
+      const initial = subjectiveWakeWorld();
+      initial.event_queue = [];
+      initial.characters.aria.physical_state.sleep_arousal = sleepRecord("awake");
+      const session = await beginWorldSimulationSession({
+        simulation_label: "C6 aborted speculative " + intentKind + " " + fault,
+        seed: "c6-abort-" + intentKind + "-" + fault,
+        initial_world_state: initial,
+      }, opts);
+      const sid = session.world_simulation_session_id;
+      const proposeGoal = packet => {
+        const view = packet.native_goal_decision;
+        assert.equal(packet.character, "aria");
+        assert.equal(view.motivation_basis.length, 1);
+        return { goal_context_token: view.context_token, goal_intents: [{
+          operation: "propose", goal_kind: "achieve_state", domain: "inquiry",
+          target_descriptor: { label: "查證計時器實際上限" },
+          motivation_basis_tokens: [view.motivation_basis[0].source_token],
+          motivation_relations: ["supports"],
+        }] };
+      };
+      if (intentKind === "plan") {
+        // Establish the prior goal through the same Native writer, rather
+        // than manufacturing a committed goal or weakening source validation.
+        const proposed = await dispatchWorldSimulationAutonomousCognitionOpportunities({
+          world_simulation_session_id: sid,
+          runtime_context_by_character: { aria: { idle: true } },
+        }, { ...opts, characterBrain: proposeGoal });
+        assert.equal(proposed.durable_cognitive_write_performed, true);
+        const adopted = await dispatchWorldSimulationAutonomousCognitionOpportunities({
+          world_simulation_session_id: sid,
+          runtime_context_by_character: { aria: { pending_internal_cues: [{
+            kind: "memory_reactivation", source_ref: "abort-fixture-adopt-goal",
+          }] } },
+        }, { ...opts, characterBrain: async packet => {
+          const view = packet.native_goal_decision;
+          assert.equal(view.existing_goals.length, 1);
+          return { goal_context_token: view.context_token, goal_intents: [{
+            operation: "commit", goal_token: view.existing_goals[0].goal_token,
+          }] };
+        } });
+        assert.equal(adopted.durable_cognitive_write_performed, true);
+      }
+      const before = await getWorldSimulationState(sid, opts);
+      const historyBefore = await getWorldSimulationHistory(sid, opts);
+      const paths = worldSimulationStatePaths(sid, opts);
+      const bytes = () => Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
+      const originalBytes = await bytes();
+      const input = {
+        world_simulation_session_id: sid,
+        expected_revision: before.revision,
+        expected_state_hash: before.state_hash,
+        max_opportunities: 2,
+        runtime_context_by_character: {
+          aria: { pending_internal_cues: [{
+            kind: "memory_reactivation", source_ref: "abort-aria-" + intentKind,
+          }] },
+          keeper: { temporal_cues: [{ source_ref: "abort-keeper-cue", due_at: now }] },
+        },
+      };
+      const schedulerInput = {
+        world_simulation_session_id: sid,
+        runtime_context_by_character: input.runtime_context_by_character,
+      };
+      const initialSchedule = await scheduleWorldSimulationAutonomousCognitionOpportunities(schedulerInput, opts);
+      const expected = initialSchedule.scheduler_projection.opportunities;
+      assert.deepEqual(expected.map(row => row.character), ["aria", "keeper"]);
+      const expectedIds = expected.map(row => row.opportunity_id);
+      const seen = [];
+      const decide = async packet => {
+        seen.push(packet.character);
+        if (packet.character === "keeper") return { disposition: "processed_autonomous_cognition_opportunity" };
+        if (intentKind === "goal") return proposeGoal(packet);
+        const view = packet.native_plan_decision;
+        assert.equal(view.committed_goals.length, 1);
+        assert.equal(view.committed_goals[0].target_descriptor.label, "查證計時器實際上限");
+        return { plan_context_token: view.context_token, plan_intents: [{
+          goal_token: view.committed_goals[0].goal_token,
+          cue_descriptor: { cue_kind: "opportunity", label: "timer_doubt_requires_verification" },
+          response_descriptor: { response_kind: "seek_support", label: "ask_trusted_ally" },
+        }] };
+      };
+      const brokenRuntime = {
+        inspectRuntime: async () => ({ current_mind: { character_facing_view: {} } }),
+        runCharacterTurn: async ({ character, brain_input, characterBrain }) => {
+          if (character === "aria") return characterBrain(brain_input);
+          if (fault === "incomplete") return {};
+          await characterBrain(brain_input);
+          try { await characterBrain(brain_input); } catch { return {}; }
+        },
+      };
+      let failed;
+      await assert.rejects(runWorldSimulationOffscreenCognitionStep(input, {
+        ...opts, characterRuntimeManager: brokenRuntime, characterBrain: decide,
+      }), error => {
+        failed = error;
+        assert.equal(error.code, fault === "incomplete"
+          ? "C6D_CONSCIOUS_COGNITION_CALLBACK_NOT_COMPLETED"
+          : "C6D_CONSCIOUS_COGNITION_DUPLICATE_INVOCATION");
+        assert.equal(error.failed_opportunity_id, expectedIds[1]);
+        assert.deepEqual(error.consumed_opportunity_ids, [],
+          "a failed speculative transaction has no consumed opportunities");
+        return true;
+      });
+      assert.deepEqual(seen, fault === "incomplete" ? ["aria"] : ["aria", "keeper"]);
+      assert.deepEqual(await bytes(), originalBytes);
+      assert.deepEqual(await getWorldSimulationState(sid, opts), before);
+      assert.deepEqual(await getWorldSimulationHistory(sid, opts), historyBefore);
+      const retryInput = { ...input, consumed_opportunity_ids: failed.consumed_opportunity_ids };
+      const retrySchedule = await scheduleWorldSimulationAutonomousCognitionOpportunities({
+        ...schedulerInput, consumed_opportunity_ids: failed.consumed_opportunity_ids,
+      }, opts);
+      assert.deepEqual(retrySchedule.scheduler_projection.opportunities, expected);
+      seen.length = 0;
+      const retried = await runWorldSimulationOffscreenCognitionStep(retryInput, {
+        ...opts, characterBrain: decide,
+      });
+      assert.deepEqual(seen, ["aria", "keeper"]);
+      assert.equal(retried.dispatch_count, 2);
+      assert.equal(retried.durable_cognitive_write_performed, true);
+      assert.deepEqual(retried.consumed_opportunity_ids, expectedIds);
+      const after = await getWorldSimulationState(sid, opts);
+      const history = await getWorldSimulationHistory(sid, opts);
+      assert.equal(after.revision, before.revision + 1);
+      assert.equal(history.turns.length, historyBefore.turns.length + 1);
+      assert.equal(history.turns.at(-1).previous_state_hash, before.state_hash);
+      assert.equal(history.turns.at(-1).next_state_hash, after.state_hash);
+      assert.equal(history.turns.at(-1).event, null);
+      assert.equal(after.state.simulation_time, before.state.simulation_time);
+      assert.deepEqual(after.state.memories, before.state.memories);
+      const field = intentKind === "goal"
+        ? "motivational_goal_history" : "goal_implementation_intention_history";
+      assert.equal(after.state[field].length, (before.state[field] ?? []).length + 1);
+      const savedBytes = await bytes();
+      const replay = await runWorldSimulationOffscreenCognitionStep({
+        ...input, expected_revision: after.revision, expected_state_hash: after.state_hash,
+      }, { ...opts, characterBrain: async () => assert.fail("committed receipt must suppress replay") });
+      assert.equal(replay.dispatch_count, 0);
+      assert.deepEqual(await bytes(), savedBytes);
+      console.log("CB-C6 aborted " + intentKind + "/" + fault + ": pending opportunities retained, retry commits once, durable replay suppressed PASS.");
+    }
+  }
+} finally {
+  await rm(abortRoot, { recursive: true, force: true });
+}
