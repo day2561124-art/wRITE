@@ -51,6 +51,7 @@ export const mcpPiCoreScripts = Object.freeze([
 ]);
 export const mcpPiPostSealScripts=Object.freeze([
   "tests/mcp/pi-scoped-admin-runner.test.mjs",
+  "tests/mcp/nexa-protected-release-admission.test.mjs",
   "tests/mcp/pi-workspace-appcontainer.test.mjs",
   "tests/mcp/mcp-workspace-porcelain-paths.test.mjs",
   "tests/mcp/pi-projection-publication-lock.test.mjs",
