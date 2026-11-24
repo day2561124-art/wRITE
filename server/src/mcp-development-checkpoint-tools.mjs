@@ -711,26 +711,29 @@ export function createDevCheckpointService({
   }
 
   async function listBlobRecordsUnlocked({ verifyDigests = false } = {}) {
-    const records = [];
+    const candidates = [];
     const prefixes = await readdir(paths.blobs, { withFileTypes: true });
     for (const prefix of prefixes) {
       if (!prefix.isDirectory() || prefix.isSymbolicLink() || !/^[a-f0-9]{2}$/u.test(prefix.name)) throw checkpointError("CHECKPOINT_STORE_CORRUPT", `Unexpected checkpoint blob prefix: ${prefix.name}.`);
       const entries = await readdir(path.join(paths.blobs, prefix.name), { withFileTypes: true });
       for (const entry of entries) {
         if (!entry.isFile() || entry.isSymbolicLink() || !sha256Pattern.test(entry.name) || entry.name.slice(0, 2) !== prefix.name) throw checkpointError("CHECKPOINT_STORE_CORRUPT", `Unexpected checkpoint blob entry: ${prefix.name}/${entry.name}.`);
-        const blobFilePath = path.join(paths.blobs, prefix.name, entry.name);
-        const info = await lstat(blobFilePath);
-        if (info.isSymbolicLink() || !info.isFile()) throw checkpointError("CHECKPOINT_STORE_CORRUPT", `Unexpected checkpoint blob type: ${entry.name}.`);
-        if (verifyDigests) {
-          const content = await readFile(blobFilePath);
-          if (content.length !== info.size || sha256Buffer(content) !== entry.name) {
-            throw checkpointError("CHECKPOINT_STORE_CORRUPT", `Checkpoint blob filename/digest mismatch: ${entry.name}.`);
-          }
-        }
-        records.push({ sha256: entry.name, bytes: info.size, path: blobFilePath });
+        candidates.push({ sha256: entry.name, path: path.join(paths.blobs, prefix.name, entry.name) });
       }
     }
-    return records;
+    // Bounded read-only fanout; mapCheckpointReads drains all in-flight reads
+    // before the maintenance lock can be released, including on corruption.
+    return mapCheckpointReads(candidates, async (candidate) => {
+      const info = await lstat(candidate.path);
+      if (info.isSymbolicLink() || !info.isFile()) throw checkpointError("CHECKPOINT_STORE_CORRUPT", `Unexpected checkpoint blob type: ${candidate.sha256}.`);
+      if (verifyDigests) {
+        const content = await readFile(candidate.path);
+        if (content.length !== info.size || sha256Buffer(content) !== candidate.sha256) {
+          throw checkpointError("CHECKPOINT_STORE_CORRUPT", `Checkpoint blob filename/digest mismatch: ${candidate.sha256}.`);
+        }
+      }
+      return { ...candidate, bytes: info.size };
+    });
   }
 
   async function validateCheckpointManifestsUnlocked(registry, identityManifests = new Map()) {
@@ -751,6 +754,8 @@ export function createDevCheckpointService({
       if (
         identity.checkpoint_content_id !== entry.checkpoint_content_id
         || identity.manifest_identity !== entry.manifest_identity
+        || (identity.internal_purpose ?? null) !== (entry.internal_purpose ?? null)
+        || (identity.internal_owner_transaction_id ?? null) !== (entry.internal_owner_transaction_id ?? null)
         || identity.git_head !== content.git_head
         || identity.workspace_snapshot_id !== content.workspace_snapshot_id
       ) {
@@ -1313,18 +1318,30 @@ export function createDevCheckpointService({
     }
   }
 
-  async function status() {
+  // Internal transaction inspection shares one fresh, locked checkpoint observation.
+  // Never expose owner identities through the public status tool or cache across requests.
+  async function inspectStatusWithRecoveryOwners({ startup = false } = {}) {
     try {
       return await withLock(async () => {
         const identityManifests = new Map();
         const registry = await reconcileRegistryUnlocked(identityManifests);
         const statistics = await storeStatisticsUnlocked(registry, { verify: true, identityManifests });
         const { reclaimable, blobs, ...publicStats } = statistics;
-        return { schema_version: DEV_CHECKPOINT_SCHEMA_VERSION, health: "healthy", registry_revision: registry.revision, storage: "server_owned_content_addressed_checkpoint_store", ...publicStats };
-      });
+        const activeRecoveryOwners = new Map();
+        for (const entry of registry.checkpoints) {
+          if (entry.state !== "active" || entry.internal_purpose !== "transaction_recovery") continue;
+          const owner = entry.internal_owner_transaction_id;
+          activeRecoveryOwners.set(owner, (activeRecoveryOwners.get(owner) ?? 0) + 1);
+        }
+        return { status: { schema_version: DEV_CHECKPOINT_SCHEMA_VERSION, health: "healthy", registry_revision: registry.revision, storage: "server_owned_content_addressed_checkpoint_store", ...publicStats }, activeRecoveryOwners };
+      }, startup ? 30_000 : 2000);
     } catch (error) {
-      return { schema_version: DEV_CHECKPOINT_SCHEMA_VERSION, health: error.code === "CHECKPOINT_STORE_BUSY" ? "degraded" : "corrupt", registry_revision: null, storage: "server_owned_content_addressed_checkpoint_store", checkpoint_count: null, active_count: null, deleted_count: null, physical_blob_bytes: null, logical_checkpoint_bytes: null, deduplicated_bytes_saved: null, reclaimable_bytes: null, reclaimable_blob_count: null, last_health_error: String(error.message).slice(0, 1024), last_health_error_code: error.code ?? null };
+      return { status: { schema_version: DEV_CHECKPOINT_SCHEMA_VERSION, health: error.code === "CHECKPOINT_STORE_BUSY" ? "degraded" : "corrupt", registry_revision: null, storage: "server_owned_content_addressed_checkpoint_store", checkpoint_count: null, active_count: null, deleted_count: null, physical_blob_bytes: null, logical_checkpoint_bytes: null, deduplicated_bytes_saved: null, reclaimable_bytes: null, reclaimable_blob_count: null, last_health_error: String(error.message).slice(0, 1024), last_health_error_code: error.code ?? null }, activeRecoveryOwners: null };
     }
+  }
+
+  async function status() {
+    return (await inspectStatusWithRecoveryOwners()).status;
   }
 
   async function gc(input = {}) {
@@ -1609,6 +1626,7 @@ export function createDevCheckpointService({
     deleteCheckpoint,
     gc,
     status,
+    inspectStatusWithRecoveryOwners,
     initialize,
     inspectOperationEffect,
     captureInternalTransactionRecovery,
@@ -1633,6 +1651,7 @@ export const dev_workspace_recover_checkpoint = (input) => defaultCheckpointServ
 export const dev_workspace_delete_checkpoint = (input) => defaultCheckpointService.deleteCheckpoint(input);
 export const dev_workspace_checkpoint_gc = (input) => defaultCheckpointService.gc(input);
 export const dev_workspace_checkpoint_status = () => defaultCheckpointService.status();
+export const inspectDevCheckpointStatusWithRecoveryOwners = (options) => defaultCheckpointService.inspectStatusWithRecoveryOwners(options);
 export const initializeDevCheckpointRuntime = () => defaultCheckpointService.initialize();
 export const inspectDevCheckpointOperationEffect = (started) => defaultCheckpointService.inspectOperationEffect(started);
 export const captureDevTransactionRecoveryCheckpoint = (input) => defaultCheckpointService.captureInternalTransactionRecovery(input);

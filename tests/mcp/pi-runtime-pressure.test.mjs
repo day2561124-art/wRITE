@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs';
+import {spawn} from 'node:child_process';
+import {createHash} from 'node:crypto';
 import {syncBuiltinESMExports} from 'node:module';
-import {readFile, readdir, writeFile, lstat, rm} from 'node:fs/promises';
+import {readFile, readdir, writeFile, lstat, rm, mkdir} from 'node:fs/promises';
 import path from 'node:path';
 import {createPressureFixture, holdFixtureLock, delay} from '../../scripts/pi-runtime-pressure-benchmark.mjs';
 import {DEV_CHECKPOINT_VERIFY_CONCURRENCY, DEV_CHECKPOINT_MANIFEST_CACHE_ENTRIES} from '../../server/src/mcp-development-checkpoint-tools.mjs';
@@ -216,4 +218,92 @@ test('full status detects missing active blobs and corrupt retired-only blobs', 
   assert.equal(missing.last_health_error_code,'CHECKPOINT_STORE_CORRUPT');
   await writeFile(activeFile,active);
   assert.equal((await f.service.status()).health,'healthy');
+});
+
+
+test('production-sized shared health observation retains bounded identity reuse and never caches corruption', async t=>{
+  const f=await fixture(t,314);
+  const identityDir=path.join(f.storageRoot,'manifests','checkpoints');
+  const blobRoot=path.join(f.storageRoot,'blobs','sha256');
+  // 44.5 MiB of physical storage, close to the live incident. Additional
+  // fixture-only objects are unreferenced, so full status must still hash them.
+  for(let i=0;i<88;i++) {
+    const content=Buffer.alloc(512*1024,i);
+    const digest=createHash('sha256').update(content).digest('hex');
+    const dir=path.join(blobRoot,digest.slice(0,2));
+    await mkdir(dir,{recursive:true});
+    await writeFile(path.join(dir,digest),content);
+  }
+  const original=fs.promises.readFile;
+  let identityReads=0, blobReads=0, inFlight=0, peak=0;
+  fs.promises.readFile=async function(file,...args) {
+    if(typeof file==='string'&&path.dirname(file)===identityDir)identityReads++;
+    if(typeof file==='string'&&path.dirname(path.dirname(file))===blobRoot) {
+      blobReads++; inFlight++; peak=Math.max(peak,inFlight);
+      try {return await original.call(this,file,...args);} finally {inFlight--;}
+    }
+    return original.call(this,file,...args);
+  };
+  syncBuiltinESMExports();
+  try {
+    const observation=await f.service.inspectStatusWithRecoveryOwners();
+    assert.equal(observation.status.health,'healthy');
+    assert.equal(observation.status.checkpoint_count,314);
+    assert.equal(observation.activeRecoveryOwners.size,0);
+    assert.equal(identityReads,314+Math.max(0,314-DEV_CHECKPOINT_MANIFEST_CACHE_ENTRIES));
+    assert.equal(observation.status.physical_blob_bytes,88*512*1024+8*65536);
+    assert.equal(observation.status.reclaimable_blob_count,88);
+    assert.equal(blobReads,96);
+    assert.equal(inFlight,0);
+    assert(peak<=DEV_CHECKPOINT_VERIFY_CONCURRENCY);
+    assert.equal('activeRecoveryOwners' in observation.status,false);
+    const name=(await readdir(identityDir))[0];
+    const file=path.join(identityDir,name), saved=await readFile(file);
+    await writeFile(file,'{}\n');
+    const failed=await f.service.inspectStatusWithRecoveryOwners();
+    assert.equal(failed.status.health,'corrupt');
+    assert.equal(failed.activeRecoveryOwners,null);
+    await writeFile(file,saved);
+    assert.equal((await f.service.status()).health,'healthy');
+  } finally {fs.promises.readFile=original;syncBuiltinESMExports();}
+});
+
+
+test('startup observation waits for a separate live process without relaxing normal status admission', async t=>{
+  const f=await fixture(t,1), lockPath=path.join(f.storageRoot,'maintenance.lock');
+  const code=`
+    import {open,rm} from 'node:fs/promises';
+    import os from 'node:os';
+    const lock=process.argv[1];
+    const handle=await open(lock,'wx');
+    await handle.writeFile(JSON.stringify({pid:process.pid,hostname:os.hostname(),acquired_at:new Date().toISOString()}));
+    await handle.sync();
+    process.stdout.write('locked\\n');
+    await new Promise(resolve=>{process.stdin.once('data',resolve);process.stdin.once('end',resolve);});
+    await handle.close();
+    await rm(lock);
+  `;
+  const child=spawn(process.execPath,['--input-type=module','-e',code,lockPath],{stdio:['pipe','pipe','pipe'],windowsHide:true});
+  const closed=new Promise(resolve=>child.once('close',resolve));
+  child.stdin.on('error',()=>{});
+  let startup;
+  try {
+    await new Promise((resolve,reject)=>{
+      child.stdout.once('data',chunk=>String(chunk).includes('locked')?resolve():reject(new Error('Unexpected lock fixture output')));
+      child.once('error',reject);
+      child.once('exit',code=>reject(new Error('Lock fixture exited: '+code)));
+    });
+    startup=f.service.inspectStatusWithRecoveryOwners({startup:true});
+    const ordinary=await f.service.status();
+    assert.equal(ordinary.health,'degraded');
+    assert.equal(ordinary.last_health_error_code,'CHECKPOINT_STORE_BUSY');
+    assert.equal((await lstat(lockPath)).isFile(),true);
+    child.stdin.end('release\\n');
+    assert.equal(await closed,0);
+    assert.equal((await startup).status.health,'healthy');
+  } finally {
+    if(!child.stdin.destroyed)child.stdin.end();
+    await closed;
+    if(startup)await startup;
+  }
 });

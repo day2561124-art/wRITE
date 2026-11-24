@@ -34,4 +34,39 @@ await new Promise(resolve => setTimeout(resolve, 300));
 assert.deepEqual(await scoped.ensure('trpg'), { initialized: true });
 assert.equal(bridgeAttempts, 3);
 assert.equal(scoped.getStatus().components.trpg.state, 'ready');
+
+let finishCheckpoint;
+let transactionStarts = 0;
+const ordered = createRuntimeReadiness([
+  ['journal', async () => ({ health: 'healthy' })],
+  ['checkpoint', () => new Promise(resolve => { finishCheckpoint = resolve; })],
+  ['transaction', async () => { transactionStarts++; return { health: 'healthy' }; }],
+  ['trpg', async () => ({ initialized: true })],
+], null, { dependencies: { transaction: ['checkpoint'] } });
+const all = ordered.start();
+await ordered.ensure('journal');
+await ordered.ensure('trpg');
+assert.equal(transactionStarts, 0);
+assert.equal(ordered.getStatus().components.checkpoint.state, 'recovering');
+finishCheckpoint({ initialized: true });
+await all;
+assert.equal(transactionStarts, 1);
+assert.equal(ordered.getStatus().state, 'ready');
+
+let now = 0;
+let healthy = false;
+const gated = createRuntimeReadiness([
+  ['checkpoint', async () => healthy ? { initialized: true } : { reconciliation_required: 1 }],
+  ['transaction', async () => { transactionStarts++; return { health: 'healthy' }; }],
+], null, { clock: () => now, dependencies: { transaction: ['checkpoint'] } });
+assert.equal((await gated.ensure('transaction')).health, 'degraded');
+assert.equal(transactionStarts, 1);
+now = 30_001;
+healthy = true;
+assert.equal((await gated.ensure('transaction')).health, 'healthy');
+assert.equal(transactionStarts, 2);
+assert.throws(() => createRuntimeReadiness([
+  ['checkpoint', async () => ({})], ['transaction', async () => ({})],
+], null, { dependencies: { checkpoint: ['transaction'] } }), /INVALID_RUNTIME_COMPONENT_DEPENDENCY/u);
+
 console.log('MCP runtime readiness regression passed.');
