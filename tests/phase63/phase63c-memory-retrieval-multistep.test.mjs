@@ -1,3 +1,7 @@
+import {
+  bindPrivateRetrievalStageResponse,
+  replayPrivateRetrievalStages,
+} from "../../server/src/world-simulation-private-retrieval-replay-service.mjs";
 import assert from "node:assert/strict";
 import {
   rm,
@@ -447,6 +451,92 @@ assert.equal(
     .includes("伊萊亞斯在橋邊停下"),
   true,
 );
+
+// C7: the trusted resolver is still the only owner of recovery selections.
+// Replaying the validated prefix must reproduce the direct V3 result.
+const privateReplayScope = {
+  session_id: "c7-private-replay-fixture",
+  committed_revision: 7,
+  committed_hash: "fixture-committed-hash",
+};
+const privateReplayInput = {
+  query,
+  memory_records: memories,
+  accessibility_base_input: accessibilityBaseInput,
+  initial_accessibility_query: initialAccessibility,
+  technical_step_budget: 4,
+  perception: {},
+  character_state: {},
+};
+const replayPrivate = (transcript, scope = privateReplayScope, kernel_input = privateReplayInput) =>
+  replayPrivateRetrievalStages({ scope, kernel_input, transcript });
+const replayMismatch = (error) =>
+  error?.code === "WORLD_SIMULATION_PRIVATE_RETRIEVAL_REPLAY_MISMATCH";
+const transcript = [];
+const pendingStages = [];
+for (let round = 0; round < 5; round += 1) {
+  const next = await replayPrivate(transcript);
+  assert.equal(next.status, "pending");
+  assert.equal(Object.hasOwn(next, "result"), false);
+  const { identity, trusted_stage_input } = next.request;
+  assert.equal(identity.sequence, round);
+  assert.equal(identity.observer, query.character);
+  assert.equal(identity.query_id, query.query_id);
+  pendingStages.push(identity.stage + ":" + (identity.step_index ?? "init"));
+  transcript.push(bindPrivateRetrievalStageResponse(identity, await resolver(trusted_stage_input)));
+}
+assert.deepEqual(pendingStages, [
+  "initiation:init", "recovery:0", "continuation:0", "recovery:1", "continuation:1",
+]);
+const replayed = await replayPrivate(transcript);
+assert.equal(replayed.status, "complete");
+assert.deepEqual(replayed.result, result);
+assert.equal(JSON.stringify(replayed.result.recovered_memories).includes("TARGET_HIDDEN_DETAIL"), false);
+
+// Invalid prefixes are rejected rather than silently reinterpreted.
+await assert.rejects(() => replayPrivate([transcript[1]]), replayMismatch);
+await assert.rejects(() => replayPrivate([transcript[0], transcript[0]]), replayMismatch);
+await assert.rejects(() => replayPrivate([...transcript, transcript[4]]), replayMismatch);
+await assert.rejects(() => replayPrivate(transcript, {
+  ...privateReplayScope, committed_revision: 8,
+}), replayMismatch);
+await assert.rejects(() => replayPrivate(transcript, {
+  ...privateReplayScope, session_id: "another-session",
+}), replayMismatch);
+for (const patch of [{ observer: "foreign-observer" }, { input_hash: "changed-input" }, { step_index: 99 }]) {
+  await assert.rejects(() => replayPrivate([
+    { ...transcript[0], identity: { ...transcript[0].identity, ...patch } },
+  ]), replayMismatch);
+}
+await assert.rejects(() => replayPrivate([
+  { ...transcript[0], response: { process_occurred: false } },
+]), replayMismatch);
+await assert.rejects(() => replayPrivate(transcript, privateReplayScope, {
+  ...privateReplayInput, perception: { changed: true },
+}), replayMismatch);
+
+// Explicit no-process and unsuccessful recovery remain genuine outcomes,
+// distinct from an unanswered request.
+const first = await replayPrivate([]);
+const noProcessPrefix = [bindPrivateRetrievalStageResponse(first.request.identity, { process_occurred: false })];
+const explicitNoProcess = await replayPrivate(noProcessPrefix);
+assert.equal(explicitNoProcess.status, "complete");
+assert.equal(explicitNoProcess.result.process_occurred, false);
+const failedPrefix = [transcript[0]];
+const failedRecovery = await replayPrivate(failedPrefix);
+failedPrefix.push(bindPrivateRetrievalStageResponse(failedRecovery.request.identity, {
+  contacted_candidate_refs: [], recovered_selections: [],
+}));
+const failedContinuation = await replayPrivate(failedPrefix);
+assert.equal(failedContinuation.status, "pending");
+failedPrefix.push(bindPrivateRetrievalStageResponse(failedContinuation.request.identity, {
+  control_action: "stop", control_reason: "cannot recall", selected_reinstatement_cue_refs: [],
+}));
+const failedReplay = await replayPrivate(failedPrefix);
+assert.equal(failedReplay.status, "complete");
+assert.equal(failedReplay.result.process_occurred, true);
+assert.equal(failedReplay.result.target_outcome, "failed");
+assert.equal(failedReplay.result.recovered_any_content, false);
 
 const noProcess =
   await executeWorldSimulationMemoryRetrievalProcessV3({
