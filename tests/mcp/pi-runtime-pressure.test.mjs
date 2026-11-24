@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs';
+import {spawn} from 'node:child_process';
 import {syncBuiltinESMExports} from 'node:module';
 import {readFile, readdir, writeFile, lstat, rm} from 'node:fs/promises';
 import path from 'node:path';
@@ -245,4 +246,44 @@ test('production-sized shared health observation retains bounded identity reuse 
     await writeFile(file,saved);
     assert.equal((await f.service.status()).health,'healthy');
   } finally {fs.promises.readFile=original;syncBuiltinESMExports();}
+});
+
+
+test('startup observation waits for a separate live process without relaxing normal status admission', async t=>{
+  const f=await fixture(t,1), lockPath=path.join(f.storageRoot,'maintenance.lock');
+  const code=`
+    import {open,rm} from 'node:fs/promises';
+    import os from 'node:os';
+    const lock=process.argv[1];
+    const handle=await open(lock,'wx');
+    await handle.writeFile(JSON.stringify({pid:process.pid,hostname:os.hostname(),acquired_at:new Date().toISOString()}));
+    await handle.sync();
+    process.stdout.write('locked\\n');
+    await new Promise(resolve=>{process.stdin.once('data',resolve);process.stdin.once('end',resolve);});
+    await handle.close();
+    await rm(lock);
+  `;
+  const child=spawn(process.execPath,['--input-type=module','-e',code,lockPath],{stdio:['pipe','pipe','pipe'],windowsHide:true});
+  const closed=new Promise(resolve=>child.once('close',resolve));
+  child.stdin.on('error',()=>{});
+  let startup;
+  try {
+    await new Promise((resolve,reject)=>{
+      child.stdout.once('data',chunk=>String(chunk).includes('locked')?resolve():reject(new Error('Unexpected lock fixture output')));
+      child.once('error',reject);
+      child.once('exit',code=>reject(new Error('Lock fixture exited: '+code)));
+    });
+    startup=f.service.inspectStatusWithRecoveryOwners({startup:true});
+    const ordinary=await f.service.status();
+    assert.equal(ordinary.health,'degraded');
+    assert.equal(ordinary.last_health_error_code,'CHECKPOINT_STORE_BUSY');
+    assert.equal((await lstat(lockPath)).isFile(),true);
+    child.stdin.end('release\\n');
+    assert.equal(await closed,0);
+    assert.equal((await startup).status.health,'healthy');
+  } finally {
+    if(!child.stdin.destroyed)child.stdin.end();
+    await closed;
+    if(startup)await startup;
+  }
 });
