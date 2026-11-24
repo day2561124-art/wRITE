@@ -166,3 +166,54 @@ test('orphan identity reconciliation and a concurrent logical delete retain life
   assert.equal(status.deleted_count,1);
   assert.equal(status.reclaimable_blob_count,0);
 });
+
+test('full status hashes each physical blob once, including unreferenced blobs', async t=>{
+  const f=await fixture(t), blobRoot=path.join(f.storageRoot,'blobs','sha256');
+  await writeFile(path.join(f.repositoryRoot,'tests','overlay-0.txt'),'distinct retired blob\n');
+  const retired=await f.service.create({workspace_id:f.checkpoint.workspace_id});
+  await f.service.deleteCheckpoint({checkpoint_id:retired.checkpoint_id});
+  const original=fs.promises.readFile, counts=new Map();
+  fs.promises.readFile=async function(file,...args) {
+    if(typeof file==='string'&&path.dirname(path.dirname(file))===blobRoot)
+      counts.set(file,(counts.get(file)??0)+1);
+    return original.call(this,file,...args);
+  };
+  syncBuiltinESMExports();
+  try {
+    const status=await f.service.status();
+    assert.equal(status.health,'healthy');
+    assert.equal(status.reclaimable_blob_count,1);
+    assert.equal(counts.size,9);
+    assert.deepEqual([...counts.values()],Array(9).fill(1));
+  } finally {fs.promises.readFile=original;syncBuiltinESMExports();}
+});
+
+test('full status detects missing active blobs and corrupt retired-only blobs', async t=>{
+  const f=await fixture(t), blobRoot=path.join(f.storageRoot,'blobs','sha256');
+  const before=new Set();
+  for(const prefix of await readdir(blobRoot))
+    for(const name of await readdir(path.join(blobRoot,prefix)))before.add(path.join(blobRoot,prefix,name));
+  await writeFile(path.join(f.repositoryRoot,'tests','overlay-0.txt'),'distinct retired blob\n');
+  const retired=await f.service.create({workspace_id:f.checkpoint.workspace_id});
+  await f.service.deleteCheckpoint({checkpoint_id:retired.checkpoint_id});
+  const retiredFiles=[];
+  for(const prefix of await readdir(blobRoot))
+    for(const name of await readdir(path.join(blobRoot,prefix))) {
+      const file=path.join(blobRoot,prefix,name);
+      if(!before.has(file))retiredFiles.push(file);
+    }
+  assert.equal(retiredFiles.length,1);
+  const retiredFile=retiredFiles[0], original=await readFile(retiredFile);
+  const corrupted=Buffer.from(original);corrupted[0]^=1;
+  await writeFile(retiredFile,corrupted);
+  assert.equal((await f.service.status()).health,'corrupt');
+  await writeFile(retiredFile,original);
+  assert.equal((await f.service.status()).health,'healthy');
+  const activeFile=[...before][0], active=await readFile(activeFile);
+  await rm(activeFile);
+  const missing=await f.service.status();
+  assert.equal(missing.health,'corrupt');
+  assert.equal(missing.last_health_error_code,'CHECKPOINT_STORE_CORRUPT');
+  await writeFile(activeFile,active);
+  assert.equal((await f.service.status()).health,'healthy');
+});

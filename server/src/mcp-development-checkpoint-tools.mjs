@@ -719,7 +719,8 @@ export function createDevCheckpointService({
       for (const entry of entries) {
         if (!entry.isFile() || entry.isSymbolicLink() || !sha256Pattern.test(entry.name) || entry.name.slice(0, 2) !== prefix.name) throw checkpointError("CHECKPOINT_STORE_CORRUPT", `Unexpected checkpoint blob entry: ${prefix.name}/${entry.name}.`);
         const blobFilePath = path.join(paths.blobs, prefix.name, entry.name);
-        const info = await stat(blobFilePath);
+        const info = await lstat(blobFilePath);
+        if (info.isSymbolicLink() || !info.isFile()) throw checkpointError("CHECKPOINT_STORE_CORRUPT", `Unexpected checkpoint blob type: ${entry.name}.`);
         if (verifyDigests) {
           const content = await readFile(blobFilePath);
           if (content.length !== info.size || sha256Buffer(content) !== entry.name) {
@@ -770,7 +771,18 @@ export function createDevCheckpointService({
   async function storeStatisticsUnlocked(registry, { verify = true, identityManifests = new Map() } = {}) {
     const roots = await validateCheckpointManifestsUnlocked(registry, identityManifests);
     const blobs = await listBlobRecordsUnlocked({ verifyDigests: verify });
-    if (verify) await mapCheckpointReads([...roots.referenced.values()], async (descriptor) => { await verifyBlob(descriptor); });
+    if (verify) {
+      // The full physical scan already verified every file digest under this
+      // maintenance lock, including unreferenced blobs. Check reference presence
+      // and descriptor size against that same observation, without a second read.
+      const verifiedByDigest = new Map(blobs.map((blob) => [blob.sha256, blob]));
+      for (const descriptor of roots.referenced.values()) {
+        const blob = verifiedByDigest.get(descriptor.sha256);
+        if (!blob || blob.bytes !== descriptor.bytes) {
+          throw checkpointError("CHECKPOINT_STORE_CORRUPT", `${descriptor.sha256}: Checkpoint blob missing or descriptor size mismatch.`);
+        }
+      }
+    }
     const physicalBytes = blobs.reduce((sum, item) => sum + item.bytes, 0);
     const referencedPhysicalBytes = blobs.filter((item) => roots.referenced.has(item.sha256)).reduce((sum, item) => sum + item.bytes, 0);
     const reclaimable = blobs.filter((item) => !roots.referenced.has(item.sha256));
