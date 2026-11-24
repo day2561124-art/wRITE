@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   cbC2AutonomousCognitionSteps,
+  cbC6ConsciousCognitionSteps,
   cbC5SubjectiveAffordanceEvidenceSteps,
   cognitionSteps,
   communicationSteps,
@@ -71,6 +72,7 @@ const activeRunAllPaths = [
   ...runAllSource.matchAll(/"tests\/body-0-authority\.test\.mjs"/g),
   ...runAllSource.matchAll(/"tests\/cb-c6\/cb-c6-sleep-arousal-reader\.test\.mjs"/g),
   ...runAllSource.matchAll(/"tests\/cb-c6\/cb-c6-sleep-arousal-transition-authority\.test\.mjs"/g),
+  ...runAllSource.matchAll(/"tests\/cb-c6\/cb-c6-conscious-cognition-reentry\.test\.mjs"/g),
   ...runAllSource.matchAll(/"tests\/body-0-history\.test\.mjs"/g),
   ...runAllSource.matchAll(/"tests\/body-0-brain-body-contract\.test\.mjs"/g),
   ...runAllSource.matchAll(/"tests\/body-0-recovery-authority\.test\.mjs"/g),
@@ -179,6 +181,7 @@ assert.deepEqual(
   cognitionPaths,
   [
     ...pathsFor(cbC2AutonomousCognitionSteps),
+    ...pathsFor(cbC6ConsciousCognitionSteps),
     ...pathsFor(cbC5SubjectiveAffordanceEvidenceSteps),
     ...phase62CognitionPaths,
     ...phase63Paths,

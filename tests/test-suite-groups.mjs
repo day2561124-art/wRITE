@@ -395,6 +395,13 @@ export const cbC2AutonomousCognitionSteps = Object.freeze([
   ]),
 ]);
 
+export const cbC6ConsciousCognitionSteps = Object.freeze([
+  Object.freeze([
+    "CB-C6-D Conscious Cognition Reentry",
+    Object.freeze(["tests/cb-c6/cb-c6-conscious-cognition-reentry.test.mjs"]),
+  ]),
+]);
+
 export const cbC5SubjectiveAffordanceEvidenceSteps = Object.freeze([
   Object.freeze([
     "CB-C5-B Subjective Affordance Evidence Catalog",
@@ -427,6 +434,7 @@ export const body0AuthoritySteps = Object.freeze([
     "CB-C6-C Sleep Arousal Transition Authority",
     Object.freeze(["tests/cb-c6/cb-c6-sleep-arousal-transition-authority.test.mjs"]),
   ]),
+  ...cbC6ConsciousCognitionSteps,
 ]);
 
 export const body0HistorySteps = Object.freeze([
@@ -668,6 +676,7 @@ export const worldSimulationSteps = Object.freeze([
 
 export const cognitionSteps = Object.freeze([
   ...cbC2AutonomousCognitionSteps,
+  ...cbC6ConsciousCognitionSteps,
   ...cbC5SubjectiveAffordanceEvidenceSteps,
   ...phase62CognitionIntegrationSteps,
   ...phase63MemorySteps,

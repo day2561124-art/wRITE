@@ -4921,14 +4921,21 @@ export async function scheduleWorldSimulationAutonomousCognitionOpportunities(
     error.code = "WORLD_SIMULATION_AUTONOMOUS_COGNITION_HISTORY_STALE";
     throw error;
   }
+  // C6-D: only the committed World clock may make a temporal cognition
+  // cue due. A caller-supplied horizon is not a World commit and cannot
+  // trigger a sleeping/deferred or awake character's future opportunity.
+  const committedSimulationTime = snapshot.state?.simulation_time ?? null;
+  if (input.simulation_time !== undefined
+      && input.simulation_time !== committedSimulationTime) {
+    const error = new Error("C6-D cognition scheduling requires the exact committed World time.");
+    error.code = "C6D_COGNITION_CLOCK_NOT_COMMITTED";
+    throw error;
+  }
   const projection = projectWorldSimulationAutonomousCognitionOpportunities({
     world_state: snapshot.state,
     state_revision: snapshot.revision,
     committed_world_history: committedHistory,
-    simulation_time:
-      input.simulation_time
-      ?? snapshot.state?.simulation_time
-      ?? null,
+    simulation_time: committedSimulationTime,
     runtime_context_by_character:
       input.runtime_context_by_character
       ?? options.autonomousCognitionRuntimeContextByCharacter
