@@ -167,6 +167,7 @@ function preparationSurface(receipt, reused) {
       phase79m_impasse_deliberation_rounds_supported: true,
       impasse_deliberation_and_action_submission_separated: true,
       same_snapshot_impasse_repreparation_enforced: true,
+      host_owned_private_retrieval_route_supported: true,
       caller_authors_candidate_action: false,
       caller_decides_causal_outcome: false,
       caller_decides_commit_gate: false,
@@ -641,12 +642,24 @@ async function prepareFormalDecisionRound(
   sessionId,
   options,
   priorSubmissions = [],
+  reservationHandle,
 ) {
   const loopOptions = formalReplayLoopOptions(options, priorSubmissions);
-  const prepared = await prepareWorldSimulationTurn(
-    { world_simulation_session_id: sessionId },
-    loopOptions,
-  );
+  const broker = preparedTurnBroker(options);
+  const privatePreparation = typeof broker.preparePrivateRetrieval === "function"
+    ? await broker.preparePrivateRetrieval({
+      prepared_turn_handle: reservationHandle,
+      preparer_owner_id: formalResolverOwnerId,
+    })
+    : { configured: false };
+  // Configured retrieval runs in the parent-owned host. A provider failure
+  // rejects preparation; never substitute the legacy no-resolver outcome.
+  const prepared = privatePreparation.configured === true
+    ? privatePreparation.prepared
+    : await prepareWorldSimulationTurn(
+      { world_simulation_session_id: sessionId },
+      loopOptions,
+    );
   const impasseRound = buildWorldSimulationFormalImpasseDeliberationRound({
     prepared_turn: prepared,
     prior_submissions: priorSubmissions,
@@ -756,6 +769,7 @@ export function buildWorldSimulationFormalTurnTransportContract() {
       caller_may_submit_hard_conflict_count: false,
       custom_causal_adjudicator_forwarded: false,
       custom_memory_retrieval_resolver_forwarded: false,
+      host_owned_private_retrieval_route_supported: true,
     },
     mcp_public_adoption_installed: false,
     http_parent_broker_adoption_installed: false,
@@ -836,6 +850,7 @@ export async function prepareFormalWorldSimulationTurn(input = {}, options = {})
       sessionId,
       options,
       [],
+      reservation.receipt.prepared_turn_handle,
     );
 
     const receipt = await broker.storePrepared({
@@ -904,6 +919,7 @@ export async function submitFormalWorldSimulationCharacterDeliberation(
       before.world_simulation_session_id,
       options,
       submitted.deliberation_submissions,
+      handle,
     );
     const receipt = await broker.storePrepared({
       prepared_turn_handle: handle,
