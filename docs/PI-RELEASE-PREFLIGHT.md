@@ -33,3 +33,21 @@ node scripts/pi-runtime/release-preflight.mjs
 所有檢查通過後，仍需依照 Nexa 原有任務授權與維護程序執行受控切換；不能由 CI 自動重新配置正式 Windows 服務或工作樹。切換後再次執行正式 MCP 的 dev_pi_runtime_status，確認 ready=true，並核對 Journal hash chain、Pi route 和既有工作流。失敗時保留原發布版本，不覆寫本機 main、不強制 pull/reset，也不重播結果未知的操作。
 
 正式本機 Git 工作樹與發布目錄是兩個不同的資料面。即使 GitHub main 已更新，也不代表運行中的受保護發布版隨之更新。
+
+
+## 關機期間在 GitHub 完成驗收，開機後手動準備
+
+1. 在 GitHub 找到已成功通過 Windows Pi 整合及完整主分支驗證的 **確切 40 字元 commit SHA**。不要把尚在執行的 CI 視為已驗收。
+2. 開機後，從 GitHub 下載該 SHA 的 Source code (zip)；解壓到**原 Git 工作樹與目前受保護發布目錄以外**的全新資料夾，例如獨立的 release-candidate 目錄。不要解壓覆蓋既有專案或服務資料夾。
+3. 用 Windows PowerShell 5.1 或以上版本，在該候選資料夾執行：
+
+~~~powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\prepare-pi-manual-release.ps1
+~~~
+
+此命令先驗證候選不含 .git、node_modules 或 junction，Node >=22.19.0，再在**候選資料夾內**對主專案和 Pi 1.5.0 Sidecar 分別執行 lockfile 固定的 npm ci，最後實際執行 preflight。任何一步失敗都禁止切換正式版本。這是安裝與檢查候選，**不是正式部署**。
+
+4. 由維護操作員保留原有發布目錄、排程、服務設定及資料備份；確認沒有正在執行或待對帳的變更，再依原有 Windows 任務授權程序手動切換候選發布目錄。新的受保護發布位置必須同時含有候選的 node_modules，而非只複製原始碼。不要把 WRITE_DATA_ROOT、Journal、checkpoint、工作區紀錄或主專案未提交檔案搬入候選或覆寫。
+5. 從正式 MCP 查詢 dev_pi_runtime_status，必須 ready=true，並驗證 Pi route、Journal 的 chain_verified / dangling_operation_count。若失敗，使用事先留存的回復程序，且不重播未知操作。
+
+這份腳本不會操作服務、重新啟動、修改 .git、執行 git pull/reset、寫入目前運作中的正式版，且不提供任意目錄的安裝參數。正式部署仍必須由操作員決定與完成。
