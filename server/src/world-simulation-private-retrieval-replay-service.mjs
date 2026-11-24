@@ -48,50 +48,45 @@ export function bindPrivateRetrievalStageResponse(identity, response) {
   return { identity: clone(identity), response: snapshot, response_hash: hash(snapshot) };
 }
 
-export async function replayPrivateRetrievalStages({ scope, kernel_input, transcript = [] } = {}) {
-  requireReplay(object(kernel_input), "Missing retrieval kernel input.");
+// Shared checkpoint cursor for direct V3 execution and engine-private World
+// preparation. Only the engine supplies run and bindingForStage.
+async function replayStages({ transcript, run, bindingForStage }) {
   requireReplay(Array.isArray(transcript) && transcript.length <= MAX_ENTRIES,
     "Invalid or oversized retrieval transcript.");
-  const input = clone(kernel_input);
-  const binding = scopeIdentity(scope, input.query);
   const prefix = clone(transcript);
   let consumed = 0;
   let pending = null;
   const suspend = new Error("Private retrieval response pending.");
-
   try {
-    const result = await executeWorldSimulationMemoryRetrievalProcessV3({
-      ...input,
-      resolver: async (stageInput) => {
-        const stage = stageInput.stage;
-        const queryId = stage === "initiation" ? stageInput.query?.query_id : stageInput.query_id;
-        const step = stage === "initiation" ? null : stageInput.process?.step_index;
-        requireReplay(stages.has(stage) && stageInput.character === binding.observer
-          && queryId === binding.query_id && (stage === "initiation"
-            ? consumed === 0 : Number.isSafeInteger(step) && step >= 0),
-          "Unexpected retrieval stage identity.");
-        requireReplay(consumed < MAX_ENTRIES, "Private retrieval replay capacity exceeded.");
-        const identity = {
-          ...binding,
-          sequence: consumed,
-          stage,
-          step_index: step,
-          input_hash: hash(stageInput),
-        };
-        if (consumed === prefix.length) {
-          pending = { identity, trusted_stage_input: clone(stageInput) };
-          throw suspend;
-        }
-        const entry = prefix[consumed];
-        requireReplay(object(entry) && object(entry.identity)
-          && hash(entry.identity) === hash(identity),
-          "Retrieval transcript does not match the current stage.");
-        requireReplay(object(entry.response) && hash(entry.response) === entry.response_hash,
-          "Retrieval response integrity mismatch.");
-        consumed += 1;
-        // Phase63C retains all stage response validation and recovery authority.
-        return clone(entry.response);
-      },
+    const result = await run(async (stageInput) => {
+      const stage = stageInput.stage;
+      const queryId = stage === "initiation" ? stageInput.query?.query_id : stageInput.query_id;
+      const step = stage === "initiation" ? null : stageInput.process?.step_index;
+      const binding = bindingForStage(stageInput, queryId);
+      requireReplay(stages.has(stage) && stageInput.character === binding.observer
+        && queryId === binding.query_id && (stage === "initiation"
+          ? step === null : Number.isSafeInteger(step) && step >= 0),
+        "Unexpected retrieval stage identity.");
+      requireReplay(consumed < MAX_ENTRIES, "Private retrieval replay capacity exceeded.");
+      const identity = {
+        ...binding,
+        sequence: consumed,
+        stage,
+        step_index: step,
+        input_hash: hash(stageInput),
+      };
+      if (consumed === prefix.length) {
+        pending = { identity, trusted_stage_input: clone(stageInput) };
+        throw suspend;
+      }
+      const entry = prefix[consumed];
+      requireReplay(object(entry) && object(entry.identity)
+        && hash(entry.identity) === hash(identity),
+        "Retrieval transcript does not match the current stage.");
+      requireReplay(object(entry.response) && hash(entry.response) === entry.response_hash,
+        "Retrieval response integrity mismatch.");
+      consumed += 1;
+      return clone(entry.response);
     });
     requireReplay(consumed === prefix.length, "Unused retrieval transcript entries.");
     return { status: "complete", result };
@@ -101,4 +96,49 @@ export async function replayPrivateRetrievalStages({ scope, kernel_input, transc
       "Invalid retrieval suspension.");
     return { status: "pending", request: pending };
   }
+}
+
+export async function replayPrivateRetrievalStages({ scope, kernel_input, transcript = [] } = {}) {
+  requireReplay(object(kernel_input), "Missing retrieval kernel input.");
+  const input = clone(kernel_input);
+  const binding = scopeIdentity(scope, input.query);
+  let initiated = false;
+  return replayStages({
+    transcript,
+    run: (resolver) => executeWorldSimulationMemoryRetrievalProcessV3({ ...input, resolver }),
+    bindingForStage: (stageInput) => {
+      if (stageInput.stage === "initiation") {
+        requireReplay(!initiated, "Repeated retrieval initiation.");
+        initiated = true;
+      } else {
+        requireReplay(initiated, "Missing retrieval initiation.");
+      }
+      return binding;
+    },
+  });
+}
+
+// The real World loop may prepare several observers. Each initiation carries
+// the kernel's query view; keep its identity separately while preserving the
+// global order of the actual engine callbacks. This is not a public resolver.
+export async function replayPrivateWorldPreparationStages({ scope, transcript = [], prepare } = {}) {
+  requireReplay(typeof prepare === "function", "Missing engine-owned preparation function.");
+  let activeBinding = null;
+  const seenQueries = new Set();
+  return replayStages({
+    transcript,
+    run: prepare,
+    bindingForStage: (stageInput, queryId) => {
+      if (stageInput.stage === "initiation") {
+        requireReplay(!seenQueries.has(queryId), "Repeated World retrieval query.");
+        activeBinding = {
+          ...scopeIdentity(scope, stageInput.query),
+          query_hash_basis: "world_kernel_initiation_view",
+        };
+        seenQueries.add(queryId);
+      }
+      requireReplay(activeBinding !== null, "Missing World retrieval initiation.");
+      return activeBinding;
+    },
+  });
 }

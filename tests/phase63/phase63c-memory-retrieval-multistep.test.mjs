@@ -1,3 +1,5 @@
+import { checkpointPrivateWorldRetrievalPreparation } from "../../server/src/world-simulation-private-retrieval-preparation-service.mjs";
+import { getWorldSimulationState } from "../../server/src/world-simulation-state-service.mjs";
 import {
   bindPrivateRetrievalStageResponse,
   replayPrivateRetrievalStages,
@@ -891,19 +893,7 @@ try {
     );
 
   const loopStageCalls = [];
-
-  const prepared =
-    await prepareWorldSimulationTurn(
-      {
-        world_simulation_session_id:
-          session.world_simulation_session_id,
-        event_id: eventId,
-      },
-      {
-        fixtureRoot,
-        memoryRetrievalTechnicalStepBudget: 4,
-        memoryRetrievalStageResolver:
-          async (input) => {
+  const loopResolver = async (input) => {
             loopStageCalls.push(
               `${input.stage}:${input.process?.step_index ?? "init"}`,
             );
@@ -1005,9 +995,12 @@ try {
             }
 
             throw new Error("unexpected native loop stage");
-          },
-      },
-    );
+          };
+  const prepareLoop = (resolver) => prepareWorldSimulationTurn(
+    { world_simulation_session_id: session.world_simulation_session_id, event_id: eventId },
+    { fixtureRoot, memoryRetrievalTechnicalStepBudget: 4, memoryRetrievalStageResolver: resolver },
+  );
+  const prepared = await prepareLoop(loopResolver);
 
   assert.equal(
     prepared.memory_retrieval_processes[0]
@@ -1044,6 +1037,47 @@ try {
       "continuation:1",
     ],
   );
+
+  // C7: checkpoint the actual World preparation, not merely a detached V3
+  // fixture. Every replay must stay on the same committed World snapshot.
+  const beforeReplay = await getWorldSimulationState(session.world_simulation_session_id, { fixtureRoot });
+  const worldScope = {
+    session_id: session.world_simulation_session_id,
+    committed_revision: beforeReplay.revision,
+    committed_hash: beforeReplay.state_hash,
+  };
+  const worldTranscript = [];
+  const checkpointWorld = (scope = worldScope, transcript = worldTranscript) =>
+    checkpointPrivateWorldRetrievalPreparation({ scope, transcript, event_id: eventId }, {
+      fixtureRoot, memoryRetrievalTechnicalStepBudget: 4,
+    });
+  for (let round = 0; round < 5; round += 1) {
+    const checkpoint = await checkpointWorld();
+    assert.equal(checkpoint.status, "pending");
+    assert.equal(Object.hasOwn(checkpoint, "result"), false);
+    assert.equal(checkpoint.request.identity.sequence, round);
+    assert.equal(checkpoint.request.identity.query_hash_basis, "world_kernel_initiation_view");
+    const current = await getWorldSimulationState(session.world_simulation_session_id, { fixtureRoot });
+    assert.equal(current.revision, beforeReplay.revision);
+    assert.equal(current.state_hash, beforeReplay.state_hash);
+    worldTranscript.push(bindPrivateRetrievalStageResponse(
+      checkpoint.request.identity, await loopResolver(checkpoint.request.trusted_stage_input),
+    ));
+  }
+  const worldReplay = await checkpointWorld();
+  assert.equal(worldReplay.status, "complete");
+  assert.deepEqual(worldReplay.result.memory_retrieval_processes, prepared.memory_retrieval_processes);
+  assert.equal(JSON.stringify(worldReplay.result.decision_packets).includes(loopTargetAnswer), true);
+  assert.equal(JSON.stringify(worldReplay.result.decision_packets).includes(loopHiddenDetail), false);
+  await assert.rejects(() => checkpointWorld({
+    ...worldScope, committed_revision: worldScope.committed_revision + 1,
+  }), replayMismatch);
+  await assert.rejects(() => checkpointWorld(worldScope, [
+    worldTranscript[0], worldTranscript[2],
+  ]), replayMismatch);
+  const afterReplay = await getWorldSimulationState(session.world_simulation_session_id, { fixtureRoot });
+  assert.equal(afterReplay.revision, beforeReplay.revision);
+  assert.equal(afterReplay.state_hash, beforeReplay.state_hash);
 
   nativeLoopVerified = true;
 } finally {
