@@ -38,7 +38,7 @@ assert.match(smoke, /ci-change-detection\.test\.mjs/u);
 assert.match(smoke, /affected-test-selector\.test\.mjs/u);
 assert.doesNotMatch(smoke, /tests\/run-all\.mjs/u);
 
-const sidecar = block("  pi-sidecar-integration:\n", "  main-regression:\n");
+const sidecar = block("  pi-sidecar-integration:\n", "  pi-manual-release-prep:\n");
 assert.match(sidecar, /ubuntu-latest/u);
 assert.match(sidecar, /windows-latest/u);
 assert.match(sidecar, /node-version: 24/u);
@@ -47,6 +47,13 @@ assert.match(sidecar, /node scripts\/pi-runtime\/release-preflight\.mjs/u);
 assert.match(sidecar, /node scripts\/pi-runtime\/runner\.mjs status/u);
 assert.match(sidecar, /node --test tests\/mcp\/mcp-pi-agent-execution\.test\.mjs/u);
 assert.match(sidecar, /node --test tests\/mcp\/mcp-pi-codemode-bridge\.test\.mjs/u);
+
+const manualPrep = block("  pi-manual-release-prep:\n", "  main-regression:\n");
+assert.match(manualPrep, /runs-on: windows-latest/u);
+assert.match(manualPrep, /node-version: 24/u);
+assert.match(manualPrep, /prepare-pi-manual-release\.ps1/u);
+assert.match(manualPrep, /Manual release candidate failed installation or real Pi preflight/u);
+assert.match(manualPrep, /Already installed release candidate was not rejected/u);
 
 const main = block("  main-regression:\n", "  scheduled-full:\n");
 assert.match(main, /github\.ref == 'refs\/heads\/main'/u);
