@@ -10,6 +10,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { createStdioSession, createReadonlyRetryBudget } from './mcp-http-stdio-adapter.mjs';
 import { createEphemeralWorldSimulationPreparedTurnBroker } from './world-simulation-prepared-turn-ephemeral-broker.mjs';
+import { createConfiguredPrivateWorldRetrievalHost } from './world-simulation-private-retrieval-host-service.mjs';
 import { createWorkspaceSnapshotAuthority } from './mcp-workspace-snapshot-authority.mjs';
 import { createWorkspaceChangeClock } from './mcp-workspace-change-clock.mjs';
 import { createWorkspaceChangeClockProvider } from './mcp-workspace-change-clock-provider.mjs';
@@ -389,6 +390,7 @@ sessionReaper.unref?.();
 // and the bounded developer reload/integration control routes.
 // Legacy raw-story payloads no longer cross MCP child boundaries.
 const preparedTurnBroker = createEphemeralWorldSimulationPreparedTurnBroker({
+  ...createConfiguredPrivateWorldRetrievalHost(),
   ownership: 'mcp_http_parent',
   storage_scope: 'mcp_http_parent_process_ephemeral_memory',
 });
