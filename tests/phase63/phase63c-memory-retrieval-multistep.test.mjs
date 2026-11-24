@@ -1189,6 +1189,18 @@ try {
       return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(result) } }] }));
     },
   });
+  const failingParent = createEphemeralWorldSimulationPreparedTurnBroker({
+    privateRetrievalExecutor: malformedExecutor,
+    privateRetrievalOptions: privateExecutionOptions,
+  });
+  const blockedFormal = await chatgpt_bridge_prepare_world_turn({
+    world_simulation_session_id: session.world_simulation_session_id,
+  }, { fixtureRoot, preparedTurnBroker: failingParent });
+  assert.equal(blockedFormal.blocked, true);
+  assert.equal(blockedFormal.blocked_code, "WORLD_SIMULATION_PRIVATE_RETRIEVAL_PROVIDER_FAILED");
+  assert.equal(JSON.stringify(blockedFormal).includes(loopHiddenDetail), false);
+  assert.equal(failingParent.getActiveReceipt({ world_simulation_session_id: session.world_simulation_session_id }), null);
+  assert.equal(failingParent.getStorageStatus().payload_reference_count, 0);
   const parent = createEphemeralWorldSimulationPreparedTurnBroker({
     ...configuredHost,
     privateRetrievalOptions: { ...configuredHost.privateRetrievalOptions, fixtureRoot },
