@@ -31,8 +31,15 @@ function Assert-FreshCandidate {
     Assert-PlainDirectory $root 'Candidate root'
     Assert-PlainDirectory (Join-Path $root 'scripts') 'Candidate scripts directory'
     Assert-PlainDirectory $runtime 'Pi runtime directory'
-    if (Test-Path -LiteralPath (Join-Path $root '.git')) {
-        throw 'Git working trees cannot be installation targets. Extract a source archive elsewhere.'
+    # Refuse an archive unpacked *inside* a managed Git tree as well.
+    $ancestor = $root
+    while ($true) {
+        if (Test-Path -LiteralPath (Join-Path $ancestor '.git')) {
+            throw 'Git working trees and their descendants cannot be installation targets. Extract the archive elsewhere.'
+        }
+        $parent = [IO.Directory]::GetParent($ancestor)
+        if ($null -eq $parent) { break }
+        $ancestor = $parent.FullName
     }
     if (Test-Path -LiteralPath (Join-Path $root 'node_modules')) {
         throw 'Candidate root already contains dependencies; prepare a fresh archive instead.'
