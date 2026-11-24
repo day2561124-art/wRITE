@@ -9,6 +9,7 @@ import {
 import {
   createWorldSimulationCharacterRuntimeManager,
   runWorldSimulationTurn,
+  runWorldSimulationOffscreenCognitionStep,
   scheduleWorldSimulationAutonomousCognitionOpportunities,
   dispatchWorldSimulationAutonomousCognitionOpportunities,
 } from "../../server/src/world-simulation-loop-service.mjs";
@@ -340,6 +341,28 @@ try {
     const params = { world_simulation_session_id: sid,
       runtime_context_by_character: { aria: { idle: true } } };
     const before = await getWorldSimulationState(sid, opts);
+    const dispatchForRoute = async (input, options) => {
+      if (route === "foreground") {
+        return dispatchWorldSimulationAutonomousCognitionOpportunities(input, options);
+      }
+      const frontier = await getWorldSimulationState(sid, opts);
+      const result = await runWorldSimulationOffscreenCognitionStep({
+        ...input, expected_revision: frontier.revision,
+        expected_state_hash: frontier.state_hash, max_opportunities: 1,
+      }, options);
+      assert.equal(result.offscreen_cognition_step, true);
+      assert.equal(result.world_time_advanced_by_cognition, false);
+      assert.equal(result.offscreen_budget_exhausted, false);
+      return result;
+    };
+    if (route === "offscreen") {
+      await assert.rejects(runWorldSimulationOffscreenCognitionStep({
+        ...params, expected_revision: before.revision,
+        expected_state_hash: before.state_hash, max_opportunities: 1,
+      }, { ...opts, characterBrain: async () => assert.fail("queued World work takes priority") }),
+      { code: "C6_OFFSCREEN_COGNITION_WORLD_WORK_PENDING" });
+      assert.deepEqual(await getWorldSimulationState(sid, opts), before);
+    }
     const deferred = await scheduleWorldSimulationAutonomousCognitionOpportunities(params, opts);
     assert.equal(deferred.scheduler_projection.opportunity_count, 0);
     assert.equal(deferred.scheduler_projection.deferred_opportunity_count, 1);
@@ -390,8 +413,25 @@ try {
     const resumed = await scheduleWorldSimulationAutonomousCognitionOpportunities(params, opts);
     assert.equal(resumed.scheduler_projection.opportunity_count, 1);
     assert.equal(resumed.scheduler_projection.opportunities[0].opportunity_id, opportunityId);
+    if (route === "offscreen") {
+      const frontier = { ...params, expected_revision: wake.revision,
+        expected_state_hash: wake.state_hash, max_opportunities: 0 };
+      const noBrain = { ...opts, characterBrain: async () => assert.fail("blocked admission cannot call Brain") };
+      const budget = await runWorldSimulationOffscreenCognitionStep(frontier, noBrain);
+      assert.equal(budget.offscreen_budget_exhausted, true);
+      assert.equal(budget.admitted_opportunity_count, 1);
+      assert.equal(budget.dispatch_count, 0);
+      assert.deepEqual(budget.consumed_opportunity_ids, []);
+      await assert.rejects(runWorldSimulationOffscreenCognitionStep({
+        ...frontier, expected_revision: before.revision, max_opportunities: 1,
+      }, noBrain), { code: "C6_OFFSCREEN_COGNITION_STATE_CHANGED" });
+      await assert.rejects(runWorldSimulationOffscreenCognitionStep({
+        ...frontier, max_opportunities: 33,
+      }, noBrain), { code: "C6_OFFSCREEN_COGNITION_INVALID" });
+      assert.deepEqual(await getWorldSimulationState(sid, opts), wake);
+    }
     const summary = [];
-    const writeGoal = await dispatchWorldSimulationAutonomousCognitionOpportunities(params, {
+    const writeGoal = await dispatchForRoute(params, {
       ...opts, characterBrain: async packet => {
         assert.equal(packet.character, "aria");
         const view = packet.native_goal_decision;
@@ -425,7 +465,7 @@ try {
       runtime_context_by_character: { aria: { pending_internal_cues: [{
         kind: "memory_reactivation", source_ref: "c6f-goal-adoption-review",
       }] } } };
-    const adoptGoal = await dispatchWorldSimulationAutonomousCognitionOpportunities(adoption, {
+    const adoptGoal = await dispatchForRoute(adoption, {
       ...opts, characterBrain: async packet => {
         const view = packet.native_goal_decision;
         assert.equal(packet.character, "aria");
@@ -443,7 +483,7 @@ try {
       runtime_context_by_character: { aria: { pending_internal_cues: [{
         kind: "memory_reactivation", source_ref: "c6f-plan-from-committed-goal",
       }] } } };
-    const plan = await dispatchWorldSimulationAutonomousCognitionOpportunities(planParams, {
+    const plan = await dispatchForRoute(planParams, {
       ...opts, characterBrain: async packet => {
         const view = packet.native_plan_decision;
         assert.equal(packet.character, "aria");
@@ -493,7 +533,7 @@ try {
     // Recreate the runtime manager, no caller-supplied consumed IDs.
     // The exact committed goal and plan receipts must survive reentry.
     for (const input of [adoption, planParams]) {
-      const replay = await dispatchWorldSimulationAutonomousCognitionOpportunities(input, {
+      const replay = await dispatchForRoute(input, {
         ...opts, characterBrain: async () => assert.fail("committed cognitive operation cannot replay"),
       });
       assert.equal(replay.dispatch_count, 0);
@@ -518,3 +558,5 @@ try {
   await rm(pairedRoot, { recursive: true, force: true });
 }
 console.log("CB-C6-F paired subjective wake reentry: memory/claim/belief provenance, goal adoption, plan and durable replay PASS.");
+
+console.log("CB-C6 quiet frontier: explicit offscreen cognition, bounded admission, stale frontier rejection and canonical goal/plan replay PASS.");
