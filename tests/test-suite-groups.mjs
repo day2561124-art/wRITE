@@ -393,6 +393,9 @@ export const cbC2AutonomousCognitionSteps = Object.freeze([
     "CB-C2 Autonomous Cognition Scheduler",
     Object.freeze(["tests/cb-c2/cb-c2-autonomous-cognition-scheduler.test.mjs"]),
   ]),
+]);
+
+export const cbC6ConsciousCognitionSteps = Object.freeze([
   Object.freeze([
     "CB-C6-D Conscious Cognition Reentry",
     Object.freeze(["tests/cb-c6/cb-c6-conscious-cognition-reentry.test.mjs"]),
@@ -431,6 +434,7 @@ export const body0AuthoritySteps = Object.freeze([
     "CB-C6-C Sleep Arousal Transition Authority",
     Object.freeze(["tests/cb-c6/cb-c6-sleep-arousal-transition-authority.test.mjs"]),
   ]),
+  ...cbC6ConsciousCognitionSteps,
 ]);
 
 export const body0HistorySteps = Object.freeze([
@@ -672,6 +676,7 @@ export const worldSimulationSteps = Object.freeze([
 
 export const cognitionSteps = Object.freeze([
   ...cbC2AutonomousCognitionSteps,
+  ...cbC6ConsciousCognitionSteps,
   ...cbC5SubjectiveAffordanceEvidenceSteps,
   ...phase62CognitionIntegrationSteps,
   ...phase63MemorySteps,
