@@ -560,3 +560,56 @@ try {
 console.log("CB-C6-F paired subjective wake reentry: memory/claim/belief provenance, goal adoption, plan and durable replay PASS.");
 
 console.log("CB-C6 quiet frontier: explicit offscreen cognition, bounded admission, stale frontier rejection and canonical goal/plan replay PASS.");
+
+const quietRoot = path.join(projectRoot, "tests", ".tmp",
+  "cb-c6-quiet-sleep-" + process.pid + "-" + Date.now());
+const quietOptions = { fixtureRoot: quietRoot };
+try {
+  const quiet = initialWorld();
+  quiet.event_queue = [];
+  const session = await beginWorldSimulationSession({
+    simulation_label: "C6 quiet frontier asleep and independent awake actor",
+    seed: "c6-quiet-sleep",
+    initial_world_state: quiet,
+  }, quietOptions);
+  const sid = session.world_simulation_session_id;
+  const before = await getWorldSimulationState(sid, quietOptions);
+  const frontier = { world_simulation_session_id: sid,
+    expected_revision: before.revision, expected_state_hash: before.state_hash,
+    max_opportunities: 1 };
+  const noBrain = { ...quietOptions, characterBrain: async () => assert.fail("no admitted Brain work") };
+  const asleep = await runWorldSimulationOffscreenCognitionStep({
+    ...frontier, runtime_context_by_character: { aria: { idle: true } },
+  }, noBrain);
+  assert.equal(asleep.admitted_opportunity_count, 0);
+  assert.equal(asleep.deferred_opportunity_count, 1);
+  assert.equal(asleep.dispatch_count, 0);
+  assert.deepEqual(asleep.consumed_opportunity_ids, []);
+  const context = { aria: { idle: true }, keeper: { temporal_cues: [{
+    source_ref: "keeper-prior-cue", due_at: now,
+  }] } };
+  const seen = [];
+  const independent = await runWorldSimulationOffscreenCognitionStep({
+    ...frontier, runtime_context_by_character: context,
+  }, { ...quietOptions, characterBrain: async packet => {
+    seen.push(packet.character);
+    return { disposition: "processed_autonomous_cognition_opportunity" };
+  } });
+  assert.deepEqual(seen, ["keeper"]);
+  assert.equal(independent.admitted_opportunity_count, 1);
+  assert.equal(independent.deferred_opportunity_count, 1);
+  assert.equal(independent.dispatch_count, 1);
+  assert.equal(independent.durable_cognitive_write_performed, false);
+  assert.equal(independent.read_only_consumption_requires_caller_receipt, true);
+  const replay = await runWorldSimulationOffscreenCognitionStep({
+    ...frontier, runtime_context_by_character: context,
+    consumed_opportunity_ids: independent.consumed_opportunity_ids,
+  }, noBrain);
+  assert.equal(replay.dispatch_count, 0);
+  assert.equal(replay.deferred_opportunity_count, 1);
+  assert.deepEqual(await getWorldSimulationState(sid, quietOptions), before);
+  assert.equal((await getWorldSimulationHistory(sid, quietOptions)).turns.length, 0);
+} finally {
+  await rm(quietRoot, { recursive: true, force: true });
+}
+console.log("CB-C6 quiet frontier sleep: awake actor independent, sleeping cue retained, read-only receipt replay suppressed PASS.");
