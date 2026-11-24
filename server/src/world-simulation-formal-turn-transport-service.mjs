@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { createConfiguredPrivateWorldRetrievalHost } from "./world-simulation-private-retrieval-host-service.mjs";
 
 import { readCommittedWorldSimulationBodyInteroceptiveSignals } from "./world-simulation-body-interoceptive-signal-service.mjs";
 import { readCommittedWorldSimulationBodyHomeostaticCues } from "./world-simulation-body-homeostatic-cue-service.mjs";
@@ -87,6 +88,7 @@ const formalResolverOwnerId =
 
 const inProcessPreparedTurnBroker =
   createEphemeralWorldSimulationPreparedTurnBroker({
+    ...(typeof process.send === "function" ? {} : createConfiguredPrivateWorldRetrievalHost()),
     ownership: "formal_world_turn_in_process_runtime",
     storage_scope: "process_local_ephemeral_memory",
   });
