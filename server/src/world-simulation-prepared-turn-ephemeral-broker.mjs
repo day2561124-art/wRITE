@@ -126,9 +126,11 @@ function requiredRevision(value) {
 // trusted recovery route must still be independently isolated before adoption.
 function assertNoPrivateRetrievalArtifact(characterInput) {
   const pending = [characterInput];
+  const visited = new WeakSet();
   while (pending.length > 0) {
     const value = pending.pop();
-    if (!value || typeof value !== "object") continue;
+    if (!value || typeof value !== "object" || visited.has(value)) continue;
+    visited.add(value);
     if (!Array.isArray(value) && (
       (value.identity?.version === "c7-private-retrieval-replay-v1"
         && (Object.hasOwn(value, "trusted_stage_input") || Object.hasOwn(value, "response")))
