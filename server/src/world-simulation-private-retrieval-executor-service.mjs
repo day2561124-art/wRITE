@@ -2,6 +2,8 @@ import { checkpointPrivateWorldRetrievalPreparation } from "./world-simulation-p
 import { bindPrivateRetrievalStageResponse } from "./world-simulation-private-retrieval-replay-service.mjs";
 
 const MAX_STAGE_CONTEXTS = 1024;
+const executors = new WeakSet();
+export const isPrivateWorldRetrievalExecutor = (value) => executors.has(value);
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
 function fail(code) {
@@ -18,10 +20,11 @@ export function createPrivateWorldRetrievalExecutor({ openStageContext } = {}) {
     fail("WORLD_SIMULATION_PRIVATE_RETRIEVAL_PROVIDER_REQUIRED");
   }
   const usedContexts = new WeakSet();
-  return Object.freeze({
-    async prepare({ scope, event_id } = {}, options = {}) {
+  const executor = Object.freeze({
+    async prepare({ scope, event_id, prior_deliberation_submissions = [] } = {}, options = {}) {
       const expected = clone(scope ?? null);
       const transcript = [];
+      const deliberation = clone(prior_deliberation_submissions);
       const settings = {
         ...(options.fixtureRoot ? { fixtureRoot: options.fixtureRoot } : {}),
         ...(options.memoryRetrievalTechnicalStepBudget === undefined ? {} : {
@@ -30,12 +33,12 @@ export function createPrivateWorldRetrievalExecutor({ openStageContext } = {}) {
       };
       for (let count = 0; count <= MAX_STAGE_CONTEXTS; count += 1) {
         const checkpoint = await checkpointPrivateWorldRetrievalPreparation({
-          scope: expected, event_id, transcript,
+          scope: expected, event_id, transcript, prior_deliberation_submissions: deliberation,
         }, settings);
         if (checkpoint.status === "complete") {
           // The result remains engine-private; only the existing Character
           // Brain projection may subsequently cross the public boundary.
-          return { prepared: checkpoint.result, stage_count: transcript.length };
+          return { prepared: checkpoint.result, stage_count: transcript.length, transcript: clone(transcript) };
         }
         if (checkpoint.status !== "pending" || count === MAX_STAGE_CONTEXTS) {
           fail("WORLD_SIMULATION_PRIVATE_RETRIEVAL_EXECUTOR_BUDGET_EXHAUSTED");
@@ -79,5 +82,18 @@ export function createPrivateWorldRetrievalExecutor({ openStageContext } = {}) {
       }
       fail("WORLD_SIMULATION_PRIVATE_RETRIEVAL_EXECUTOR_BUDGET_EXHAUSTED");
     },
+    async replay({ scope, event_id, transcript, prior_deliberation_submissions = [] } = {}, options = {}) {
+      if (!Array.isArray(transcript)) fail("WORLD_SIMULATION_PRIVATE_RETRIEVAL_TRANSCRIPT_REQUIRED");
+      const checkpoint = await checkpointPrivateWorldRetrievalPreparation({
+        scope, event_id, transcript, prior_deliberation_submissions,
+      }, options);
+      if (checkpoint.status !== "complete") {
+        // Deliberation replay may not silently expand or re-decide retrieval.
+        fail("WORLD_SIMULATION_PRIVATE_RETRIEVAL_TRANSCRIPT_INCOMPLETE");
+      }
+      return { prepared: checkpoint.result, stage_count: transcript.length };
+    },
   });
+  executors.add(executor);
+  return executor;
 }
