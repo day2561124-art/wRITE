@@ -1,3 +1,5 @@
+import { createPrivateWorldRetrievalExecutor } from "../../server/src/world-simulation-private-retrieval-executor-service.mjs";
+import { createEphemeralWorldSimulationPreparedTurnBroker } from "../../server/src/world-simulation-prepared-turn-ephemeral-broker.mjs";
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
 import path from "node:path";
@@ -111,7 +113,7 @@ function bobPacket(prepared) {
   return prepared.decision_packets.find(packet => packet.character === "Bob");
 }
 
-async function submitCurrentFormalDeliberation(surface) {
+async function submitCurrentFormalDeliberation(surface, options = fixtureOptions) {
   const current = surface.current_decision;
   assert.ok(current, "Formal deliberation round must expose one current pending decision.");
   const task = current.character_input.experiential_deliberation;
@@ -127,7 +129,7 @@ async function submitCurrentFormalDeliberation(surface) {
     prepared_turn_handle: surface.prepared_turn_handle,
     decision_handle: current.decision_handle,
     deliberation_response: { [outputField]: values },
-  }, fixtureOptions);
+  }, options);
 }
 
 try {
@@ -332,6 +334,47 @@ try {
       .includes("evidence_ref"),
     false,
   );
+
+  // C7: the existing Phase89B deliberation must reprepare the same World
+  // snapshot using the parent-owned retrieval transcript, without calling
+  // the private model again. Explicit no-process is a genuine test decision.
+  const privateSessionId = await bootstrap("Phase89C private retrieval replay", "phase89c-private");
+  let privateStageCalls = 0;
+  const privateExecutor = createPrivateWorldRetrievalExecutor({
+    openStageContext: async () => ({
+      resolve: async (view) => {
+        assert.equal(view.stage, "initiation");
+        privateStageCalls += 1;
+        return { process_occurred: false };
+      },
+      close: async () => {},
+    }),
+  });
+  const privateBroker = createEphemeralWorldSimulationPreparedTurnBroker({
+    privateRetrievalExecutor: privateExecutor,
+    privateRetrievalOptions: fixtureOptions,
+  });
+  const privateOptions = { ...fixtureOptions, preparedTurnBroker: privateBroker };
+  let privateSurface = await prepareFormalWorldSimulationTurn({
+    world_simulation_session_id: privateSessionId,
+  }, privateOptions);
+  assert.equal(privateSurface.decision_round_kind, worldSimulationFormalImpasseDecisionKinds.PHASE89B);
+  const initialPrivateStageCalls = privateStageCalls;
+  assert.ok(initialPrivateStageCalls >= 2);
+  let privateRounds = 0;
+  while (privateSurface.decision_round_kind !== worldSimulationFormalImpasseDecisionKinds.ACTION) {
+    privateSurface = await submitCurrentFormalDeliberation(privateSurface, privateOptions);
+    assert.equal(privateStageCalls, initialPrivateStageCalls,
+      "A Formal deliberation round must replay, not regenerate, the private retrieval transcript.");
+    assert.equal(JSON.stringify(privateSurface).includes("private_retrieval_transcript"), false);
+    privateRounds += 1;
+    assert.ok(privateRounds < 40);
+  }
+  assert.equal(privateSurface.current_decision.character_input.character, "Alice");
+  assert.deepEqual(privateSurface.current_decision.character_input.cognition.persistent_mood_context,
+    formalAliceInput.cognition.persistent_mood_context);
+  privateBroker.invalidate({ prepared_turn_handle: privateSurface.prepared_turn_handle });
+  assert.equal(privateBroker.getStorageStatus().payload_reference_count, 0);
 
   const contract = buildWorldSimulationPersistentMoodNativeAdoptionContract();
   assert.equal(contract.phase, "Phase89C");
