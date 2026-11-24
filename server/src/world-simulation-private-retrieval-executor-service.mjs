@@ -15,13 +15,30 @@ function fail(code) {
 // Engine-private host adapter, never a public MCP option. The host must supply
 // a genuinely isolated backend context per stage. Distinct JS wrapper objects
 // alone do NOT attest separate model contexts or prove provider privacy.
-export function createPrivateWorldRetrievalExecutor({ openStageContext } = {}) {
+function assertExplicitStageResponse(stage, response) {
+  const object = response && typeof response === "object" && !Array.isArray(response);
+  const valid = object && (
+    stage === "initiation" ? typeof response.process_occurred === "boolean"
+      : stage === "recovery" ? Array.isArray(response.contacted_candidate_refs)
+        && Array.isArray(response.recovered_selections)
+      : stage === "cue_construction" ? Array.isArray(response.cue_proposals)
+      : stage === "continuation" ? ["continue", "stop"].includes(response.control_action)
+      : false
+  );
+  if (!valid) fail("WORLD_SIMULATION_PRIVATE_RETRIEVAL_PROVIDER_RESPONSE_INVALID");
+}
+
+export function createPrivateWorldRetrievalExecutor({ openStageContext, maxDurationMs = 180_000 } = {}) {
   if (typeof openStageContext !== "function") {
     fail("WORLD_SIMULATION_PRIVATE_RETRIEVAL_PROVIDER_REQUIRED");
+  }
+  if (!Number.isSafeInteger(maxDurationMs) || maxDurationMs < 1 || maxDurationMs > 240_000) {
+    fail("WORLD_SIMULATION_PRIVATE_RETRIEVAL_PROVIDER_INVALID");
   }
   const usedContexts = new WeakSet();
   const executor = Object.freeze({
     async prepare({ scope, event_id, prior_deliberation_submissions = [] } = {}, options = {}) {
+      const deadline = Date.now() + maxDurationMs;
       const expected = clone(scope ?? null);
       const transcript = [];
       const deliberation = clone(prior_deliberation_submissions);
@@ -32,9 +49,11 @@ export function createPrivateWorldRetrievalExecutor({ openStageContext } = {}) {
         }),
       };
       for (let count = 0; count <= MAX_STAGE_CONTEXTS; count += 1) {
+        if (Date.now() >= deadline) fail("WORLD_SIMULATION_PRIVATE_RETRIEVAL_EXECUTOR_BUDGET_EXHAUSTED");
         const checkpoint = await checkpointPrivateWorldRetrievalPreparation({
           scope: expected, event_id, transcript, prior_deliberation_submissions: deliberation,
         }, settings);
+        if (Date.now() >= deadline) fail("WORLD_SIMULATION_PRIVATE_RETRIEVAL_EXECUTOR_BUDGET_EXHAUSTED");
         if (checkpoint.status === "complete") {
           // The result remains engine-private; only the existing Character
           // Brain projection may subsequently cross the public boundary.
@@ -61,9 +80,9 @@ export function createPrivateWorldRetrievalExecutor({ openStageContext } = {}) {
           if (typeof context.resolve !== "function" || typeof context.close !== "function") {
             fail("WORLD_SIMULATION_PRIVATE_RETRIEVAL_CONTEXT_REUSED_OR_INVALID");
           }
-          response = bindPrivateRetrievalStageResponse(
-            request.identity, await context.resolve(clone(request.trusted_stage_input)),
-          );
+          const decision = await context.resolve(clone(request.trusted_stage_input));
+          assertExplicitStageResponse(request.identity.stage, decision);
+          response = bindPrivateRetrievalStageResponse(request.identity, decision);
         } catch {
           failed = true;
         } finally {
