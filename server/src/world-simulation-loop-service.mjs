@@ -4974,20 +4974,102 @@ export async function scheduleWorldSimulationAutonomousCognitionOpportunities(
   });
 }
 
+// Explicit host-driven offscreen cognitive work at a committed quiet frontier.
+// This does not advance World time, change fidelity policy, execute actions or
+// replace the canonical C2/C3 cognitive writers. Pending World/acoustic work
+// retains priority; unsupported concurrent processes are not guessed away.
+export async function runWorldSimulationOffscreenCognitionStep(input = {}, options = {}) {
+  const reject = (message, code = "C6_OFFSCREEN_COGNITION_INVALID") => {
+    const error = new Error(message);
+    error.code = code;
+    throw error;
+  };
+  if (!isObject(input) || Object.keys(input).some(key => ![
+    "world_simulation_session_id", "expected_revision", "expected_state_hash",
+    "max_opportunities", "runtime_context_by_character", "consumed_opportunity_ids",
+  ].includes(key))
+      || typeof input.world_simulation_session_id !== "string"
+      || !input.world_simulation_session_id.trim()
+      || !Number.isSafeInteger(input.expected_revision) || input.expected_revision < 0
+      || typeof input.expected_state_hash !== "string" || !input.expected_state_hash
+      || !Number.isSafeInteger(input.max_opportunities)
+      || input.max_opportunities < 0 || input.max_opportunities > 32) {
+    reject("Offscreen cognition requires an exact World revision/hash and a budget from 0 to 32.");
+  }
+  const sessionId = input.world_simulation_session_id;
+  await assertWorldSimulationSession(sessionId, options);
+  const snapshot = await getWorldSimulationState(sessionId, options);
+  if (snapshot.revision !== input.expected_revision
+      || snapshot.state_hash !== input.expected_state_hash) {
+    reject("Offscreen cognition frontier no longer matches committed World state.",
+      "C6_OFFSCREEN_COGNITION_STATE_CHANGED");
+  }
+  const state = snapshot.state;
+  if (typeof state.simulation_time !== "string"
+      || !Number.isFinite(Date.parse(state.simulation_time))) {
+    reject("Offscreen cognition requires committed World time.");
+  }
+  if (array(state.event_queue).length || array(state.sound_events).length
+      || Object.values(object(state.ability_fields)).some(row => row?.active === true)
+      || Object.values(object(state.projectiles)).some(row => row?.active === true)) {
+    reject("Pending World events, acoustic evidence or active physical processes require their own authority first.",
+      "C6_OFFSCREEN_COGNITION_WORLD_WORK_PENDING");
+  }
+  const result = await dispatchWorldSimulationAutonomousCognitionInternal({
+    world_simulation_session_id: sessionId,
+    simulation_time: state.simulation_time,
+    runtime_context_by_character: input.runtime_context_by_character,
+    consumed_opportunity_ids: input.consumed_opportunity_ids,
+  }, options, {
+    revision: snapshot.revision, state_hash: snapshot.state_hash,
+    max_opportunities: input.max_opportunities,
+  });
+  return Object.freeze({
+    ...result,
+    offscreen_cognition_step: true,
+    world_time_advanced_by_cognition: false,
+    max_opportunities: input.max_opportunities,
+    // Read-only dispatch receipts still belong to the caller. Only existing
+    // canonical goal/plan commits durably consume an opportunity in history.
+    read_only_consumption_requires_caller_receipt: true,
+  });
+}
+
 export async function dispatchWorldSimulationAutonomousCognitionOpportunities(
   input = {},
   options = {},
 ) {
+  return dispatchWorldSimulationAutonomousCognitionInternal(input, options);
+}
+
+async function dispatchWorldSimulationAutonomousCognitionInternal(
+  input, options, offscreenFrontier = null,
+) {
   const scheduled =
     await scheduleWorldSimulationAutonomousCognitionOpportunities(input, options);
+  if (offscreenFrontier && (scheduled.state_revision !== offscreenFrontier.revision
+      || scheduled.world_state_hash !== offscreenFrontier.state_hash)) {
+    const error = new Error("Offscreen cognition lost its admitted World frontier.");
+    error.code = "C6_OFFSCREEN_COGNITION_STATE_CHANGED";
+    throw error;
+  }
+  // C2 commits all admitted participants against one revision. Do not split
+  // an atomic cognition transaction just to fit a small offscreen budget.
+  const budgetExhausted = offscreenFrontier !== null
+    && scheduled.scheduler_projection.opportunity_count > offscreenFrontier.max_opportunities;
 
-  if (scheduled.scheduler_projection.opportunity_count === 0) {
+  if (scheduled.scheduler_projection.opportunity_count === 0 || budgetExhausted) {
     return Object.freeze({
       version: worldSimulationAutonomousCognitionSchedulerVersion,
       world_simulation_session_id: scheduled.world_simulation_session_id,
       state_revision: scheduled.state_revision,
       world_state_hash: scheduled.world_state_hash,
       event_queue_empty: scheduled.event_queue_empty,
+      ...(offscreenFrontier ? {
+        offscreen_budget_exhausted: budgetExhausted,
+        admitted_opportunity_count: scheduled.scheduler_projection.opportunity_count,
+        deferred_opportunity_count: scheduled.scheduler_projection.deferred_opportunity_count,
+      } : {}),
       dispatch_count: 0,
       dispatches: [],
       consumed_opportunity_ids: [],
@@ -5306,6 +5388,11 @@ export async function dispatchWorldSimulationAutonomousCognitionOpportunities(
     state_revision: scheduled.state_revision,
     world_state_hash: scheduled.world_state_hash,
     event_queue_empty: scheduled.event_queue_empty,
+    ...(offscreenFrontier ? {
+      offscreen_budget_exhausted: false,
+      admitted_opportunity_count: scheduled.scheduler_projection.opportunity_count,
+      deferred_opportunity_count: scheduled.scheduler_projection.deferred_opportunity_count,
+    } : {}),
     dispatch_count: reportedDispatches.length,
     dispatches: reportedDispatches,
     consumed_opportunity_ids: dispatches.map((item) => item.opportunity_id),
