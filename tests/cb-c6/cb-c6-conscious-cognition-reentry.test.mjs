@@ -255,3 +255,266 @@ try {
   await rm(root, { recursive: true, force: true });
 }
 console.log("CB-C6-D Brain reentry: committed sleep defers, true wake resumes once, World clock spoofing rejected.");
+
+
+// C6-F: reentry must preserve subjective evidence well enough to make a
+// real goal/plan decision through the existing C2/C3 Native writers.
+// The paired offscreen path executes queued events at canonical fidelity;
+// this is NOT evidence for a lower-fidelity independent thought generator.
+import { runWorldSimulationOffscreenEventBatch } from "../../server/src/world-simulation-offscreen-event-batch-service.mjs";
+import { hashAgentRunValue } from "../../server/src/agent-run-service.mjs";
+import { buildWorldSimulationSubjectiveClaims } from "../../server/src/world-simulation-subjective-claim-projection-service.mjs";
+import { resolveWorldSimulationSubjectiveBeliefs } from "../../server/src/world-simulation-subjective-belief-resolution-service.mjs";
+import { buildWorldSimulationSubjectiveBeliefRevisions } from "../../server/src/world-simulation-subjective-belief-revision-service.mjs";
+import {
+  buildWorldSimulationChronologicalMutationQueue,
+  executeWorldSimulationChronologicalMutationQueue,
+} from "../../server/src/world-simulation-chronological-mutation-queue-service.mjs";
+
+function subjectiveWakeWorld() {
+  const sourceTurn = "c6f-prior-subjective-observation";
+  const proposition = "我看見計時器上標著四十分鐘。";
+  const memory = {
+    memory_id: "c6f-prior-observation",
+    memory_type: "episodic_direct_perception",
+    content: { kind: "visual_observation", description: proposition },
+    source: { kind: "direct_perception", sense: "visual" },
+    internal_provenance: {
+      event_id: "c6f-prior-visual-event", scene_id: "room",
+      turn_id: sourceTurn, observation_hash: "c6f-prior-observation-hash",
+      formation_version: "phase63a-subjective-memory-formation-v1",
+    },
+    formation_stage: "encoded_unconsolidated",
+    engine_persisted_trace: true, last_recalled_at: null,
+    accessible: true, suppressed: false, possibly_incorrect: false,
+    source_confused: false, subjective_memory_not_world_truth: true,
+  };
+  let state = initialWorld();
+  state.memories.aria = [memory];
+  const execute = (current, stage, built) => {
+    const queue = buildWorldSimulationChronologicalMutationQueue({
+      turn_id: sourceTurn + ":" + stage,
+      world_state_hash: hashAgentRunValue(current),
+      state_transitions: built.result.state_transitions,
+      elapsed_ms: 0,
+    });
+    return executeWorldSimulationChronologicalMutationQueue({
+      world_state: current, preview_world_state: built.result.preview_world_state,
+      queue, scene_id: "room",
+    }).next_world_state;
+  };
+  const claim = buildWorldSimulationSubjectiveClaims({
+    world_state: state, turn_id: sourceTurn,
+    source_memory_records: [{ character: "aria", memory_record: memory }],
+    claim_proposals: [{
+      proposal_ref: "prior_visual_label", character: "aria", proposition,
+      evidence: [{ source_memory_ref: memory.memory_id, relation: "supports" }],
+    }],
+  });
+  state = execute(state, "subjective_claim", claim);
+  const resolution = resolveWorldSimulationSubjectiveBeliefs({
+    world_state: state, turn_id: sourceTurn,
+  });
+  state = execute(state, "subjective_belief_revision", buildWorldSimulationSubjectiveBeliefRevisions({
+    world_state: state, turn_id: sourceTurn, resolution: resolution.result,
+  }));
+  assert.equal(state.subjective_claim_history.length, 1);
+  assert.equal(state.subjective_belief_revision_history.length, 1);
+  return state;
+}
+
+const pairedRoot = path.join(projectRoot, "tests", ".tmp",
+  "cb-c6f-goal-plan-reentry-" + process.pid + "-" + Date.now());
+const initialSubjective = subjectiveWakeWorld();
+const originalSubjective = structuredClone(initialSubjective);
+const pairedResults = [];
+try {
+  for (const route of ["foreground", "offscreen"]) {
+    const opts = { fixtureRoot: path.join(pairedRoot, route) };
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-F subjective goal/plan reentry " + route,
+      seed: "c6f-subjective-reentry-" + route,
+      initial_world_state: structuredClone(initialSubjective),
+    }, opts);
+    const sid = session.world_simulation_session_id;
+    const params = { world_simulation_session_id: sid,
+      runtime_context_by_character: { aria: { idle: true } } };
+    const before = await getWorldSimulationState(sid, opts);
+    const deferred = await scheduleWorldSimulationAutonomousCognitionOpportunities(params, opts);
+    assert.equal(deferred.scheduler_projection.opportunity_count, 0);
+    assert.equal(deferred.scheduler_projection.deferred_opportunity_count, 1);
+    const opportunityId = deferred.scheduler_projection.deferred_opportunities[0].opportunity_id;
+    const sleepingDispatch = await dispatchWorldSimulationAutonomousCognitionOpportunities(params, {
+      ...opts, characterBrain: async () => assert.fail("sleeping Brain cannot decide a goal"),
+    });
+    assert.equal(sleepingDispatch.dispatch_count, 0);
+    assert.deepEqual(sleepingDispatch.consumed_opportunity_ids, []);
+    assert.deepEqual(await getWorldSimulationState(sid, opts), before);
+
+    const turnOpts = { ...opts,
+      characterRuntimeManager: createWorldSimulationCharacterRuntimeManager({
+        identityResolver: async name => ({
+          entity_id: "character_" + name, canonical_name: name,
+          identity_source: "c6f_pair_fixture", formal: true,
+        }),
+      }),
+      characterBrain: async packet => {
+        assert.equal(packet.character, "keeper",
+          "sleeping actor must not receive the ordinary wake turn decision");
+        return { action_id: "cb-c6d-keeper-wait" };
+      },
+    };
+    if (route === "foreground") {
+      assert.equal((await runWorldSimulationTurn({
+        world_simulation_session_id: sid,
+      }, turnOpts)).committed, true);
+    } else {
+      const batch = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid, max_turns: 1,
+        target_horizon: new Date(Date.parse(now) + 500).toISOString(),
+      }, turnOpts);
+      assert.equal(batch.committed_turn_count, 1);
+      assert.equal(batch.target_horizon_claimed, true);
+      assert.equal(batch.state_reconciliation_required, false);
+    }
+    const wake = await getWorldSimulationState(sid, opts);
+    assert.equal(wake.revision, 1);
+    assert.equal(wake.state.simulation_time, new Date(Date.parse(now) + 500).toISOString());
+    assert.equal(wake.state.characters.aria.physical_state.sleep_arousal.condition, "awake");
+    assert.deepEqual(wake.state.event_queue, []);
+    assert.deepEqual(wake.state.memories.aria, before.state.memories.aria);
+    assert.deepEqual(wake.state.subjective_claim_history, before.state.subjective_claim_history);
+    assert.deepEqual(wake.state.subjective_belief_revision_history, before.state.subjective_belief_revision_history);
+    assert.equal(wake.state.characters.aria.current_goal, before.state.characters.aria.current_goal);
+
+    const resumed = await scheduleWorldSimulationAutonomousCognitionOpportunities(params, opts);
+    assert.equal(resumed.scheduler_projection.opportunity_count, 1);
+    assert.equal(resumed.scheduler_projection.opportunities[0].opportunity_id, opportunityId);
+    const summary = [];
+    const writeGoal = await dispatchWorldSimulationAutonomousCognitionOpportunities(params, {
+      ...opts, characterBrain: async packet => {
+        assert.equal(packet.character, "aria");
+        const view = packet.native_goal_decision;
+        assert.equal(view.character, "aria");
+        assert.equal(view.motivation_basis.length, 1);
+        const proposition = view.motivation_basis[0].evidence.proposition;
+        assert.equal(proposition, "我看見計時器上標著四十分鐘。");
+        assert.equal(view.world_truth_exposed, false);
+        assert.equal(view.source_event_ids_exposed, false);
+        summary.push({ step: "propose", proposition });
+        return {
+          goal_context_token: view.context_token,
+          goal_intents: [{
+            operation: "propose", goal_kind: "achieve_state", domain: "inquiry",
+            target_descriptor: { label: "查證計時器實際上限" },
+            motivation_basis_tokens: [view.motivation_basis[0].source_token],
+            motivation_relations: ["supports"],
+          }],
+        };
+      },
+    });
+    assert.equal(writeGoal.dispatch_count, 1);
+    assert.equal(writeGoal.durable_cognitive_write_performed, true);
+    assert.equal(writeGoal.action_selection_performed, false);
+    assert.deepEqual(writeGoal.consumed_opportunity_ids, [opportunityId]);
+    assert.equal((await scheduleWorldSimulationAutonomousCognitionOpportunities(params, opts))
+      .scheduler_projection.opportunity_count, 0,
+      "persisted goal receipt must suppress the original pre-wake opportunity");
+
+    const adoption = { world_simulation_session_id: sid,
+      runtime_context_by_character: { aria: { pending_internal_cues: [{
+        kind: "memory_reactivation", source_ref: "c6f-goal-adoption-review",
+      }] } } };
+    const adoptGoal = await dispatchWorldSimulationAutonomousCognitionOpportunities(adoption, {
+      ...opts, characterBrain: async packet => {
+        const view = packet.native_goal_decision;
+        assert.equal(packet.character, "aria");
+        assert.equal(view.existing_goals.length, 1);
+        assert.equal(view.existing_goals[0].state, "proposed");
+        summary.push({ step: "commit", state: view.existing_goals[0].state });
+        return { goal_context_token: view.context_token,
+          goal_intents: [{ operation: "commit", goal_token: view.existing_goals[0].goal_token }] };
+      },
+    });
+    assert.equal(adoptGoal.dispatch_count, 1);
+    assert.equal(adoptGoal.durable_cognitive_write_performed, true);
+
+    const planParams = { world_simulation_session_id: sid,
+      runtime_context_by_character: { aria: { pending_internal_cues: [{
+        kind: "memory_reactivation", source_ref: "c6f-plan-from-committed-goal",
+      }] } } };
+    const plan = await dispatchWorldSimulationAutonomousCognitionOpportunities(planParams, {
+      ...opts, characterBrain: async packet => {
+        const view = packet.native_plan_decision;
+        assert.equal(packet.character, "aria");
+        assert.equal(view.prior_turn_committed_goal_only, true);
+        assert.equal(view.world_truth_exposed, false);
+        assert.equal(view.committed_goals.length, 1);
+        const label = view.committed_goals[0].target_descriptor.label;
+        assert.equal(label, "查證計時器實際上限");
+        summary.push({ step: "plan", goal: label });
+        return { plan_context_token: view.context_token,
+          plan_intents: [{
+            goal_token: view.committed_goals[0].goal_token,
+            cue_descriptor: { cue_kind: "opportunity", label: "timer_doubt_requires_verification" },
+            response_descriptor: { response_kind: "seek_support", label: "ask_trusted_ally" },
+          }] };
+      },
+    });
+    assert.equal(plan.dispatch_count, 1);
+    assert.equal(plan.durable_cognitive_write_performed, true);
+    assert.equal(plan.action_selection_performed, false);
+    const end = await getWorldSimulationState(sid, opts);
+    const history = await getWorldSimulationHistory(sid, opts);
+    assert.equal(end.revision, 4);
+    assert.equal(end.state.simulation_time, wake.state.simulation_time);
+    assert.deepEqual(end.state.memories.aria, wake.state.memories.aria);
+    assert.deepEqual(end.state.subjective_claim_history, wake.state.subjective_claim_history);
+    assert.deepEqual(end.state.subjective_belief_revision_history, wake.state.subjective_belief_revision_history);
+    const goalEvents = Object.values(end.state.motivational_goal_events ?? {});
+    assert.equal(goalEvents.length, 2);
+    assert.deepEqual(goalEvents.map(item => item.operation).sort(), ["commit", "propose"]);
+    assert.equal(new Set(goalEvents.map(item => item.goal_id)).size, 1);
+    assert.equal(end.state.goal_implementation_intention_history.length, 1);
+    assert.equal(history.turns.length, 4);
+    let prior = before.state_hash;
+    for (const turn of history.turns) {
+      assert.equal(turn.previous_state_hash, prior);
+      prior = turn.next_state_hash;
+    }
+    assert.equal(prior, end.state_hash);
+    for (const turn of history.turns.slice(1)) {
+      assert.equal(turn.event, null);
+      assert.deepEqual(turn.selected_action_intents, []);
+      assert.deepEqual(turn.action_outcomes, []);
+    }
+    const paths = worldSimulationStatePaths(sid, opts);
+    const bytes = await Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
+    // Recreate the runtime manager, no caller-supplied consumed IDs.
+    // The exact committed goal and plan receipts must survive reentry.
+    for (const input of [adoption, planParams]) {
+      const replay = await dispatchWorldSimulationAutonomousCognitionOpportunities(input, {
+        ...opts, characterBrain: async () => assert.fail("committed cognitive operation cannot replay"),
+      });
+      assert.equal(replay.dispatch_count, 0);
+    }
+    assert.deepEqual(await Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]), bytes);
+    assert.deepEqual(await getWorldSimulationHistory(sid, opts), history);
+    pairedResults.push({
+      simulation_time: end.state.simulation_time,
+      memory: end.state.memories.aria,
+      claims: end.state.subjective_claim_history,
+      beliefs: end.state.subjective_belief_revision_history,
+      body: end.state.characters.aria.physical_state,
+      goal_operations: goalEvents.map(item => item.operation).sort(),
+      plan_count: end.state.goal_implementation_intention_history.length,
+      decisions: summary,
+    });
+  }
+  assert.deepEqual(pairedResults[0], pairedResults[1],
+    "canonical foreground and queued offscreen wake must preserve the same subjective evidence and goal/plan decisions");
+  assert.deepEqual(initialSubjective, originalSubjective, "paired simulation must not mutate initial input");
+} finally {
+  await rm(pairedRoot, { recursive: true, force: true });
+}
+console.log("CB-C6-F paired subjective wake reentry: memory/claim/belief provenance, goal adoption, plan and durable replay PASS.");
