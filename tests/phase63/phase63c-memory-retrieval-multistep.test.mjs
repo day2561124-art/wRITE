@@ -1,3 +1,10 @@
+import { EventEmitter } from "node:events";
+import { createEphemeralWorldSimulationPreparedTurnBroker } from "../../server/src/world-simulation-prepared-turn-ephemeral-broker.mjs";
+import { attachWorldSimulationPreparedTurnBrokerIpc, createWorldSimulationPreparedTurnBrokerIpcClient } from "../../server/src/world-simulation-prepared-turn-broker-ipc.mjs";
+import {
+  chatgpt_bridge_prepare_world_turn, chatgpt_bridge_submit_world_character_action,
+  chatgpt_bridge_resolve_world_turn,
+} from "../../server/src/mcp-world-simulation-tools.mjs";
 import { createPrivateWorldRetrievalExecutor } from "../../server/src/world-simulation-private-retrieval-executor-service.mjs";
 import { checkpointPrivateWorldRetrievalPreparation } from "../../server/src/world-simulation-private-retrieval-preparation-service.mjs";
 import { getWorldSimulationState } from "../../server/src/world-simulation-state-service.mjs";
@@ -1139,6 +1146,66 @@ try {
   const afterExecutor = await getWorldSimulationState(session.world_simulation_session_id, { fixtureRoot });
   assert.equal(afterExecutor.revision, beforeReplay.revision);
   assert.equal(afterExecutor.state_hash, beforeReplay.state_hash);
+
+  // C7: use the real Formal tool surface through a parent-owned IPC broker.
+  // The ordinary character decision sees actual recovered fragments, not the
+  // private stage inputs or the parent-held replay transcript.
+  const parent = createEphemeralWorldSimulationPreparedTurnBroker({
+    privateRetrievalExecutor: executor,
+    privateRetrievalOptions: privateExecutionOptions,
+  });
+  const parentChild = new EventEmitter();
+  const childProcess = new EventEmitter();
+  parentChild.connected = childProcess.connected = true;
+  parentChild.send = (message, cb) => {
+    queueMicrotask(() => childProcess.emit("message", structuredClone(message)));
+    cb?.(null);
+  };
+  childProcess.send = (message, cb) => {
+    queueMicrotask(() => parentChild.emit("message", structuredClone(message)));
+    cb?.(null);
+  };
+  const detach = attachWorldSimulationPreparedTurnBrokerIpc(parentChild, parent);
+  const child = createWorldSimulationPreparedTurnBrokerIpcClient({ process_like: childProcess });
+  const formalOptions = { fixtureRoot, preparedTurnBroker: child };
+  const initialCount = openedStages.length;
+  try {
+    const formalInput = { world_simulation_session_id: session.world_simulation_session_id };
+    const formal = await chatgpt_bridge_prepare_world_turn(formalInput, formalOptions);
+    assert.equal(formal.ok, true, JSON.stringify(formal));
+    assert.equal(formal.blocked, false);
+    assert.equal(formal.current_decision.character_input.character, character);
+    assert.equal(JSON.stringify(formal).includes(loopTargetAnswer), true);
+    assert.equal(JSON.stringify(formal).includes(loopHiddenDetail), false);
+    assert.equal(JSON.stringify(formal).includes("trusted_stage_input"), false);
+    assert.equal(JSON.stringify(formal).includes("private_retrieval_transcript"), false);
+    assert.equal(openedStages.length - initialCount, 5);
+    const same = await chatgpt_bridge_prepare_world_turn(formalInput, formalOptions);
+    assert.equal(same.prepared_turn_handle, formal.prepared_turn_handle);
+    assert.equal(openedStages.length - initialCount, 5);
+    const choice = formal.current_decision.character_input.candidate_action_intents
+      .find((item) => item.action_id === "remain-still");
+    assert.ok(choice);
+    const selected = await chatgpt_bridge_submit_world_character_action({
+      prepared_turn_handle: formal.prepared_turn_handle,
+      decision_handle: formal.current_decision.decision_handle,
+      action_id: choice.action_id,
+    }, formalOptions);
+    assert.equal(selected.ready_to_resolve, true);
+    const resolved = await chatgpt_bridge_resolve_world_turn({
+      prepared_turn_handle: formal.prepared_turn_handle,
+    }, formalOptions);
+    assert.equal(resolved.committed, true, JSON.stringify(resolved));
+    const final = await getWorldSimulationState(session.world_simulation_session_id, { fixtureRoot });
+    assert.equal(final.revision, beforeReplay.revision + 1);
+    const repeated = await chatgpt_bridge_resolve_world_turn({
+      prepared_turn_handle: formal.prepared_turn_handle,
+    }, formalOptions);
+    assert.equal(repeated.blocked, true);
+    assert.equal(parent.getStorageStatus().payload_reference_count, 0);
+  } finally {
+    detach();
+  }
 
   nativeLoopVerified = true;
 } finally {
