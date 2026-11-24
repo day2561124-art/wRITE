@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   cbC2AutonomousCognitionSteps,
+  cbC6ConsciousCognitionSteps,
   cbC5SubjectiveAffordanceEvidenceSteps,
   cognitionSteps,
   communicationSteps,
@@ -180,6 +181,7 @@ assert.deepEqual(
   cognitionPaths,
   [
     ...pathsFor(cbC2AutonomousCognitionSteps),
+    ...pathsFor(cbC6ConsciousCognitionSteps),
     ...pathsFor(cbC5SubjectiveAffordanceEvidenceSteps),
     ...phase62CognitionPaths,
     ...phase63Paths,
