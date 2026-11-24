@@ -6,6 +6,7 @@ import {
 
 const allowedOperations = new Set([
   "prepared_turn_reserve_preparation",
+  "prepared_turn_prepare_private_retrieval",
   "prepared_turn_store_prepared",
   "prepared_turn_abort_preparation",
   "prepared_turn_get_receipt",
@@ -101,6 +102,9 @@ export function createWorldSimulationPreparedTurnBrokerIpcClient(options = {}) {
       state_revision: payload.state_revision,
       world_state_hash: payload.world_state_hash,
     }),
+    preparePrivateRetrieval: (payload) => request("prepared_turn_prepare_private_retrieval", {
+      prepared_turn_handle: payload.prepared_turn_handle,
+    }),
     storePrepared: (payload) => request("prepared_turn_store_prepared", {
       prepared_turn_handle: payload.prepared_turn_handle,
       prepared_turn: payload.prepared_turn,
@@ -154,6 +158,10 @@ export function attachWorldSimulationPreparedTurnBrokerIpc(
   const operationHandlers = {
     prepared_turn_reserve_preparation: (payload) => broker.reservePreparation({
       ...payload,
+      preparer_owner_id: ownerId,
+    }),
+    prepared_turn_prepare_private_retrieval: (payload) => broker.preparePrivateRetrieval({
+      prepared_turn_handle: payload.prepared_turn_handle,
       preparer_owner_id: ownerId,
     }),
     prepared_turn_store_prepared: (payload) => broker.storePrepared({
