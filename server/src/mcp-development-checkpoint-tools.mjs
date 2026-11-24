@@ -1317,7 +1317,7 @@ export function createDevCheckpointService({
 
   // Internal transaction inspection shares one fresh, locked checkpoint observation.
   // Never expose owner identities through the public status tool or cache across requests.
-  async function inspectStatusWithRecoveryOwners() {
+  async function inspectStatusWithRecoveryOwners({ startup = false } = {}) {
     try {
       return await withLock(async () => {
         const identityManifests = new Map();
@@ -1331,7 +1331,7 @@ export function createDevCheckpointService({
           activeRecoveryOwners.set(owner, (activeRecoveryOwners.get(owner) ?? 0) + 1);
         }
         return { status: { schema_version: DEV_CHECKPOINT_SCHEMA_VERSION, health: "healthy", registry_revision: registry.revision, storage: "server_owned_content_addressed_checkpoint_store", ...publicStats }, activeRecoveryOwners };
-      });
+      }, startup ? 30_000 : 2000);
     } catch (error) {
       return { status: { schema_version: DEV_CHECKPOINT_SCHEMA_VERSION, health: error.code === "CHECKPOINT_STORE_BUSY" ? "degraded" : "corrupt", registry_revision: null, storage: "server_owned_content_addressed_checkpoint_store", checkpoint_count: null, active_count: null, deleted_count: null, physical_blob_bytes: null, logical_checkpoint_bytes: null, deduplicated_bytes_saved: null, reclaimable_bytes: null, reclaimable_blob_count: null, last_health_error: String(error.message).slice(0, 1024), last_health_error_code: error.code ?? null }, activeRecoveryOwners: null };
     }
@@ -1648,7 +1648,7 @@ export const dev_workspace_recover_checkpoint = (input) => defaultCheckpointServ
 export const dev_workspace_delete_checkpoint = (input) => defaultCheckpointService.deleteCheckpoint(input);
 export const dev_workspace_checkpoint_gc = (input) => defaultCheckpointService.gc(input);
 export const dev_workspace_checkpoint_status = () => defaultCheckpointService.status();
-export const inspectDevCheckpointStatusWithRecoveryOwners = () => defaultCheckpointService.inspectStatusWithRecoveryOwners();
+export const inspectDevCheckpointStatusWithRecoveryOwners = (options) => defaultCheckpointService.inspectStatusWithRecoveryOwners(options);
 export const initializeDevCheckpointRuntime = () => defaultCheckpointService.initialize();
 export const inspectDevCheckpointOperationEffect = (started) => defaultCheckpointService.inspectOperationEffect(started);
 export const captureDevTransactionRecoveryCheckpoint = (input) => defaultCheckpointService.captureInternalTransactionRecovery(input);
