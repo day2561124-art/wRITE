@@ -72,10 +72,34 @@ test('terminal recovery owner scan contention degrades only the current observat
  const issue=first.integrity_issues.find(x=>x.code==='TRANSACTION_RECOVERY_CHECKPOINT_OWNER_SCAN_FAILED');
  assert.ok(issue);
  assert.equal(issue.transaction_id,transaction.transaction_id);
+ assert.equal(issue.checkpoint_error_code,'CHECKPOINT_STORE_BUSY');
  assert.equal(first.checkpoint_store_health,'healthy');
  busy=false;
  const recovered=await service.status();
  assert.equal(recovered.health,'healthy');
  assert.equal(recovered.last_health_error,null);
+ assert.deepEqual(recovered.integrity_issues,[]);
+});
+
+test('non-contention recovery owner scan failure still latches degradation',async t=>{
+ const {harness}=await import('./mcp-development-transaction-baseline-harness.mjs');
+ const h=await harness('owner-scan-hard-failure');
+ t.after(()=>h.cleanup());
+ await writeFile(path.join(h.repositoryRoot,'tests','a.txt'),'target-a\n','utf8');
+ const target=await h.checkpointService.create({workspace_id:h.workspace_id,label:'owner scan target'});
+ await writeFile(path.join(h.repositoryRoot,'tests','a.txt'),'source-a\n','utf8');
+ const service=h.makeTransactionService();
+ const transaction=await service.restore({workspace_id:h.workspace_id,checkpoint_id:target.checkpoint_id});
+ assert.equal(transaction.state,'completed');
+ assert.equal((await service.status()).health,'healthy');
+ const scan=h.checkpointApi.listRecoveryByOwner;
+ h.checkpointApi.listRecoveryByOwner=async()=>{throw Object.assign(new Error('owner manifest unreadable'),{code:'EACCES'});};
+ const first=await service.status();
+ assert.equal(first.health,'degraded');
+ const issue=first.integrity_issues.find(x=>x.code==='TRANSACTION_RECOVERY_CHECKPOINT_OWNER_SCAN_FAILED');
+ assert.equal(issue?.checkpoint_error_code,'EACCES');
+ h.checkpointApi.listRecoveryByOwner=scan;
+ const recovered=await service.status();
+ assert.equal(recovered.health,'degraded');
  assert.deepEqual(recovered.integrity_issues,[]);
 });
