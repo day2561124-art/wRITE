@@ -393,6 +393,10 @@ export const cbC2AutonomousCognitionSteps = Object.freeze([
     "CB-C2 Autonomous Cognition Scheduler",
     Object.freeze(["tests/cb-c2/cb-c2-autonomous-cognition-scheduler.test.mjs"]),
   ]),
+  Object.freeze([
+    "CB-C6-D Conscious Cognition Reentry",
+    Object.freeze(["tests/cb-c6/cb-c6-conscious-cognition-reentry.test.mjs"]),
+  ]),
 ]);
 
 export const cbC5SubjectiveAffordanceEvidenceSteps = Object.freeze([
