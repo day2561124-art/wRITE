@@ -5144,8 +5144,17 @@ async function dispatchWorldSimulationAutonomousCognitionInternal(
     const admissionError = (message, code) => {
       const error = new Error(message);
       error.code = code;
-      error.consumed_opportunity_ids = dispatches.map((item) => item.opportunity_id);
-      if (brainCompleted) error.consumed_opportunity_ids.push(opportunity.opportunity_id);
+      // If any Brain has submitted a goal/plan intent, the entire cognitive
+      // transaction is still speculative until the atomic World writer commits.
+      // An ingress failure must not report uncommitted intent as consumed.
+      // Keep the established receipt semantics for entirely read-only batches.
+      const hasPendingCognitiveWrite = selectedNativeGoalIntents.length > 0
+        || selectedNativePlanIntents.length > 0;
+      error.consumed_opportunity_ids = hasPendingCognitiveWrite
+        ? [] : dispatches.map((item) => item.opportunity_id);
+      if (brainCompleted && !hasPendingCognitiveWrite) {
+        error.consumed_opportunity_ids.push(opportunity.opportunity_id);
+      }
       error.failed_opportunity_id = opportunity.opportunity_id;
       return error;
     };
