@@ -52,6 +52,13 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
 
   let snapshot = await getWorldSimulationState(sessionId, options);
   const initial = snapshot;
+  const expectedFrontier = options.worldSimulationExpectedFrontier;
+  if (expectedFrontier !== undefined
+      && (expectedFrontier?.revision !== snapshot.revision
+        || expectedFrontier?.state_hash !== snapshot.state_hash)) {
+    reject("Host offscreen batch lost its exact committed frontier.",
+      "C6_RESOLUTION_FRONTIER_CHANGED");
+  }
   if (!Number.isFinite(Date.parse(snapshot.state?.simulation_time)))
     reject("Offscreen event batches require committed World simulation time.");
   if (target !== null && Date.parse(target) < Date.parse(snapshot.state.simulation_time))
@@ -170,7 +177,12 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
         attempts += 1;
         result = await runWorldSimulationTurn({
           world_simulation_session_id: sessionId, event_id: eventId,
-        }, turnOptions);
+        }, {
+          ...turnOptions,
+          worldSimulationExpectedFrontier: {
+            revision: snapshot.revision, state_hash: snapshot.state_hash,
+          },
+        });
       } else {
         const discovery = projectWorldSimulationOffscreenBreakpoint({
           world_state: snapshot.state, target_horizon: target,
