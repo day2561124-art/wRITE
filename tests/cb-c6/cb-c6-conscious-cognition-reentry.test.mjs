@@ -311,11 +311,11 @@ function subjectiveWakeWorld() {
       evidence: [{ source_memory_ref: memory.memory_id, relation: "supports" }],
     }],
   });
-  state = execute(state, "claim", claim);
+  state = execute(state, "subjective_claim", claim);
   const resolution = resolveWorldSimulationSubjectiveBeliefs({
     world_state: state, turn_id: sourceTurn,
   });
-  state = execute(state, "belief", buildWorldSimulationSubjectiveBeliefRevisions({
+  state = execute(state, "subjective_belief_revision", buildWorldSimulationSubjectiveBeliefRevisions({
     world_state: state, turn_id: sourceTurn, resolution: resolution.result,
   }));
   assert.equal(state.subjective_claim_history.length, 1);
