@@ -143,3 +143,16 @@ Remaining C7-A inspection: exact MCP schema and parent dispatch allowlists,
 stage-specific response validation and actual retrieval query/replay identity,
 plus the wider Formal/Native semantic inventory. This is a focused audit,
 not a completed C7-A gate. No runtime code has been changed in this slice.
+
+
+## C7-B private replay and public receipt boundary — 2026-11-24
+
+PR #96 merged at `3fec924bcd57f547b0f2b42cd53bc79db1c297b1`; [CI 45352493340](https://github.com/day2561124-art/wRITE/actions/runs/45352493340) passed all six executed jobs. The affected gate actually executed the extended Phase63C fixture. Private staged replay is an executable slice, not public parity.
+
+Further inspection:
+- `world-simulation-loop-service.mjs` derives turn ID from session, committed revision/hash and event ID; the V3 query then binds observer, turn, memory snapshot, accessibility context, initial frontier and goal.
+- `mcp-server.mjs` deliberation schema explicitly allows only the existing Phase79M response fields. Do not broaden it to arbitrary recovery objects.
+- `world-simulation-prepared-turn-broker-ipc.mjs` forwards bounded deliberation input to the parent, whose owner identity is minted by the attachment. The parent broker returns the current `character_input` directly; an internal recovery payload placed there would be exposed.
+- This slice rejects private replay request/response envelopes and raw recovery stage views nested in public decision input before storing a prepared round. Direct parent and IPC negative cases verify no current decision or private content is returned; ordinary action preparation still proceeds. This is a narrow defense-in-depth guard, not general sanitization or proof of model-context isolation.
+- Native learned-dialogue special-case recovery is not a general recovery policy. Do not substitute it, always-recover behavior, or a dummy failure for general retrieval.
+- Next executable boundary: define an engine-owned, separately isolated recovery executor and a content-safe projection for other stage decisions. The existing private replay helper supplies stage identity and transcript validation. No public schema expansion or adoption until that route is demonstrated end to end. C7-A wider semantic inventory remains open.
