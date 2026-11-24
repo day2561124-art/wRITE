@@ -112,3 +112,56 @@ The next candidate introduces `createWorldSimulationResolutionController` as a h
 PR #88 documentation CI [45321158764](https://github.com/day2561124-art/wRITE/actions/runs/45321158764) and main [45333939528](https://github.com/day2561124-art/wRITE/actions/runs/45333939528) succeeded. PR #89 [CI 45334190309](https://github.com/day2561124-art/wRITE/actions/runs/45334190309) passed all five required jobs; affected job 138242278441 records positive actual resolution selection, exact frontier, committed cognition and read-only promotion. Merged at `a57ef471e2b604e87db96969ccdbde5d17bddd3b`.
 
 The final paired social candidate extends the existing CC8P acceptance fixture, not the sealed CC8 runtime. Ordinary foreground visible/turned-away scenarios are retained. Each gains a paired run in which the controller selects offscreen, executes actual Native speech and observer interpretation/social appraisal turns, and returns to foreground before the subsequent independent choice. The comparison retains same time horizons, body state, prior goals, observer-specific social memory and relationship evidence, and later controlled action choices. An unreachable observer receives no invented experience; a visible gaze cue is not automatically mapped to an objective social meaning. The existing controlled resolvers author subjective interpretations. Promotion is read-only against exact state and history bytes, and the still-pending later event must be executed normally. This is a bounded integration oracle, not a general autonomous policy quality certification or all-physics equivalence. CI and the formal exact-commit/local seal remain outstanding.
+
+
+## Remote functional acceptance — 2026-11-24
+
+**Bounded C6 functional candidate accepted on GitHub PR CI; formal C6-F seal remains open.**
+Exact integrated runtime/test candidate: `8c1b7fe340edcc80830420a53e078f8367b78be3` (merged PR #90).
+This section supersedes the pending functional work listed in the preceding
+candidate sections, without changing the original C6 contract.
+
+- PR #89: [affected/cross-platform CI 45334190309](https://github.com/day2561124-art/wRITE/actions/runs/45334190309);
+  [post-merge main 45337229176](https://github.com/day2561124-art/wRITE/actions/runs/45337229176) completed all five required jobs successfully.
+- PR #90: [CI 45337468852](https://github.com/day2561124-art/wRITE/actions/runs/45337468852)
+  completed all five required jobs successfully. Affected job 138252840381
+  explicitly logged both `CC-8P multimodal subjective social lifecycle tests passed.`
+  and `CB-C6-F social resolution reentry: actual observer-specific memory and relationship evidence, same horizons, read-only promotion and later foreground choice PASS.`
+  as well as affected-suite success. The exact-head PR was merged without additional runtime changes.
+- PR #90 integrated candidate [main 45340440268](https://github.com/day2561124-art/wRITE/actions/runs/45340440268)
+  was in progress at the time of this inventory. Do not infer its completion from the PR checks.
+
+| Original gate | Bounded functional acceptance evidence |
+| --- | --- |
+| C6-A | Original source-grounded sleep/offscreen contract and CC8 supported/deferred modalities; #84 scope restoration and #88 final gate inventory. |
+| C6-B | Objective sleep/arousal reader, provenance and unknown-condition compatibility tests. |
+| C6-C | Configured event-backed Body transition, rejection and chronology tests; injury/incapacitation independence. |
+| C6-D | D1/D2/D3 ingress, #84 exact committed clock and wake, #85 subjective evidence/goal/plan continuation, #87 atomic interruption and retry. |
+| C6-E | Existing bounded queued/event and supported physical breakpoint/horizon tests; #86 quiet-frontier cognition; #89 explicit host-owned resolution selection. |
+| C6-F | #47/#49 wake/acoustic pairing; #85/#86/#89 goal/plan, subjective evidence and resolution reentry; #90 positive paired CC8P observer-specific social memory/relationship evidence and subsequent foreground choice. |
+
+The #90 tests retain ordinary foreground visible/turned-away cases and compare
+offscreen-selected equivalents at the same horizon. Actual canonical
+speech, hearing, gaze and source-bound subjective appraisal are processed,
+then the same session returns to foreground before later action selection.
+The reachable observers retain distinct interpretations; the unreachable
+observer receives no fabricated evidence. Promotion alone is read-only.
+These are controlled Brain/resolver fixtures exercising real canonical
+authority and persistence, not proof of unrestricted human-equivalent
+decision quality, independent long-horizon background intelligence, or
+arbitrary process/physics equivalence. Host resolution is explicit and
+session-bound, not an autonomous per-actor fidelity policy; host integration
+and general World/Body scheduling expansion retain their separate owners.
+Read-only cognition receipts remain caller-owned as documented in #86.
+
+The finite functional closure sequence in #88 now has positive remote test
+evidence for each implementation item. Do not reopen C6 merely to add more
+physical combinations or consumer-specific behavior. Remaining acceptance:
+confirm exact integrated main regression, reconcile the user's actual local
+working tree and remote candidate without overwriting divergent changes,
+verify the formal integration journal/transaction/checkpoint/cleanup and
+CC8 handoff receipts, and run required local gates. The workstation has not
+been inspected in this round. No local synchronization, deployment or formal
+PASS_STABLE seal is asserted. Keep C7 Formal/Native parity and C8 longitudinal
+certification separate; any preparation may use this exact remote baseline
+but may not present C6's formal seal as completed.
