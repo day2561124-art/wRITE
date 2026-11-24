@@ -22,6 +22,7 @@ const allowedOperations = new Set([
 export function createWorldSimulationPreparedTurnBrokerIpcClient(options = {}) {
   const processLike = options.process_like ?? process;
   const timeoutMs = options.timeout_ms ?? 10_000;
+  const privateRetrievalTimeoutMs = options.private_retrieval_timeout_ms ?? options.timeout_ms ?? 300_000;
   const pending = new Map();
   let disconnected = typeof processLike.send !== "function"
     || processLike.connected === false;
@@ -76,7 +77,7 @@ export function createWorldSimulationPreparedTurnBrokerIpcClient(options = {}) {
       const timer = setTimeout(() => {
         pending.delete(requestId);
         reject(new Error("prepared_turn_parent_broker_timeout"));
-      }, timeoutMs);
+      }, operation === "prepared_turn_prepare_private_retrieval" ? privateRetrievalTimeoutMs : timeoutMs);
       pending.set(requestId, { resolve, reject, timer });
       processLike.send({
         protocol: worldSimulationPreparedTurnBrokerProtocol,
