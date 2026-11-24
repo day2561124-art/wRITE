@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { isPrivateWorldRetrievalExecutor } from "./world-simulation-private-retrieval-executor-service.mjs";
 
 import {
   hashCanonicalValue,
@@ -200,6 +201,16 @@ export function createWorldSimulationPreparedTurnHandle(date = new Date()) {
 }
 
 export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
+  const privateRetrievalExecutor = options.privateRetrievalExecutor ?? null;
+  if (privateRetrievalExecutor !== null && !isPrivateWorldRetrievalExecutor(privateRetrievalExecutor)) {
+    fail("WORLD_SIMULATION_PRIVATE_RETRIEVAL_PROVIDER_INVALID", "Private retrieval requires a host-owned executor.");
+  }
+  const privateRetrievalOptions = Object.freeze({
+    ...(options.privateRetrievalOptions?.fixtureRoot ? { fixtureRoot: options.privateRetrievalOptions.fixtureRoot } : {}),
+    ...(options.privateRetrievalOptions?.memoryRetrievalTechnicalStepBudget === undefined ? {} : {
+      memoryRetrievalTechnicalStepBudget: options.privateRetrievalOptions.memoryRetrievalTechnicalStepBudget,
+    }),
+  });
   const records = new Map();
   const activeBySession = new Map();
   const brokerStorageScope = options.storage_scope
@@ -222,6 +233,9 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
   function releasePayload(record) {
     delete record.prepared_turn;
     delete record.deliberation_submissions;
+    delete record.private_retrieval_transcript;
+    delete record.private_retrieval_preparation_hash;
+    delete record.private_retrieval_inflight;
     for (const decision of record.decisions) {
       delete decision.character_input;
       delete decision.candidate_action_ids;
@@ -292,6 +306,9 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
       current_decision_index: 0,
       deliberation_submissions: [],
       deliberation_submission_count: 0,
+      private_retrieval_transcript: null,
+      private_retrieval_preparation_hash: null,
+      private_retrieval_inflight: false,
       lifecycle_status: "preparing",
       created_at: new Date().toISOString(),
       broker_storage_scope: brokerStorageScope,
@@ -306,6 +323,68 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
       acquired: true,
       receipt: publicReceipt(record),
     };
+  }
+
+  // Parent-owned execution: only the current preparation owner may request it.
+  // Neither stage inputs nor the transcript are returned to the MCP caller.
+  function privatePreparationHash(prepared) {
+    return hashCanonicalValue({
+      turn_id: prepared.turn_id,
+      memory_retrieval_queries: prepared.memory_retrieval_queries ?? [],
+      memory_retrieval_processes: prepared.memory_retrieval_processes ?? [],
+      decision_packets: prepared.decision_packets ?? [],
+    });
+  }
+
+  async function preparePrivateRetrieval(input = {}) {
+    const record = recordForHandle(input.prepared_turn_handle);
+    const ownerId = requiredString(input.preparer_owner_id, "preparer_owner_id",
+      "WORLD_SIMULATION_PREPARER_OWNER_INVALID");
+    const assertOwner = () => {
+      if (record.lifecycle_status !== "preparing" || record.preparer_owner_id !== ownerId) {
+        fail("WORLD_SIMULATION_PREPARATION_OWNER_MISMATCH",
+          "Private retrieval requires the current preparation reservation.");
+      }
+    };
+    assertOwner();
+    if (!privateRetrievalExecutor) return { configured: false };
+    if (record.private_retrieval_inflight || record.private_retrieval_preparation_hash !== null) {
+      fail("WORLD_SIMULATION_PRIVATE_RETRIEVAL_ALREADY_PREPARING",
+        "Private retrieval has already been requested for this preparation round.");
+    }
+    record.private_retrieval_inflight = true;
+    const scope = {
+      session_id: record.world_simulation_session_id,
+      committed_revision: record.state_revision,
+      committed_hash: record.world_state_hash,
+    };
+    try {
+      const initial = record.private_retrieval_transcript === null;
+      const request = {
+        scope,
+        prior_deliberation_submissions: cloneJson(record.deliberation_submissions),
+      };
+      const result = initial
+        ? await privateRetrievalExecutor.prepare(request, privateRetrievalOptions)
+        : await privateRetrievalExecutor.replay({
+          ...request, transcript: cloneJson(record.private_retrieval_transcript),
+        }, privateRetrievalOptions);
+      assertOwner();
+      const prepared = result.prepared;
+      if (prepared?.world_simulation_session_id !== scope.session_id
+          || prepared.state_revision !== scope.committed_revision
+          || prepared.world_state_hash !== scope.committed_hash) {
+        fail("WORLD_SIMULATION_PREPARED_TURN_BINDING_MISMATCH",
+          "Private retrieval preparation does not match the reserved frontier.");
+      }
+      if (initial) record.private_retrieval_transcript = cloneJson(result.transcript);
+      record.private_retrieval_preparation_hash = privatePreparationHash(prepared);
+      return { configured: true, prepared: cloneJson(prepared) };
+    } finally {
+      if (record.lifecycle_status === "preparing" && record.preparer_owner_id === ownerId) {
+        record.private_retrieval_inflight = false;
+      }
+    }
   }
 
   function storePrepared(input = {}) {
@@ -346,6 +425,12 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
         "WORLD_SIMULATION_PREPARED_TURN_BINDING_MISMATCH",
         "prepared_turn session/revision/hash binding does not match the preparation reservation.",
       );
+    }
+    if (privateRetrievalExecutor && (record.private_retrieval_inflight
+        || record.private_retrieval_preparation_hash === null
+        || privatePreparationHash(input.prepared_turn) !== record.private_retrieval_preparation_hash)) {
+      fail("WORLD_SIMULATION_PRIVATE_RETRIEVAL_PREPARATION_REQUIRED",
+        "Configured private retrieval must complete on the same reserved frontier.");
     }
     const decisionRoundKind = requiredString(
       input.decision_round_kind
@@ -643,6 +728,7 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
       record.lifecycle_status = "preparing";
       record.preparer_owner_id = ownerId;
       record.decision_round_kind = null;
+      record.private_retrieval_preparation_hash = null;
       record.decisions = [];
       record.current_decision_index = 0;
     }
@@ -772,6 +858,7 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
     persistence: "none",
     broker_runtime_process_instance_id: brokerRuntimeProcessInstanceId,
     reservePreparation,
+    preparePrivateRetrieval,
     storePrepared,
     abortPreparation,
     store,
