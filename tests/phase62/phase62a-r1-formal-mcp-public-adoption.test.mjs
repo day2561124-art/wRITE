@@ -484,16 +484,36 @@ try {
       ?? {},
     ).sort(),
     [
+      "activated_longitudinal_case_refs",
       "activated_semantic_refs",
+      "adaptation_decisions",
       "claim_context_token",
       "claim_intents",
+      "linked_experience_reuse_decisions",
+      "mood_interpretations",
       "preference_decisions",
       "preference_revisions",
+      "preparative_revalidation_decisions",
       "relation_context_token",
       "relation_intents",
+      "reuse_decisions",
+      "reuse_outcome_deliberation_decisions",
       "transfer_mappings",
     ],
   );
+
+  const publicResponseProperties = deliberationSubmitSchema.properties.deliberation_response.properties;
+  const { formalExperientialResponseFields } = await import("../../server/src/world-simulation-formal-experiential-deliberation-contract.mjs");
+  for (const field of formalExperientialResponseFields) {
+    assert.ok(Object.hasOwn(publicResponseProperties, field), `Canonical stage ${field} is unreachable through public MCP`);
+    const schema = publicResponseProperties[field];
+    assert.equal(schema.type, "array");
+    if (schema.items.type === "object") assert.equal(schema.items.additionalProperties, false);
+  }
+  assert.equal(publicResponseProperties.mood_interpretations.maxItems, 1);
+  assert.equal(publicResponseProperties.mood_interpretations.items.properties.subjective_mood_label.maxLength, 96);
+  assert.equal(publicResponseProperties.mood_interpretations.items.properties.interpretation.maxLength, 512);
+  assert.equal(Object.hasOwn(publicResponseProperties.mood_interpretations.items.properties, "intensity"), false);
 
   const submitSchema =
     publicToolMap.get(
