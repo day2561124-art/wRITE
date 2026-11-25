@@ -33,6 +33,19 @@ function validBinding(record) {
     && PI_TASK_AUTHORIZATION_ID.test(record.task_authorization_id);
 }
 
+// Shared structural validation for the reader and the separate operator
+// publication workflow. Successful validation never grants execution rights.
+export function validatePiEngineeringBindingSnapshot(raw) {
+  try {
+    hashExecutionInput(raw);
+    const bindings = JSON.parse(JSON.stringify(raw));
+    if (!Array.isArray(bindings) || bindings.length > 128 || !bindings.every(validBinding)) denied();
+    return bindings;
+  } catch {
+    denied();
+  }
+}
+
 // Host-owned binding provider. These dependencies MUST originate in the
 // authenticated host composition root, not MCP request arguments. This does
 // not create grants, expose a listing API, or replace the grant verifier.
@@ -57,13 +70,10 @@ export function createPiEngineeringApprovalSource({ loadBindings, resolveWorkspa
 
     let bindings;
     try {
-      const raw = await loadBindings();
-      hashExecutionInput(raw);
-      bindings = JSON.parse(JSON.stringify(raw));
+      bindings = validatePiEngineeringBindingSnapshot(await loadBindings());
     } catch {
       denied();
     }
-    if (!Array.isArray(bindings) || bindings.length > 128 || !bindings.every(validBinding)) denied();
     const matches = bindings.filter(record => record.principal === authenticatedPrincipal
       && record.workspace_id === context.workspace_id
       && record.workstream_id === workstreamId
