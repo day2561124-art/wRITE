@@ -10,7 +10,6 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { createStdioSession, createReadonlyRetryBudget } from './mcp-http-stdio-adapter.mjs';
 import { createEphemeralWorldSimulationPreparedTurnBroker } from './world-simulation-prepared-turn-ephemeral-broker.mjs';
-import { createConfiguredPrivateWorldRetrievalHost } from './world-simulation-private-retrieval-host-service.mjs';
 import { createWorkspaceSnapshotAuthority } from './mcp-workspace-snapshot-authority.mjs';
 import { createWorkspaceChangeClock } from './mcp-workspace-change-clock.mjs';
 import { createWorkspaceChangeClockProvider } from './mcp-workspace-change-clock-provider.mjs';
@@ -389,8 +388,15 @@ sessionReaper.unref?.();
 // The long-lived HTTP parent owns the world-simulation prepared-turn broker
 // and the bounded developer reload/integration control routes.
 // Legacy raw-story payloads no longer cross MCP child boundaries.
+// Keep the unconfigured HTTP parent lightweight. Only an explicit private
+// retrieval configuration loads the World cognition execution graph.
+const privateRetrievalConfigured = Boolean(process.env.WRITER_PRIVATE_RETRIEVAL_ENDPOINT?.trim()
+  || process.env.WRITER_PRIVATE_RETRIEVAL_MODEL?.trim());
+const privateRetrievalHost = privateRetrievalConfigured
+  ? (await import('./world-simulation-private-retrieval-host-service.mjs')).createConfiguredPrivateWorldRetrievalHost()
+  : {};
 const preparedTurnBroker = createEphemeralWorldSimulationPreparedTurnBroker({
-  ...createConfiguredPrivateWorldRetrievalHost(),
+  ...privateRetrievalHost,
   ownership: 'mcp_http_parent',
   storage_scope: 'mcp_http_parent_process_ephemeral_memory',
 });
