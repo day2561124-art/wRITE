@@ -44,13 +44,14 @@ function validateReply(reply, view) {
 // One parent-owned, process-local suspended execution. No replay of causal
 // execution, no exposure of resolver closures or raw staged World state.
 // A public response may only resume the exact currently published decision.
-export function createPostEncodingClaimContinuation({ leaseMs = 120_000 } = {}) {
+export function createPostEncodingClaimContinuation({ leaseMs = 120_000, onTerminal = () => {} } = {}) {
   if (!Number.isSafeInteger(leaseMs) || leaseMs < 1 || leaseMs > 600_000) fail(inactive);
   let state = "idle", pending = null, terminal = null, timer = null, sequence = 0;
   const waiters = new Set();
   const notify = () => { for (const wake of waiters) wake(); waiters.clear(); };
   const current = () => pending ? clone(pending.decision) : null;
   const clear = () => { if (timer) clearTimeout(timer); timer = null; };
+  const finish = () => { clear(); onTerminal(clone(terminal)); notify(); };
   function cancel(code = inactive) {
     if (state === "committing") fail("WORLD_SIMULATION_POST_ENCODING_COMMIT_IN_PROGRESS");
     if (["complete", "failed", "cancelled"].includes(state)) return false;
@@ -60,7 +61,7 @@ export function createPostEncodingClaimContinuation({ leaseMs = 120_000 } = {}) 
     const waiting = pending;
     pending = null;
     if (waiting) { const error = new Error(code); error.code = code; waiting.reject(error); }
-    notify();
+    finish();
     return true;
   }
   function permitCommit() {
@@ -100,11 +101,11 @@ export function createPostEncodingClaimContinuation({ leaseMs = 120_000 } = {}) 
     Promise.resolve().then(() => run({ interpretClaim, permitCommit })).then(result => {
       if (state === "cancelled") return;
       if (state !== "committing" && result?.committed === true) fail(inactive);
-      state = "complete"; terminal = { result: clone(result) }; clear(); notify();
+      state = "complete"; terminal = { result: clone(result) }; finish();
     }).catch(error => {
       if (state === "cancelled") return;
       state = "failed"; terminal = { error_code: error?.code ?? "WORLD_SIMULATION_POST_ENCODING_FAILED" };
-      clear(); pending = null; notify();
+      pending = null; finish();
     });
     return wait();
   }
