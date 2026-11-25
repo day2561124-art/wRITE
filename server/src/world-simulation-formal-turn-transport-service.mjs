@@ -1,5 +1,5 @@
 import { runFormalWorldResolution } from "./world-simulation-formal-resolution-engine-service.mjs";
-import { postEncodingClaimDecisionKind } from "./world-simulation-post-encoding-claim-continuation-service.mjs";
+import { isPostEncodingDecisionKind } from "./world-simulation-post-encoding-claim-continuation-service.mjs";
 import { randomBytes } from "node:crypto";
 import { extractFormalGoalPlanIntentFields } from "./world-simulation-formal-goal-plan-intent-contract.mjs";
 import { buildWorldSimulationNativeGoalDecisionView } from "./world-simulation-motivation-goal-integration-service.mjs";
@@ -835,7 +835,7 @@ export async function prepareFormalWorldSimulationTurn(input = {}, options = {})
           "The active world turn is already being prepared by another transport owner.",
         );
       }
-      if (active.lifecycle_status === "taken_for_resolution" && active.current_decision?.decision_kind !== postEncodingClaimDecisionKind) {
+      if (active.lifecycle_status === "taken_for_resolution" && !isPostEncodingDecisionKind(active.current_decision?.decision_kind)) {
         fail(
           "WORLD_SIMULATION_PREPARED_TURN_RESOLUTION_IN_PROGRESS",
           "The active prepared world turn is already being resolved.",
@@ -927,7 +927,7 @@ export async function submitFormalWorldSimulationCharacterDeliberation(
     );
   }
 
-  if (before.current_decision?.decision_kind === postEncodingClaimDecisionKind) {
+  if (isPostEncodingDecisionKind(before.current_decision?.decision_kind)) {
     const boundary = await broker.submitPostEncodingClaim({
       prepared_turn_handle: handle, decision_handle: decisionHandle,
       deliberation_response: input.deliberation_response,
@@ -1012,7 +1012,7 @@ export async function submitFormalWorldSimulationCharacterAction(
       ? { reject_all: true }
       : { action_id: input.action_id.trim() }),
     ...extractFormalGoalPlanIntentFields(input),
-    ...(Object.hasOwn(input, "request_subjective_claim_interpretation") ? { request_subjective_claim_interpretation: input.request_subjective_claim_interpretation } : {}),
+    ...Object.fromEntries(["request_subjective_claim_interpretation", "request_subjective_claim_relation_interpretation"].filter(key => Object.hasOwn(input, key)).map(key => [key, input[key]])),
   });
 
   return preparationSurface(receipt, false);
