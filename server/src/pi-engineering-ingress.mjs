@@ -2,6 +2,15 @@ import { hashExecutionInput, PI_TASK_AUTHORIZATION_ID } from "./pi-execution-con
 import { adaptAuthorizedPiRequest } from "./pi-execution-policy.mjs";
 import { requiresPiTaskGrant } from "./pi-task-authorization.mjs";
 
+// Deliberately finite and narrower than the explicit host-approved route.
+// Shell, elevated maintenance and lifecycle operations keep their existing
+// explicit authorization route, even if an ordinary action is also present.
+const automaticBindingCapabilities = new Set([
+  "filesystem.read", "filesystem.list", "filesystem.write", "filesystem.patch",
+  "workspace.create_checkpoint", "verification.focused", "verification.affected",
+  "git.status", "git.commit",
+]);
+
 function denied() {
   throw Object.assign(new Error("PERMISSION_DENIED"), { code: "PERMISSION_DENIED" });
 }
@@ -53,6 +62,7 @@ export async function adaptPiEngineeringIngress(source, {
     && !Object.hasOwn(source, "task_authorization_id")
     && !Object.hasOwn(source, "command")
     && Array.isArray(source.requested_actions)
+    && source.requested_actions.every(action => automaticBindingCapabilities.has(action?.capability))
     && source.requested_actions.some(action =>
       typeof action?.capability === "string" && requiresPiTaskGrant(action.capability));
   if (!explicitHostRequest && !automaticHostBinding) {
