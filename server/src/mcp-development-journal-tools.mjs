@@ -1566,8 +1566,9 @@ export function createDevOperationJournalService({
     if (!Number.isSafeInteger(expected_revision) || expected_revision < 0
       || typeof validateHistory !== "function") throw new Error("Invalid Pi persistence binding.");
     for (let pass = 0; pass < DEV_JOURNAL_VERIFY_MAX_CATCHUP_PASSES; pass += 1) {
-      await assertMutationAllowed();
-      const verification = await verify();
+      // Both mutation admission and projection history use the same freshly
+      // verified snapshot for this attempt. A head-CAS miss repeats verification.
+      const verification = await verifyMutationAllowed();
       const { eventsPath } = await ensureStorageRoot(storageRoot);
       // Validate the captured immutable history and candidate before taking the
       // append lock. Exact head CAS below discards this work on any publication.
@@ -2023,7 +2024,7 @@ export function createDevOperationJournalService({
       });
   }
 
-  async function assertMutationAllowed() {
+  async function verifyMutationAllowed() {
     const verified = await verify();
     if (explicitDegraded) {
       const error = new Error(`JOURNAL_${runtimeHealth.toUpperCase()}: development mutation is blocked until journal reconciliation succeeds.`);
@@ -2031,6 +2032,11 @@ export function createDevOperationJournalService({
       throw error;
     }
     scheduleRecovery(verified);
+    return verified;
+  }
+
+  async function assertMutationAllowed() {
+    await verifyMutationAllowed();
   }
 
   async function begin(input = {}) {
