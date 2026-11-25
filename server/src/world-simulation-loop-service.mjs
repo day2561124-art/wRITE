@@ -10608,6 +10608,7 @@ async function resolveSubjectiveMeansFeasibilityInterpretations(
 // Module-private transport: only a final Native Brain reply can opt in.
 // Ordinary direct callers continue to use the existing Phase65 resolver.
 const nativeSubjectiveClaimHandoff = Symbol("native_subjective_claim_handoff");
+const postEncodingCommitPermit = Symbol("post_encoding_commit_permit");
 
 async function resolveSubjectiveClaimProposals(
   worldState,
@@ -14394,6 +14395,11 @@ export async function resolveWorldSimulationTurn(
     error.code = "C6E_OFFSCREEN_BATCH_STATE_CHANGED";
     throw error;
   }
+  if (options[postEncodingCommitPermit] && options[postEncodingCommitPermit]() !== true) {
+    const error = new Error("Post-encoding resolution no longer owns the final commit permit.");
+    error.code = "WORLD_SIMULATION_POST_ENCODING_LEASE_INACTIVE";
+    throw error;
+  }
   const committed = await commitWorldSimulationTurn(
     sessionId,
     {
@@ -16659,7 +16665,7 @@ function buildPostEncodingClaimResolver({
 // action. This is not a public MCP input or a caller callback ingress.
 // Causal execution and commitment remain in the single canonical resolve.
 export async function resolveWorldSimulationTurnWithPostEncodingClaimIntents(
-  prepared, selectedActions, { claimCharacters = [], interpretClaim } = {}, options = {},
+  prepared, selectedActions, { claimCharacters = [], interpretClaim, permitCommit } = {}, options = {},
 ) {
   if (!Array.isArray(claimCharacters) || new Set(claimCharacters).size !== claimCharacters.length
       || claimCharacters.some(character => !prepared?.decision_packets?.some(packet => packet.character === character))) {
@@ -16667,7 +16673,13 @@ export async function resolveWorldSimulationTurnWithPostEncodingClaimIntents(
     error.code = "WORLD_SIMULATION_NATIVE_SUBJECTIVE_CLAIM_INTENT_INVALID";
     throw error;
   }
-  if (!claimCharacters.length) return resolveWorldSimulationTurn(prepared, selectedActions, options);
+  if (permitCommit !== undefined && typeof permitCommit !== "function") {
+    const error = new Error("Post-encoding commit permit must be engine-owned.");
+    error.code = "WORLD_SIMULATION_POST_ENCODING_LEASE_INACTIVE";
+    throw error;
+  }
+  const commitOptions = permitCommit ? { [postEncodingCommitPermit]: permitCommit } : {};
+  if (!claimCharacters.length) return resolveWorldSimulationTurn(prepared, selectedActions, { ...options, ...commitOptions });
   if (typeof interpretClaim !== "function" || typeof options.subjectiveClaimResolver === "function"
       || typeof options[nativeSubjectiveClaimHandoff] === "function") {
     const error = new Error("Post-encoding claim interpretation requires one trusted interpreter.");
@@ -16685,7 +16697,7 @@ export async function resolveWorldSimulationTurnWithPostEncodingClaimIntents(
     prepared, claimCharacters: [...claimCharacters], characterRuntimeManager, interpretClaim, options, expectedSnapshot,
   });
   return resolveWorldSimulationTurn(prepared, selectedActions, {
-    ...options, characterRuntimeManager, [nativeSubjectiveClaimHandoff]: resolveClaims,
+    ...options, ...commitOptions, characterRuntimeManager, [nativeSubjectiveClaimHandoff]: resolveClaims,
   });
 }
 
