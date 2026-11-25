@@ -227,5 +227,18 @@ export function createPiStandingPolicyPublisher({ root, resolveWorkspace, clock 
     catch (error) { if (error.code !== "EEXIST") throw error; }
     return { policy_id: id, revoked: true };
   }
-  return Object.freeze({ preview, issue, revoke });
+  async function list() {
+    const dir = await directory(root);
+    const files = (await readdir(dir)).filter(name => /^pi_standing_[a-f0-9]{32}\.approved\.json$/u.test(name));
+    if (files.length > maxPolicies) fail("STANDING_POLICY_STORE_FULL");
+    const records = [];
+    for (const name of files.sort()) {
+      const id = name.slice(0, -".approved.json".length);
+      const record = await readRecord(dir, id);
+      records.push({ ...record, policy_sha256: hashExecutionInput(record),
+        revoked: await revoked(dir, id), expired: clock() >= record.plan.expires_at_ms });
+    }
+    return records;
+  }
+  return Object.freeze({ preview, issue, revoke, list });
 }
