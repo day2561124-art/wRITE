@@ -728,6 +728,9 @@ export function createDevOperationJournalService({
   powershellEffectProfile = REVIEWED_POWERSHELL_EFFECT_PROFILE,
   indexRefreshRecoveryProfile = REVIEWED_INDEX_REFRESH,
   backgroundRecovery = false,
+  verificationTimingObserver = process.env.NEXA_JOURNAL_VERIFY_TIMING === "1"
+    ? (record) => console.error("[nexa-journal-verify-timing] " + JSON.stringify(record))
+    : undefined,
 } = {}) {
   if (!Number.isSafeInteger(lockAcquireTimeoutMs) || lockAcquireTimeoutMs < 1) {
     throw new Error("lockAcquireTimeoutMs must be a positive safe integer.");
@@ -741,6 +744,13 @@ export function createDevOperationJournalService({
   // Only successfully classified snapshots are cached; public results never alias them.
   let verifiedSnapshot = null;
   let verificationInFlight = null;
+
+  // Opt-in numeric observations only. No paths, identities, event contents, or
+  // policy data. Observer failures cannot influence verification decisions.
+  function publishVerificationTiming(timing) {
+    if (!timing) return;
+    try { verificationTimingObserver(Object.freeze({ ...timing })); } catch {}
+  }
   const workspaceMutationState = new Map();
   const recoveringOperations = new Map();
   let recoveryTimer = null;
@@ -787,11 +797,19 @@ export function createDevOperationJournalService({
     return left.files.every((fileName, index) => fileName === right.files[index]);
   }
 
-  async function captureSnapshot(eventsPath) {
+  async function captureSnapshot(eventsPath, timing) {
+    const lockStart = timing && performance.now();
     const lockHandle = await acquireJournalLock(lockPath, { timeoutMs: lockAcquireTimeoutMs });
+    if (timing) timing.lock_wait_ms += performance.now() - lockStart;
     try {
       const head = await readHead(headPath);
+      const listStart = timing && performance.now();
       const files = await listEventFiles(eventsPath);
+      if (timing) {
+        timing.enumeration_ms += performance.now() - listStart;
+        timing.enumerated_files += files.length;
+        timing.capture_count += 1;
+      }
       if (files.length > DEV_JOURNAL_MAX_RECOVERY_SCAN) throw new Error(`Journal scan exceeds ${DEV_JOURNAL_MAX_RECOVERY_SCAN} events.`);
       if (files.length !== head.latest_sequence) {
         throw new Error("Journal event-file snapshot cardinality does not match the captured head sequence.");
@@ -806,13 +824,14 @@ export function createDevOperationJournalService({
     }
   }
 
-  async function verifySnapshotExtension({ eventsPath, base, snapshot }) {
+  async function verifySnapshotExtension({ eventsPath, base, snapshot, timing }) {
     if (snapshot.files.length < base.files.length) throw new Error("Journal event-file snapshot moved backwards during verification.");
     for (let index = 0; index < base.files.length; index += 1) {
       if (snapshot.files[index] !== base.files[index]) throw new Error("Journal event-file snapshot changed a previously captured immutable prefix.");
     }
     // Names/head alone cannot prove that an immutable prefix survived. Check every
     // cached file's identity and nanosecond metadata, including on catch-up passes.
+    const prefixStart = timing && performance.now();
     const prefixChecks = await mapJournalFilesBounded(base.files, async (fileName, index) => {
       const info = await lstat(path.join(eventsPath, fileName), { bigint: true });
       if (info.isSymbolicLink() || !info.isFile()
@@ -820,6 +839,10 @@ export function createDevOperationJournalService({
         throw new Error(`Journal event-file snapshot changed a previously verified immutable prefix: ${fileName}.`);
       }
     });
+    if (timing) {
+      timing.prefix_metadata_ms += performance.now() - prefixStart;
+      timing.prefix_files_checked += base.files.length;
+    }
     for (const check of prefixChecks) if (check.error) throw check.error;
     let previousHash = base.head.latest_event_hash;
     let previousSequence = base.head.latest_sequence;
@@ -827,6 +850,7 @@ export function createDevOperationJournalService({
     const versions = [...base.versions];
     const seenSequence = new Set(events.map((event) => event.sequence));
     const suffix = snapshot.files.slice(base.files.length);
+    const suffixStart = timing && performance.now();
     const loaded = await mapJournalFilesBounded(suffix, async (fileName) => {
       const filePath = path.join(eventsPath, fileName);
       const beforeInfo = await lstat(filePath, { bigint: true });
@@ -842,6 +866,10 @@ export function createDevOperationJournalService({
       }
       return { event, version };
     });
+    if (timing) {
+      timing.suffix_load_ms += performance.now() - suffixStart;
+      timing.suffix_files_loaded += suffix.length;
+    }
     // Parallel loading never decides sequence, chain, or the first failing event.
     for (let index = 0; index < suffix.length; index += 1) {
       const fileName = suffix[index];
@@ -1246,15 +1274,28 @@ export function createDevOperationJournalService({
   }
 
   async function verifyStableSnapshot() {
+    const startedAt = performance.now();
+    const timing = typeof verificationTimingObserver === "function" ? {
+      schema_version: 1, warm: verifiedSnapshot !== null, completed: false,
+      passes: 0, capture_count: 0, enumerated_files: 0, prefix_files_checked: 0,
+      suffix_files_loaded: 0, lock_wait_ms: 0, enumeration_ms: 0,
+      prefix_metadata_ms: 0, suffix_load_ms: 0, classification_ms: 0,
+    } : null;
     try {
       const { eventsPath } = await ensureStorageRoot(storageRoot);
       let verified = verifiedSnapshot ?? { head: emptyHead(), files: [], events: [], versions: [] };
-      let snapshot = await captureSnapshot(eventsPath);
+      let snapshot = await captureSnapshot(eventsPath, timing);
       for (let pass = 0; pass < DEV_JOURNAL_VERIFY_MAX_CATCHUP_PASSES; pass += 1) {
-        verified = await verifySnapshotExtension({ eventsPath, base: verified, snapshot });
-        const confirmation = await captureSnapshot(eventsPath);
+        if (timing) timing.passes += 1;
+        verified = await verifySnapshotExtension({ eventsPath, base: verified, snapshot, timing });
+        const confirmation = await captureSnapshot(eventsPath, timing);
         if (snapshotsEqual(snapshot, confirmation)) {
+          const classificationStart = timing && performance.now();
           const result = classifyVerifiedSnapshot(verified);
+          if (timing) {
+            timing.classification_ms += performance.now() - classificationStart;
+            timing.completed = true;
+          }
           verifiedSnapshot = verified;
           return result;
         }
@@ -1268,6 +1309,11 @@ export function createDevOperationJournalService({
       reconciliationRequired = true;
       lastHealthError = error.message;
       throw error;
+    } finally {
+      if (timing) {
+        timing.total_ms = performance.now() - startedAt;
+        publishVerificationTiming(timing);
+      }
     }
   }
 
