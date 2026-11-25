@@ -1,0 +1,34 @@
+name: Nexa Journal scale benchmark
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/nexa-journal-scale.yml'
+      - 'scripts/benchmark-nexa-journal-verification.mjs'
+      - 'server/src/mcp-development-journal-tools.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-journal:
+    name: Synthetic Journal (66k, ${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - run: npm ci
+      - name: Measure synthetic Journal
+        env:
+          WRITE_DATA_ROOT: ${{ runner.temp }}/nexa-benchmark-data
+        run: node scripts/benchmark-nexa-journal-verification.mjs 66000
