@@ -6,6 +6,7 @@ import {
 
 const allowedOperations = new Set([
   "prepared_turn_reserve_preparation",
+  "prepared_turn_prepare_private_retrieval",
   "prepared_turn_store_prepared",
   "prepared_turn_abort_preparation",
   "prepared_turn_get_receipt",
@@ -21,6 +22,7 @@ const allowedOperations = new Set([
 export function createWorldSimulationPreparedTurnBrokerIpcClient(options = {}) {
   const processLike = options.process_like ?? process;
   const timeoutMs = options.timeout_ms ?? 10_000;
+  const privateRetrievalTimeoutMs = options.private_retrieval_timeout_ms ?? options.timeout_ms ?? 300_000;
   const pending = new Map();
   let disconnected = typeof processLike.send !== "function"
     || processLike.connected === false;
@@ -75,7 +77,7 @@ export function createWorldSimulationPreparedTurnBrokerIpcClient(options = {}) {
       const timer = setTimeout(() => {
         pending.delete(requestId);
         reject(new Error("prepared_turn_parent_broker_timeout"));
-      }, timeoutMs);
+      }, operation === "prepared_turn_prepare_private_retrieval" ? privateRetrievalTimeoutMs : timeoutMs);
       pending.set(requestId, { resolve, reject, timer });
       processLike.send({
         protocol: worldSimulationPreparedTurnBrokerProtocol,
@@ -100,6 +102,9 @@ export function createWorldSimulationPreparedTurnBrokerIpcClient(options = {}) {
       world_simulation_session_id: payload.world_simulation_session_id,
       state_revision: payload.state_revision,
       world_state_hash: payload.world_state_hash,
+    }),
+    preparePrivateRetrieval: (payload) => request("prepared_turn_prepare_private_retrieval", {
+      prepared_turn_handle: payload.prepared_turn_handle,
     }),
     storePrepared: (payload) => request("prepared_turn_store_prepared", {
       prepared_turn_handle: payload.prepared_turn_handle,
@@ -156,6 +161,10 @@ export function attachWorldSimulationPreparedTurnBrokerIpc(
   const operationHandlers = {
     prepared_turn_reserve_preparation: (payload) => broker.reservePreparation({
       ...payload,
+      preparer_owner_id: ownerId,
+    }),
+    prepared_turn_prepare_private_retrieval: (payload) => broker.preparePrivateRetrieval({
+      prepared_turn_handle: payload.prepared_turn_handle,
       preparer_owner_id: ownerId,
     }),
     prepared_turn_store_prepared: (payload) => broker.storePrepared({

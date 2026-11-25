@@ -110,7 +110,7 @@ jobs:
       - name: Verify real Pi Codemode bridge
         run: node --test tests/mcp/mcp-pi-codemode-bridge.test.mjs
       - name: Verify operator-owned grant bindings and policy evidence on both platforms
-        run: node --test tests/mcp/pi-engineering-binding-publisher.test.mjs tests/mcp/pi-standing-policy-evidence.test.mjs tests/mcp/pi-engineering-ingress.test.mjs tests/mcp/pi-operator-batch-approval.test.mjs
+        run: node --test tests/mcp/pi-engineering-binding-publisher.test.mjs tests/mcp/pi-standing-policy-evidence.test.mjs tests/mcp/pi-engineering-ingress.test.mjs tests/mcp/pi-operator-batch-approval.test.mjs tests/mcp/pi-standing-authorization.test.mjs
 
   pi-manual-release-prep:
     if: github.event_name == 'pull_request' || github.event_name == 'push'

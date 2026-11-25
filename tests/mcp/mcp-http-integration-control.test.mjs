@@ -138,7 +138,7 @@ async function startParent(repo, profile) {
   await new Promise((resolve) => server.close(resolve));
   const child = spawn(process.execPath, ['server/src/mcp-http-server.mjs', '--port', String(port)], {
     cwd: repo, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, MCP_TOOL_PROFILE: profile },
+    env: { ...process.env, MCP_TOOL_PROFILE: profile, WRITER_PRIVATE_RETRIEVAL_ENDPOINT: '', WRITER_PRIVATE_RETRIEVAL_MODEL: '' },
   });
   let logs = '';
   await new Promise((resolve, reject) => {
@@ -179,7 +179,7 @@ async function fixture() {
     'pi-durable-worker-supervisor.mjs', 'pi-durable-worker-protocol.mjs',
     'mcp-workspace-snapshot-authority.mjs', 'mcp-workspace-snapshot-authority-ipc.mjs', 'mcp-workspace-change-clock.mjs',
     'mcp-workspace-change-clock-provider.mjs', 'git-status-porcelain.mjs',
-    'world-simulation-prepared-turn-ephemeral-broker.mjs', 'world-simulation-formal-goal-plan-intent-contract.mjs', 'world-simulation-prepared-turn-broker-ipc.mjs',
+    'world-simulation-prepared-turn-ephemeral-broker.mjs', 'world-simulation-formal-goal-plan-intent-contract.mjs', 'world-simulation-private-retrieval-authority-service.mjs', 'world-simulation-prepared-turn-broker-ipc.mjs',
     'world-simulation-formal-experiential-deliberation-contract.mjs',
     'canonical-json-hash-service.mjs', 'process-control.mjs', 'file-transactions.mjs', 'project-paths.mjs',
   ]) await copyFile(path.join(root, 'server', 'src', file), path.join(src, file));

@@ -177,7 +177,8 @@ import { createPiProductionRouteStore } from "./pi-production-execution-route.mj
 import { createPiProductionExecutionController, guardPiDirectExecution } from "./pi-production-execution-controller.mjs";
 import { adaptPiEngineeringIngress } from "./pi-engineering-ingress.mjs";
 import { createPiEngineeringApprovalSource, loadPiEngineeringApprovalBindings } from "./pi-engineering-approval-source.mjs";
-import { createPiTaskAuthorizationStore } from "./pi-task-authorization.mjs";
+import { createPiTaskAuthorizationStore, createPiTaskPolicy } from "./pi-task-authorization.mjs";
+import { createPiStandingAuthorizationReader } from "./pi-standing-authorization.mjs";
 import { createPiLifecycleScopeVerifier } from "./pi-lifecycle-scope.mjs";
 import { dev_pi_runtime_status, dev_pi_execute_readonly } from "./mcp-pi-agent-tools.mjs";
 import { PI_READ_ONLY_LIMITS } from "./pi-codemode-bridge.mjs";
@@ -2154,7 +2155,7 @@ const toolDefinitions = [
   },
   {
     name: "dev_pi_execute_intent",
-    description: "Default engineering ingress. Routine work accepts intent_id, goal, registered isolated workspace_id and explicit requested_actions. When task grants are mandatory, a request without task_authorization_id can use an existing operator-approved host binding; missing or invalid bindings are denied. host_approved_engineering explicitly selects the same mechanism. Commands require their existing explicit authorization and never use automatic binding. Pi derives mechanical contract fields for autonomous_engineering. Legacy autonomous PowerShell, authorized_engineering, and full ExecutionIntent inputs remain subject to server policy. reconcile_only needs the exact operation identity and context. Duplicate intents return durable state.",
+    description: "Default engineering ingress. Routine work accepts intent_id, goal, registered isolated workspace_id and explicit requested_actions. When task grants are mandatory, a request without task_authorization_id can use an existing operator-approved host binding; missing or invalid bindings are denied. host_approved_engineering explicitly selects the same mechanism. standing_engineering uses a separately published operator-approved finite standing policy, explicit actions, and authenticated principal; absent, ambiguous, expired or revoked policy is denied. Commands require their existing explicit authorization and never use automatic binding. Pi derives mechanical contract fields for autonomous_engineering. Legacy autonomous PowerShell, authorized_engineering, and full ExecutionIntent inputs remain subject to server policy. reconcile_only needs the exact operation identity and context. Duplicate intents return durable state.",
     risk: "high-risk-write",
     annotations: { readOnlyHint: false },
     inputSchema: baseSchema({ intent_json: { type: "string", minLength: 1, maxLength: 524288 } }, ["intent_json"]),
@@ -2167,9 +2168,10 @@ const toolDefinitions = [
       intent = await adaptPiEngineeringIngress(intent, {
         authentication, resolveWorkspace: resolveDevWorkspaceExecutionContext,
         approvalSource: piEngineeringApprovalSource,
+        standingApprovalSource: piStandingAuthorizationReader.bind,
         requireTaskAuthorization: process.env.NEXA_PI_REQUIRE_TASK_AUTHORIZATION === "1",
       });
-      return jsonContent(await piProductionController.submit(intent));
+      return jsonContent(await piProductionController.submit(intent, { authentication }));
     },
   },
   {
@@ -5944,6 +5946,10 @@ const piEngineeringApprovalSource = createPiEngineeringApprovalSource({
   resolveWorkspace: resolveDevWorkspaceExecutionContext,
   authorizeTask: createPiTaskAuthorizationStore({ root: process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT }).authorize,
 });
+const piStandingAuthorizationReader = createPiStandingAuthorizationReader({
+  root: process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT,
+  resolveWorkspace: resolveDevWorkspaceExecutionContext,
+});
 const piProductionController = createPiProductionExecutionController({ transport: {
   requestTimeoutMs:300000,longRequestTimeoutMs:8*60*60*1000,queryTimeoutMs:120000,
   callTool: params => callToolDirect(params),
@@ -5992,7 +5998,7 @@ const piProductionController = createPiProductionExecutionController({ transport
     return piLifecycleScopeVerifier({context, step});
   },
   requestTimeoutMs: 1800000, queryTimeoutMs: 300000,
-} });
+}, authorizeTask: createPiTaskPolicy({ authorizeStanding: piStandingAuthorizationReader.authorize }) });
 async function callTool(params, authentication) {
   const name = params?.name;
   if(!workbenchTransportBoundary.isToolAllowed(name))throw new Error("GM_CONNECTION_TOOL_DENIED");
@@ -6132,7 +6138,7 @@ async function dispatch(message) {
         },
       },
       serverInfo,
-      instructions: "Use tools/list and tools/call. Bounded development file and Git reads can run directly against their authorized workspace. Engineering routing is governed by dev_pi_execution_status. When pi_default is active, submit GPT-authored work through dev_pi_execute_intent with the operator-issued task_authorization_id when required, or explicit requested_actions using an existing operator-approved host binding. A missing or invalid binding does not authorize execution. GPT decides, Pi schedules and records, MCP executes. Other direct engineering tools use diagnostic/emergency fallback metadata and mutations require a reconciliation_key. Consult persisted operation evidence after a Pi failure. High-risk writes retain their explicit confirmation guards." + (trpgGMBridge?.instruction ? " TRPG GM: " + trpgGMBridge.instruction : ""),
+      instructions: "Use tools/list and tools/call. Bounded development file and Git reads can run directly against their authorized workspace. Engineering routing is governed by dev_pi_execution_status. When pi_default is active, submit GPT-authored work through dev_pi_execute_intent with the operator-issued task_authorization_id when required, or explicit requested_actions using an existing operator-approved host binding. For independently approved ordinary isolated workspaces, standing_engineering can use an explicit action list without a task grant ID; the host derives and revalidates the pinned policy. A missing or invalid authorization does not permit execution. GPT decides, Pi schedules and records, MCP executes. Other direct engineering tools use diagnostic/emergency fallback metadata and mutations require a reconciliation_key. Consult persisted operation evidence after a Pi failure. High-risk writes retain their explicit confirmation guards." + (trpgGMBridge?.instruction ? " TRPG GM: " + trpgGMBridge.instruction : ""),
     });
   }
 
