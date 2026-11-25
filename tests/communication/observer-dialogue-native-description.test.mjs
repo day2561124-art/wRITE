@@ -7,6 +7,7 @@ import { buildCharacterCommunicationActionCandidate } from "../../server/src/cha
 import { beginWorldSimulationSession } from "../../server/src/world-simulation-session-service.mjs";
 import {
   createWorldSimulationCharacterRuntimeManager, replayWorldSimulationCommittedCharacterExperiences, runWorldSimulationTurn,
+  prepareWorldSimulationTurn, resolveWorldSimulationTurnWithPostEncodingClaimIntents,
   scheduleWorldSimulationAutonomousCognitionOpportunities,
   dispatchWorldSimulationAutonomousCognitionOpportunities,
 } from "../../server/src/world-simulation-loop-service.mjs";
@@ -24,7 +25,7 @@ const secondFact = "它最多能倒數四十分鐘。";
 const question = "白色計時器能倒數多久？";
 const prompt = "你指的是哪一件？";
 const shortReply = "架上那台。";
-async function run(scenario, {controlledClaimProbe = false, nativeClaimChoice = false, nativeClaimFault = null} = {}) {
+async function run(scenario, {controlledClaimProbe = false, nativeClaimChoice = false, nativeClaimFault = null, engineClaimChoice = false} = {}) {
   const temp = path.join(projectRoot, "tests", ".tmp");
   await mkdir(temp, {recursive: true});
   const fixtureRoot = await mkdtemp(path.join(temp, "native-description-clarification-"));
@@ -246,12 +247,30 @@ async function run(scenario, {controlledClaimProbe = false, nativeClaimChoice = 
           }];
         }} : {}),
       };
+      const executeTurn = async () => {
+        if (!engineClaimChoice) return runWorldSimulationTurn(input(id), turnOptions);
+        // Simulate an engine transport which already froze action decisions.
+        // The post-encoding interpretation occurs inside the same single
+        // canonical resolution, rather than replaying the causal turn.
+        const prepared = await prepareWorldSimulationTurn(input(id), options);
+        const selected = Object.fromEntries(prepared.decision_packets.map(packet => [packet.character, "reject_all"]));
+        const before = await getWorldSimulationState(sid, options);
+        return resolveWorldSimulationTurnWithPostEncodingClaimIntents(prepared, selected, {
+          claimCharacters: id === "observe1" ? [] : [actor],
+          interpretClaim: async packet => {
+            const during = await getWorldSimulationState(sid, options);
+            assert.equal(during.revision, before.revision);
+            assert.equal(during.state_hash, before.state_hash);
+            return turnOptions.characterBrain(packet);
+          },
+        }, options);
+      };
       if (preAttempt) {
         const expectedCode = nativeClaimFault === "duplicate_evidence"
           ? "WORLD_SIMULATION_SUBJECTIVE_CLAIM_EVIDENCE_DUPLICATE"
           : "WORLD_SIMULATION_NATIVE_SUBJECTIVE_CLAIM_INTENT_INVALID";
         const historyBefore = await getWorldSimulationHistory(sid, options);
-        await assert.rejects(runWorldSimulationTurn(input(id), turnOptions),
+        await assert.rejects(executeTurn(),
           error => error?.code === expectedCode,
           "Invalid explicit subjective claims must fail through the appropriate existing authority guard.");
         const afterAttempt = await getWorldSimulationState(sid, options);
@@ -270,7 +289,7 @@ async function run(scenario, {controlledClaimProbe = false, nativeClaimChoice = 
         }));
         return;
       }
-      assert.ok((await runWorldSimulationTurn(input(id), turnOptions)).committed);
+      assert.ok((await executeTurn()).committed);
     }
     const beforeState = (await getWorldSimulationState(sid, options)).state;
     const before = learned(beforeState);
@@ -676,13 +695,17 @@ if (!selectedScenario || selectedScenario === "controlled_claim_probe") {
 if (!selectedScenario || selectedScenario === "native_claim_choice") {
   await run("conflict_speech", {nativeClaimChoice: true});
 }
+if (!selectedScenario || selectedScenario === "engine_claim_choice") {
+  await run("conflict_speech", {nativeClaimChoice: true, engineClaimChoice: true});
+  await run("conflict_speech", {nativeClaimChoice: true, engineClaimChoice: true, nativeClaimFault: "stale_source"});
+}
 const nativeClaimFaults = ["stale_context", "stale_source", "forged_source", "duplicate_evidence", "foreign_author"];
 if (!selectedScenario || selectedScenario === "native_claim_negative") {
   for (const nativeClaimFault of nativeClaimFaults) {
     await run("conflict_speech", {nativeClaimChoice: true, nativeClaimFault});
   }
 }
-if (!["controlled_claim_probe", "native_claim_choice", "native_claim_negative"].includes(selectedScenario)) {
+if (!["controlled_claim_probe", "native_claim_choice", "native_claim_negative", "engine_claim_choice"].includes(selectedScenario)) {
   await Promise.all((selectedScenario ? [selectedScenario] : ["recalled_speech", "historical_panel_speech", "conflict_speech"])
     .map(scenario => run(scenario)));
 }
