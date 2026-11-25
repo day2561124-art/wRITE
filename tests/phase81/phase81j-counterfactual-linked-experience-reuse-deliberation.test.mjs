@@ -468,6 +468,8 @@ const transportSource = await readFile(
   "server/src/world-simulation-formal-turn-transport-service.mjs",
   "utf8",
 );
+const resolutionSource = await readFile("server/src/world-simulation-formal-resolution-engine-service.mjs", "utf8");
+assert.match(transportSource, /runFormalWorldResolution\(acquisition, loopOptions\)/);
 const brokerSource = await readFile(
   "server/src/world-simulation-prepared-turn-ephemeral-broker.mjs",
   "utf8",
@@ -480,9 +482,9 @@ assert.match(loopSource, /counterfactualLinkedExperienceReuseResolver/);
 assert.match(loopSource, /brainInput\.counterfactual_linked_experience_reuse/);
 assert.match(loopSource, /counterfactualLinkedExperienceReuseProjections/);
 assert.match(transportSource, /counterfactual_linked_experience_reuse_resolver_views/);
-assert.match(transportSource, /counterfactualLinkedExperienceReuseProjections/);
+assert.match(resolutionSource, /counterfactualLinkedExperienceReuseProjections/);
 assert.match(
-  transportSource,
+  resolutionSource,
   /acquisition\.prepared_turn\.counterfactual_linked_experience_reuse_projections/,
 );
 assert.match(brokerSource, /worldSimulationFormalImpasseDecisionKinds\.PHASE81J/);
