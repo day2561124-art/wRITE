@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {mkdtemp,rm,readFile} from 'node:fs/promises';
+import {mkdtemp,rm,readFile,readdir,writeFile} from 'node:fs/promises';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {randomUUID} from 'node:crypto';
@@ -10,6 +10,7 @@ import {createDevOperationJournalService} from '../../server/src/mcp-development
 import {createPiProductionRouteStore} from '../../server/src/pi-production-execution-route.mjs';
 import {createPiProductionExecutionController,projectVerifiedPiJournalHistory} from '../../server/src/pi-production-execution-controller.mjs';
 import {REQUIRED_DECISION_BOUNDARIES} from '../../server/src/pi-execution-contract.mjs';
+import {createPiReliableExecutionStore} from '../../server/src/pi-reliable-execution-store.mjs';
 
 const context={project_id:'writer_workbench',workstream_id:'dev_workstream_20261003-153931_7730524b821e',workspace_id:'dev_workspace_65ed265de3494399b7ad40b2'};
 const intent=id=>({schema_version:1,intent_id:id,goal:'Inspect precise durable state',context,constraints:['Preserve scope'],
@@ -190,4 +191,41 @@ test('explicitly injected route remains authoritative, not the production defaul
   const result=await f.host.inspectStatus({intent_id:i.intent_id,context});
   assert.equal(result.route.mode,'pi_default');
   assert.deepEqual(f.counts,{projections:1,routes:1,dispatch:0});
+});
+
+test('projection append shares only the same attempt fresh mutation verification',async t=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'pi-projection-single-verify-'));
+  t.after(async()=>{await rm(root,{recursive:true,force:true});});
+  const storageRoot=path.join(root,'journal'),timings=[],attempts=[];
+  const journal=createDevOperationJournalService({
+    storageRoot,verificationTimingObserver:record=>timings.push(record),
+  });
+  let lastArgs;
+  const store=createPiReliableExecutionStore({journal:{
+    ...journal,appendExecutionProjection:async(...args)=>{
+      lastArgs=args;
+      const before=timings.length;
+      const event=await journal.appendExecutionProjection(...args);
+      attempts.push(timings.slice(before));
+      return event;
+    },
+  }});
+  const first=await store.admit(intent('single-verify-first'));
+  const second=await store.admit(intent('single-verify-second'));
+  assert.notEqual(first.state.operation_id,second.state.operation_id);
+  assert.deepEqual(attempts.map(rows=>rows.length),[1,1],
+    'one fresh physical verification per uncontended projection publication attempt');
+  assert(attempts.every(rows=>rows[0].completed));
+  assert.equal(attempts[1][0].prefix_files_checked,2);
+  const verified=await journal.verify();
+  assert.equal(verified.head.latest_sequence,4);
+  const headPath=path.join(storageRoot,'head.json');
+  const headBefore=await readFile(headPath,'utf8');
+  const eventsPath=path.join(storageRoot,'events');
+  const filename=(await readdir(eventsPath)).sort()[0];
+  const file=path.join(eventsPath,filename);
+  await writeFile(file,(await readFile(file,'utf8'))+' ');
+  // Even an exact duplicate admission must verify the physical prefix anew.
+  await assert.rejects(journal.appendExecutionProjection(...lastArgs),/immutable prefix/u);
+  assert.equal(await readFile(headPath,'utf8'),headBefore);
 });
