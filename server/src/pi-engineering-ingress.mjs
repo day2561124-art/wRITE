@@ -1,5 +1,6 @@
 import { hashExecutionInput, PI_TASK_AUTHORIZATION_ID } from "./pi-execution-contract.mjs";
 import { adaptAuthorizedPiRequest } from "./pi-execution-policy.mjs";
+import { requiresPiTaskGrant } from "./pi-task-authorization.mjs";
 
 function denied() {
   throw Object.assign(new Error("PERMISSION_DENIED"), { code: "PERMISSION_DENIED" });
@@ -36,12 +37,25 @@ export async function adaptHostAuthorizedEngineeringRequest(source, {
   return intent;
 }
 
-// This opt-in envelope is deliberately distinct from legacy requests. Only the
-// authenticated transport decision, never request metadata, supplies identity.
+// Only the authenticated transport decision, never request metadata, supplies
+// identity. Explicit host requests and mandatory-grant automatic binding
+// both require an already approved grant.
 export async function adaptPiEngineeringIngress(source, {
   authentication, resolveWorkspace, approvalSource,
+  requireTaskAuthorization = false,
 } = {}) {
-  if (source?.request_kind !== "host_approved_engineering") {
+  // When task grants are mandatory, an explicit-action autonomous request
+  // may reuse an independently published host binding. Never select or issue
+  // new authority, silently convert a command, or fall back after denial.
+  const explicitHostRequest = source?.request_kind === "host_approved_engineering";
+  const automaticHostBinding = requireTaskAuthorization === true
+    && source?.request_kind === "autonomous_engineering"
+    && !Object.hasOwn(source, "task_authorization_id")
+    && !Object.hasOwn(source, "command")
+    && Array.isArray(source.requested_actions)
+    && source.requested_actions.some(action =>
+      typeof action?.capability === "string" && requiresPiTaskGrant(action.capability));
+  if (!explicitHostRequest && !automaticHostBinding) {
     return adaptAuthorizedPiRequest(source, { resolveWorkspace });
   }
   if (authentication?.ok !== true || authentication.local !== false
