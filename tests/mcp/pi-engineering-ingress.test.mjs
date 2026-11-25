@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { adaptHostAuthorizedEngineeringRequest } from "../../server/src/pi-engineering-ingress.mjs";
+import { createPiEngineeringApprovalSource } from "../../server/src/pi-engineering-approval-source.mjs";
 import { createPiTaskAuthorizationStore } from "../../server/src/pi-task-authorization.mjs";
 
 const context = {
@@ -117,4 +118,63 @@ test("host ingress cannot silently reinterpret a short PowerShell command", asyn
     requested_actions: [{ step_id: "host", capability: "host.powershell",
       input: { command: "Get-Location" } }],
   }), { ...f.options, approvedGrantId: sandboxGrant.task_authorization_id }), { code: "PERMISSION_DENIED" });
+});
+
+const principal = "authenticated-fixture-principal";
+function approvalFixture(f) {
+  const binding = { principal, workspace_id: context.workspace_id,
+    workstream_id: context.workstream_id, goal,
+    task_authorization_id: f.grant.task_authorization_id };
+  let bindings = [binding];
+  let resolutions = 0;
+  const adapt = createPiEngineeringApprovalSource({
+    loadBindings: async () => bindings,
+    authorizeTask: f.store.authorize,
+    resolveWorkspace: async () => { resolutions++; return { ...context }; },
+  });
+  return { binding, adapt, setBindings: value => { bindings = value; },
+    resolutions: () => resolutions };
+}
+
+test("host binding resolves an existing approved grant without a caller-supplied grant identifier", async t => {
+  const f = await fixture(t);
+  const a = approvalFixture(f);
+  const first = await a.adapt(source(), { authenticatedPrincipal: principal });
+  const second = await a.adapt(source({ intent_id: "host-approved-second" }), { authenticatedPrincipal: principal });
+  assert.equal(first.task_authorization_id, f.grant.task_authorization_id);
+  assert.equal(second.task_authorization_id, first.task_authorization_id);
+  assert.notEqual(second.intent_id, first.intent_id);
+  assert.equal(a.resolutions(), 4);
+  await f.store.authorize(first);
+  await f.store.authorize(second);
+});
+
+test("binding source rejects absent, ambiguous, malformed and cross-principal bindings", async t => {
+  const f = await fixture(t);
+  const a = approvalFixture(f);
+  const rejected = options => assert.rejects(a.adapt(source(), options), { code: "PERMISSION_DENIED" });
+  await rejected({});
+  await rejected({ authenticatedPrincipal: "other-principal" });
+  for (const bindings of [
+    [], [a.binding, a.binding], [{ ...a.binding, goal: "Different goal" }],
+    [{ ...a.binding, workstream_id: "dev_workstream_20261125-010000_" + "c".repeat(12) }],
+    [{ ...a.binding, unexpected: true }], [{ ...a.binding, task_authorization_id: "invalid" }],
+  ]) {
+    a.setBindings(bindings);
+    await rejected({ authenticatedPrincipal: principal });
+  }
+  a.setBindings([a.binding]);
+  await assert.rejects(a.adapt(source({ task_authorization_id: f.grant.task_authorization_id }),
+    { authenticatedPrincipal: principal }), { code: "PERMISSION_DENIED" });
+});
+
+test("fresh host binding snapshots and the original grant verifier both remain authoritative", async t => {
+  const f = await fixture(t);
+  const a = approvalFixture(f);
+  await a.adapt(source(), { authenticatedPrincipal: principal });
+  a.setBindings([]);
+  await assert.rejects(a.adapt(source(), { authenticatedPrincipal: principal }), { code: "PERMISSION_DENIED" });
+  a.setBindings([a.binding]);
+  await f.store.revoke(f.grant.task_authorization_id);
+  await assert.rejects(a.adapt(source(), { authenticatedPrincipal: principal }), { code: "PERMISSION_DENIED" });
 });
