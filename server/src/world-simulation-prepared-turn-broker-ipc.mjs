@@ -119,6 +119,8 @@ export function createWorldSimulationPreparedTurnBrokerIpcClient(options = {}) {
       ...(payload.reject_all === true
         ? { reject_all: true }
         : { action_id: payload.action_id }),
+      ...Object.fromEntries(["goal_context_token", "goal_intents", "plan_context_token", "plan_intents"]
+        .filter(key => Object.hasOwn(payload, key)).map(key => [key, payload[key]])),
     }),
     submitDeliberation: (payload) => request("prepared_turn_submit_deliberation", {
       prepared_turn_handle: payload.prepared_turn_handle,
