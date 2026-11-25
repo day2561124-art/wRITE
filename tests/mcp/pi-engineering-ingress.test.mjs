@@ -96,3 +96,25 @@ test("caller cannot inject a grant reference or host-only parameter", async t =>
     approvedGrantId: f.grant.task_authorization_id,
   }), f.options), { code: "INVALID_AUTHORIZED_REQUEST" });
 });
+
+test("host ingress cannot silently reinterpret a short PowerShell command", async t => {
+  const f = await fixture(t);
+  const { requested_actions, ...request } = source();
+  for (const command of ["Get-Location", "Get-ChildItem"]) {
+    await assert.rejects(adaptHostAuthorizedEngineeringRequest({
+      ...request, command,
+    }, f.options), { code: "EXPLICIT_ENGINEERING_ACTION_REQUIRED" });
+  }
+  const sandboxGrant = await f.store.issue({ ...context, goal,
+    capabilities: ["workspace.powershell_isolated"], expires_at_ms: 200 });
+  const sandbox = await adaptHostAuthorizedEngineeringRequest(source({
+    requested_actions: [{ step_id: "sandbox", capability: "workspace.powershell_isolated",
+      input: { command: "Get-Location", cwd: "." } }],
+  }), { ...f.options, approvedGrantId: sandboxGrant.task_authorization_id });
+  assert.equal(sandbox.requested_actions[0].capability, "workspace.powershell_isolated");
+  assert.equal(sandbox.mutation_plan[0].target, context.workspace_id);
+  await assert.rejects(adaptHostAuthorizedEngineeringRequest(source({
+    requested_actions: [{ step_id: "host", capability: "host.powershell",
+      input: { command: "Get-Location" } }],
+  }), { ...f.options, approvedGrantId: sandboxGrant.task_authorization_id }), { code: "PERMISSION_DENIED" });
+});
