@@ -113,3 +113,49 @@ test("one operator-approved binding serves successive exact-scope intents until 
   await assert.rejects(f.store.authorize(first), { code: "PERMISSION_DENIED" });
   await assert.rejects(f.store.authorize(second), { code: "PERMISSION_DENIED" });
 });
+
+test("one protected manifest supports two independently approved workstreams without cross-scope reuse", async t => {
+  const f = await fixture(t);
+  const other = { ...workspace,
+    workspace_id: "dev_workspace_" + "e".repeat(24),
+    workstream_id: "dev_workstream_20261125-020000_" + "f".repeat(12) };
+  const otherGoal = "Verify separate operator-approved workstream";
+  const otherGrant = await f.store.issue({ ...other, goal: otherGoal, expires_at_ms: 200,
+    capabilities: ["filesystem.write"] });
+  const otherBinding = { principal, workspace_id: other.workspace_id, workstream_id: other.workstream_id,
+    goal: otherGoal, task_authorization_id: otherGrant.task_authorization_id };
+  const resolveWorkspace = async ({ workspace_id }) =>
+    workspace_id === workspace.workspace_id ? { ...workspace }
+      : workspace_id === other.workspace_id ? { ...other } : null;
+  const publisher = createPiEngineeringBindingPublisher({
+    root: f.root, resolveWorkspace, authorizeTask: f.store.authorize,
+  });
+  const adapt = createPiEngineeringApprovalSource({
+    loadBindings: () => loadPiEngineeringApprovalBindings(f.root), resolveWorkspace, authorizeTask: f.store.authorize,
+  });
+  const result = await publisher.publish({ expected_current_sha256: null, bindings: [f.binding, otherBinding] });
+  assert.equal(result.count, 2);
+  const first = await adapt(f.source, { authenticatedPrincipal: principal });
+  const secondSource = { ...f.source, workspace_id: other.workspace_id, goal: otherGoal, intent_id: "second-workstream" };
+  const second = await adapt(secondSource, { authenticatedPrincipal: principal });
+  assert.equal(first.task_authorization_id, f.grant.task_authorization_id);
+  assert.equal(second.task_authorization_id, otherGrant.task_authorization_id);
+  await assert.rejects(adapt({ ...secondSource, goal }, { authenticatedPrincipal: principal }),
+    { code: "PERMISSION_DENIED" });
+  await f.store.revoke(f.grant.task_authorization_id);
+  await assert.rejects(adapt(f.source, { authenticatedPrincipal: principal }), { code: "PERMISSION_DENIED" });
+  await f.store.authorize(await adapt(secondSource, { authenticatedPrincipal: principal }));
+});
+
+test("runtime rejects an ambiguous protected manifest even when one record matches the caller", async t => {
+  const f = await fixture(t);
+  const file = path.join(f.root, "engineering-bindings.json");
+  for (const bindings of [
+    [f.binding, { ...f.binding, principal: "different-principal" }],
+    [f.binding, { ...f.binding, task_authorization_id: "pi_task_" + "d".repeat(32) }],
+  ]) {
+    await writeFile(file, JSON.stringify(bindings));
+    await assert.rejects(f.adapt(f.source, { authenticatedPrincipal: principal }), { code: "PERMISSION_DENIED" });
+    await assert.rejects(f.publisher.inspect());
+  }
+});
