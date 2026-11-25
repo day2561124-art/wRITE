@@ -161,6 +161,7 @@ function preparationSurface(receipt, reused) {
     deliberation_submission_count:
       receipt.deliberation_submission_count ?? 0,
     ready_to_resolve: receipt.ready_to_resolve,
+    post_encoding_requested: receipt.post_encoding_requested === true,
     reused_existing_prepared_turn: reused === true,
     current_decision: receipt.current_decision,
     boundaries: {
@@ -834,7 +835,7 @@ export async function prepareFormalWorldSimulationTurn(input = {}, options = {})
           "The active world turn is already being prepared by another transport owner.",
         );
       }
-      if (active.lifecycle_status === "taken_for_resolution") {
+      if (active.lifecycle_status === "taken_for_resolution" && active.current_decision?.decision_kind !== postEncodingClaimDecisionKind) {
         fail(
           "WORLD_SIMULATION_PREPARED_TURN_RESOLUTION_IN_PROGRESS",
           "The active prepared world turn is already being resolved.",
@@ -926,6 +927,15 @@ export async function submitFormalWorldSimulationCharacterDeliberation(
     );
   }
 
+  if (before.current_decision?.decision_kind === postEncodingClaimDecisionKind) {
+    const boundary = await broker.submitPostEncodingClaim({
+      prepared_turn_handle: handle, decision_handle: decisionHandle,
+      deliberation_response: input.deliberation_response,
+    });
+    return boundary.result ? resolutionSurface(boundary.receipt, boundary.result)
+      : preparationSurface(boundary.receipt, false);
+  }
+
   const submitted = await broker.submitDeliberation({
     prepared_turn_handle: handle,
     decision_handle: decisionHandle,
@@ -1002,6 +1012,7 @@ export async function submitFormalWorldSimulationCharacterAction(
       ? { reject_all: true }
       : { action_id: input.action_id.trim() }),
     ...extractFormalGoalPlanIntentFields(input),
+    ...(Object.hasOwn(input, "request_subjective_claim_interpretation") ? { request_subjective_claim_interpretation: input.request_subjective_claim_interpretation } : {}),
   });
 
   return preparationSurface(receipt, false);
@@ -1014,6 +1025,13 @@ export async function resolveFormalWorldSimulationTurn(input = {}, options = {})
     "WORLD_SIMULATION_FORMAL_PREPARED_TURN_HANDLE_REQUIRED",
   );
   const broker = preparedTurnBroker(options);
+  const before = await broker.getReceipt({ prepared_turn_handle: handle });
+  if (before.post_encoding_requested && !before.terminal) {
+    await assertReceiptFresh(before, options);
+    const boundary = await broker.startPostEncodingResolution({ prepared_turn_handle: handle });
+    return boundary.result ? resolutionSurface(boundary.receipt, boundary.result)
+      : { ...preparationSurface(boundary.receipt, false), committed: false, resolution_pending: true };
+  }
   const acquisition = await broker.takeForResolution({
     prepared_turn_handle: handle,
     resolver_owner_id: formalResolverOwnerId,
