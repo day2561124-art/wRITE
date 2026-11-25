@@ -29,7 +29,7 @@ try {
   const names = (await readdir(eventsPath)).sort();
   assert.equal(names.length, 2);
   const templates = await Promise.all(names.map(async name =>
-    JSON.parse(await readFile(path.join(eventsPath, name), "utf8")))));
+    JSON.parse(await readFile(path.join(eventsPath, name), "utf8"))));
   let previous = templates[1].event_hash;
   let last = templates[1];
   let batch = [];
