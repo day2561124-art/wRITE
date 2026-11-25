@@ -231,3 +231,38 @@ test('projection append shares only the same attempt fresh mutation verification
   await assert.rejects(journal.appendExecutionProjection(...lastArgs),/immutable prefix/u);
   assert.equal(await readFile(headPath,'utf8'),headBefore);
 });
+
+test('narrow verified readers return detached records and still reject unrelated prefix tampering',async t=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'pi-filtered-journal-read-'));
+  t.after(async()=>{await rm(root,{recursive:true,force:true});});
+  const storageRoot=path.join(root,'journal'),timings=[];
+  const journal=createDevOperationJournalService({storageRoot,
+    verificationTimingObserver:record=>timings.push(record)});
+  const unrelated=await journal.begin({operation_type:'fixture',tool_name:'dev_fixture'});
+  await journal.complete(unrelated.operation_id);
+  const route=createPiProductionRouteStore({journal});
+  await route.change({mode:'pi_default',expected_revision:0,
+    decision_id:'gpt-filtered-read-fixture',gate_hash:'a'.repeat(64)},{validateGate:async()=>true});
+  const store=createPiReliableExecutionStore({journal});
+  await store.admit(intent('filtered-read-fixture'));
+  const expected=await journal.verify();
+  const before=timings.length;
+  const [routes,projections]=await Promise.all([journal.readProductionRoutes(),journal.readExecutionProjections()]);
+  assert.equal(timings.length-before,1,'concurrent narrow readers share physical verification');
+  assert.equal(timings.at(-1).prefix_files_checked,expected.events.length);
+  assert.deepEqual(routes,expected.events.filter(e=>e.operation_type==='pi_production_route'&&e.stage==='operation_completed'));
+  assert.deepEqual(projections,expected.events.filter(e=>e.execution_projection!==undefined));
+  routes[0].result.route_record='{}';
+  projections[0].execution_projection.intent.goal='poisoned';
+  assert.deepEqual(await journal.verify(),expected,'narrow outputs never alias the verified cache');
+  const file=path.join(storageRoot,'events',(await readdir(path.join(storageRoot,'events'))).sort()[0]);
+  await writeFile(file,(await readFile(file,'utf8'))+' ');
+  const headPath=path.join(storageRoot,'head.json');
+  const headBefore=await readFile(headPath,'utf8');
+  const outcomes=await Promise.allSettled([journal.readProductionRoutes(),journal.readExecutionProjections()]);
+  for(const outcome of outcomes){
+    assert.equal(outcome.status,'rejected');
+    assert.match(outcome.reason.message,/immutable prefix/u);
+  }
+  assert.equal(await readFile(headPath,'utf8'),headBefore,'observational reads never publish a new head');
+});
