@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
 
 export const postEncodingClaimDecisionKind = "post_encoding_subjective_claim";
+export const postEncodingClaimRelationDecisionKind = "post_encoding_subjective_claim_relation";
+export const isPostEncodingDecisionKind = kind => [postEncodingClaimDecisionKind, postEncodingClaimRelationDecisionKind].includes(kind);
 const clone = value => JSON.parse(JSON.stringify(value));
 function fail(code) { const error = new Error(code); error.code = code; throw error; }
 const invalid = "WORLD_SIMULATION_NATIVE_SUBJECTIVE_CLAIM_INTENT_INVALID";
@@ -23,6 +25,33 @@ export const formalClaimResponseProperties = Object.freeze({
     },
   } },
 });
+
+export const formalClaimRelationResponseProperties = Object.freeze({
+  relation_context_token: { type: "string", maxLength: 128 },
+  relation_intents: { type: "array", maxItems: 8, items: {
+    type: "object", additionalProperties: false, required: ["source_claim_token", "target_claim_token", "relation"],
+    properties: {
+      source_claim_token: { type: "string", maxLength: 128 },
+      target_claim_token: { type: "string", maxLength: 128 },
+      relation: { type: "string", enum: ["challenges", "supersedes"] },
+    },
+  } },
+});
+const invalidRelation = "WORLD_SIMULATION_NATIVE_SUBJECTIVE_CLAIM_RELATION_INTENT_INVALID";
+function validateRelationReply(reply, view) {
+  if (!isObject(reply) || Object.keys(reply).some(key => !Object.hasOwn(formalClaimRelationResponseProperties, key))
+      || reply.relation_context_token !== view.context_token || !Array.isArray(reply.relation_intents)
+      || reply.relation_intents.length > 8) fail(invalidRelation);
+  const current = new Set(view.current_claims.map(claim => claim.claim_token));
+  const prior = new Set(view.prior_claims.map(claim => claim.claim_token));
+  for (const item of reply.relation_intents) {
+    if (!isObject(item) || Object.keys(item).some(key => !["source_claim_token", "target_claim_token", "relation"].includes(key))
+        || !["challenges", "supersedes"].includes(item.relation) || !current.has(item.source_claim_token)
+        || item.source_claim_token === item.target_claim_token
+        || (!prior.has(item.target_claim_token) && !(item.relation === "challenges" && current.has(item.target_claim_token)))) fail(invalidRelation);
+  }
+  return clone(reply);
+}
 
 function validateReply(reply, view) {
   if (!isObject(reply) || Object.keys(reply).some(key => !Object.hasOwn(formalClaimResponseProperties, key))
@@ -72,13 +101,17 @@ export function createPostEncodingClaimContinuation({ leaseMs = 120_000, onTermi
   }
   async function interpretClaim(packet) {
     if (state !== "running" || pending) fail(inactive);
-    const view = packet?.native_subjective_claim_decision;
+    const relation = packet?.native_subjective_claim_relation_decision;
+    const claim = packet?.native_subjective_claim_decision;
+    if (Boolean(relation) === Boolean(claim)) fail(invalid);
+    const view = relation ?? claim;
     if (view?.character !== packet?.character || view?.bounded_view_only !== true
-        || view?.world_truth_exposed !== false || !Array.isArray(view?.memory_sources)) fail(invalid);
+        || view?.world_truth_exposed !== false
+        || (relation ? (!Array.isArray(view.current_claims) || !Array.isArray(view.prior_claims)) : !Array.isArray(view.memory_sources))) fail(relation ? invalidRelation : invalid);
     return new Promise((resolve, reject) => {
       const decision = {
         decision_index: sequence++, decision_handle: "world_decision_" + randomBytes(16).toString("hex"),
-        decision_kind: postEncodingClaimDecisionKind, character_input: clone(packet),
+        decision_kind: relation ? postEncodingClaimRelationDecisionKind : postEncodingClaimDecisionKind, character_input: clone(packet),
       };
       pending = { decision, resolve, reject };
       state = "pending";
@@ -111,7 +144,9 @@ export function createPostEncodingClaimContinuation({ leaseMs = 120_000, onTermi
   }
   function submit(decisionHandle, reply) {
     if (state !== "pending" || !pending || pending.decision.decision_handle !== decisionHandle) fail("WORLD_SIMULATION_DECISION_ORDER_VIOLATION");
-    const validated = validateReply(reply, pending.decision.character_input.native_subjective_claim_decision);
+    const validated = pending.decision.decision_kind === postEncodingClaimRelationDecisionKind
+      ? validateRelationReply(reply, pending.decision.character_input.native_subjective_claim_relation_decision)
+      : validateReply(reply, pending.decision.character_input.native_subjective_claim_decision);
     const waiting = pending;
     pending = null; state = "running";
     waiting.resolve(validated);
