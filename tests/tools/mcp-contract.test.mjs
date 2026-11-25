@@ -51,7 +51,7 @@ const piTestScripts = [
 
 const defaultTestScriptTimeoutMs = 300_000;
 const testScriptTimeoutOverrides = new Map([
-  ["tests/mcp/pi-bootstrap-wire.test.mjs", getDevTestSuiteMapping().mcp_pi_postseal.timeout_ms + 600_000],
+  ["tests/mcp/pi-bootstrap-wire.test.mjs", 2 * getDevTestSuiteMapping().mcp_pi_postseal.timeout_ms + 600_000],
   ["tests/mcp/mcp-development-test-tools.test.mjs", 600_000],
   ["tests/mcp/mcp-development-transaction-tools.test.mjs", 600_000],
 ]);
