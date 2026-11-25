@@ -340,6 +340,52 @@ await expectCorrupt("unexpected-event-entry", async (storageRoot) => {
   await writeFile(path.join(storageRoot, "events", "unexpected.txt"), "unexpected\n", "utf8");
 });
 
+// Issue #122: opt-in observations report cold/warm verification cost without
+// weakening prefix validation, exposing event content or controlling outcomes.
+{
+  const { fixture } = await completedFixture("verification-timing");
+  try {
+    const timings = [];
+    const service = createDevOperationJournalService({
+      storageRoot: fixture.storageRoot,
+      verificationTimingObserver: record => {
+        timings.push(record);
+        throw new Error("diagnostic observer failed");
+      },
+    });
+    const cold = await service.verify();
+    assert.equal(cold.events.length, 2);
+    assert.equal(timings.length, 1);
+    assert.equal(timings[0].warm, false);
+    assert.equal(timings[0].completed, true);
+    assert.equal(timings[0].suffix_files_loaded, 2);
+    assert.equal(timings[0].prefix_files_checked, 0);
+    assert.equal(timings[0].capture_count, 2);
+    assert.equal(timings[0].enumerated_files, 4);
+    assert(Object.isFrozen(timings[0]));
+    const [warm, coalesced] = await Promise.all([service.verify(), service.verify()]);
+    assert.equal(timings.length, 2, "concurrent reads share one verification");
+    assert.equal(timings[1].warm, true);
+    assert.equal(timings[1].prefix_files_checked, 2);
+    assert.equal(timings[1].suffix_files_loaded, 0);
+    assert.deepEqual(warm, cold);
+    assert.deepEqual(coalesced, cold);
+    for (const record of timings) {
+      for (const name of ["total_ms", "lock_wait_ms", "enumeration_ms",
+        "prefix_metadata_ms", "suffix_load_ms", "classification_ms"]) {
+        assert(Number.isFinite(record[name]) && record[name] >= 0);
+      }
+      assert(Object.values(record).every(value =>
+        typeof value === "number" || typeof value === "boolean"));
+    }
+    const first = await readEvent(fixture.storageRoot, 0);
+    await writeFile(path.join(fixture.storageRoot, "events", first.file),
+      JSON.stringify({ ...first.event, unexpected_tampering: true }) + "\n");
+    await assert.rejects(service.verify(), /immutable prefix/u);
+    assert.equal(timings.at(-1).completed, false);
+  } finally { await clean(fixture); }
+}
+
 // R6: cold validation spans multiple worker batches; warm validation rechecks file
 // versions without reading bodies. Appends from this process and a child remain visible.
 {
