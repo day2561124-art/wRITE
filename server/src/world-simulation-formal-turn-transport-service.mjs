@@ -1013,7 +1013,7 @@ export async function submitFormalWorldSimulationCharacterAction(
       ? { reject_all: true }
       : { action_id: input.action_id.trim() }),
     ...extractFormalGoalPlanIntentFields(input),
-    ...Object.fromEntries(["request_subjective_claim_interpretation", "request_subjective_claim_relation_interpretation"].filter(key => Object.hasOwn(input, key)).map(key => [key, input[key]])),
+    ...Object.fromEntries(["request_subjective_claim_interpretation", "request_subjective_claim_relation_interpretation", "request_affective_appraisal"].filter(key => Object.hasOwn(input, key)).map(key => [key, input[key]])),
   });
 
   return preparationSurface(receipt, false);
