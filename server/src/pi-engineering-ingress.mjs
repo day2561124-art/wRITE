@@ -35,3 +35,21 @@ export async function adaptHostAuthorizedEngineeringRequest(source, {
   await authorizeTask(intent);
   return intent;
 }
+
+// This opt-in envelope is deliberately distinct from legacy requests. Only the
+// authenticated transport decision, never request metadata, supplies identity.
+export async function adaptPiEngineeringIngress(source, {
+  authentication, resolveWorkspace, approvalSource,
+} = {}) {
+  if (source?.request_kind !== "host_approved_engineering") {
+    return adaptAuthorizedPiRequest(source, { resolveWorkspace });
+  }
+  if (authentication?.ok !== true || authentication.local !== false
+    || typeof authentication.principal !== "string" || !authentication.principal.trim()
+    || typeof approvalSource !== "function") denied();
+  hashExecutionInput(source);
+  if (Object.hasOwn(source, "task_authorization_id")) denied();
+  const request = JSON.parse(JSON.stringify(source));
+  request.request_kind = "autonomous_engineering";
+  return approvalSource(request, { authenticatedPrincipal: authentication.principal });
+}
