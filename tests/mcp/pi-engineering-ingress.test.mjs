@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { adaptHostAuthorizedEngineeringRequest } from "../../server/src/pi-engineering-ingress.mjs";
-import { createPiEngineeringApprovalSource } from "../../server/src/pi-engineering-approval-source.mjs";
+import { adaptHostAuthorizedEngineeringRequest, adaptPiEngineeringIngress } from "../../server/src/pi-engineering-ingress.mjs";
+import { createPiEngineeringApprovalSource, loadPiEngineeringApprovalBindings } from "../../server/src/pi-engineering-approval-source.mjs";
+import { createWorkbenchTransportBoundary } from "../../server/src/mcp-trpg-gm-bridge.mjs";
 import { createPiTaskAuthorizationStore } from "../../server/src/pi-task-authorization.mjs";
 
 const context = {
@@ -36,7 +37,7 @@ async function fixture(t) {
     resolveWorkspace: async () => ({ ...context }),
     authorizeTask: store.authorize,
   };
-  return { store, grant, options, setTime: value => { now = value; } };
+  return { root, store, grant, options, setTime: value => { now = value; } };
 }
 
 test("host-supplied approved grant creates an unchanged strict intent without a caller grant ID", async t => {
@@ -177,4 +178,73 @@ test("fresh host binding snapshots and the original grant verifier both remain a
   a.setBindings([a.binding]);
   await f.store.revoke(f.grant.task_authorization_id);
   await assert.rejects(a.adapt(source(), { authenticatedPrincipal: principal }), { code: "PERMISSION_DENIED" });
+});
+
+test("protected approval binding loader fails closed on missing, malformed and oversized records", async t => {
+  const f = await fixture(t);
+  const a = approvalFixture(f);
+  const file = path.join(f.root, "engineering-bindings.json");
+  for (const root of [undefined, ".", f.root]) {
+    await assert.rejects(loadPiEngineeringApprovalBindings(root), { code: "PERMISSION_DENIED" });
+  }
+  await mkdir(file);
+  await assert.rejects(loadPiEngineeringApprovalBindings(f.root), { code: "PERMISSION_DENIED" });
+  await rm(file, { recursive: true });
+  await writeFile(file, "{invalid");
+  await assert.rejects(loadPiEngineeringApprovalBindings(f.root), { code: "PERMISSION_DENIED" });
+  await writeFile(file, " ".repeat(256 * 1024 + 1));
+  await assert.rejects(loadPiEngineeringApprovalBindings(f.root), { code: "PERMISSION_DENIED" });
+  await writeFile(file, JSON.stringify([a.binding]));
+  assert.deepEqual(await loadPiEngineeringApprovalBindings(f.root), [a.binding]);
+});
+
+test("new ingress uses verified transport principal and the protected approval source, not caller metadata", async t => {
+  const f = await fixture(t);
+  const a = approvalFixture(f);
+  const boundary = createWorkbenchTransportBoundary({
+    ipc: true, trustedLocalOwner: false,
+    loadSecurity: async () => ({ verifier: { authorize: async ({ authorization }) => {
+      return authorization === "Bearer SYNTHETIC_VALID_PROOF"
+        ? { ok: true, principal: { key: principal } }
+        : { ok: false, code: "INVALID_TOKEN" };
+    } } }),
+  });
+  t.after(() => boundary.close());
+  const request = source({ request_kind: "host_approved_engineering" });
+  const message = token => ({
+    method: "tools/call", params: { name: "dev_pi_execute_intent",
+      arguments: { intent_json: JSON.stringify(request) },
+      _meta: { workbench_http_access_token: token, actor: "untrusted-actor" },
+    },
+  });
+  const options = {
+    resolveWorkspace: f.options.resolveWorkspace, approvalSource: a.adapt,
+  };
+  const authentication = await boundary.authorize(message("SYNTHETIC_VALID_PROOF"));
+  const intent = await adaptPiEngineeringIngress(request, { ...options, authentication });
+  assert.equal(intent.task_authorization_id, f.grant.task_authorization_id);
+  assert.equal(intent.context.workspace_id, context.workspace_id);
+  for (const decision of [undefined, { ok: true, local: true, principal },
+    { ok: true, local: false, principal: "other-principal" },
+    await boundary.authorize(message("FORGED"))]) {
+    await assert.rejects(adaptPiEngineeringIngress(request, { ...options, authentication: decision }),
+      { code: "PERMISSION_DENIED" });
+  }
+  await assert.rejects(adaptPiEngineeringIngress({ ...request,
+    task_authorization_id: f.grant.task_authorization_id }, { ...options, authentication }),
+    { code: "PERMISSION_DENIED" });
+  await assert.rejects(adaptPiEngineeringIngress({ ...request,
+    authenticatedPrincipal: principal }, { ...options, authentication }),
+    { code: "INVALID_AUTHORIZED_REQUEST" });
+});
+
+test("legacy ingress retains its existing contract and does not consult the approval source", async t => {
+  const f = await fixture(t);
+  const request = source({ task_authorization_id: f.grant.task_authorization_id });
+  const intent = await adaptPiEngineeringIngress(request, {
+    resolveWorkspace: f.options.resolveWorkspace,
+    approvalSource: () => assert.fail("legacy ingress must not consult the binding source"),
+  });
+  assert.equal(intent.task_authorization_id, f.grant.task_authorization_id);
+  await f.store.authorize(intent);
 });
