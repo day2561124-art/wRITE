@@ -273,3 +273,54 @@ test("host approval is refused for an inactive workstream or a changed authorita
     }
   }
 });
+
+test("mandatory ordinary ingress automatically selects only a pre-existing authenticated binding", async t => {
+  const f = await fixture(t);
+  const a = approvalFixture(f);
+  const options = { requireTaskAuthorization: true, resolveWorkspace: f.options.resolveWorkspace,
+    approvalSource: a.adapt, authentication: { ok: true, local: false, principal } };
+  const input = source();
+  const first = await adaptPiEngineeringIngress(input, options);
+  const next = await adaptPiEngineeringIngress(source({ intent_id: "auto-binding-next" }), options);
+  assert.equal(first.task_authorization_id, f.grant.task_authorization_id);
+  assert.equal(next.task_authorization_id, first.task_authorization_id);
+  assert.notEqual(first.intent_id, next.intent_id);
+  assert.equal(Object.hasOwn(input, "task_authorization_id"), false);
+  await f.store.authorize(first);
+  await f.store.authorize(next);
+  for (const authentication of [undefined, { ok: true, local: true, principal },
+    { ok: true, local: false, principal: "different" }]) {
+    await assert.rejects(adaptPiEngineeringIngress(input, { ...options, authentication }),
+      { code: "PERMISSION_DENIED" });
+  }
+  await assert.rejects(adaptPiEngineeringIngress(source({ goal: "Different goal" }), options),
+    { code: "PERMISSION_DENIED" });
+  a.setBindings([]);
+  await assert.rejects(adaptPiEngineeringIngress(input, options), { code: "PERMISSION_DENIED" });
+  a.setBindings([a.binding]);
+  await f.store.revoke(f.grant.task_authorization_id);
+  await assert.rejects(adaptPiEngineeringIngress(input, options), { code: "PERMISSION_DENIED" });
+});
+
+test("automatic binding preserves explicit grants, disabled mode, read-only and protected routes", async t => {
+  const f = await fixture(t);
+  const options = { requireTaskAuthorization: true, resolveWorkspace: f.options.resolveWorkspace,
+    authentication: { ok: true, local: false, principal },
+    approvalSource: () => assert.fail("must not look up automatic binding on this route") };
+  const explicit = await adaptPiEngineeringIngress(source({ task_authorization_id: f.grant.task_authorization_id }), options);
+  assert.equal(explicit.task_authorization_id, f.grant.task_authorization_id);
+  const disabled = await adaptPiEngineeringIngress(source(), { ...options, requireTaskAuthorization: false });
+  assert.equal(disabled.task_authorization_id, undefined);
+  const read = await adaptPiEngineeringIngress(source({ requested_actions: [
+    { step_id: "read", capability: "filesystem.read", input: { path: "fixture.txt" } },
+  ] }), options);
+  assert.equal(read.task_authorization_id, undefined);
+  const { requested_actions, ...short } = source();
+  const shell = await adaptPiEngineeringIngress({ ...short, command: "Get-Location" }, options);
+  assert.equal(shell.requested_actions[0].capability, "host.powershell");
+  assert.equal(shell.task_authorization_id, undefined);
+  await assert.rejects(adaptPiEngineeringIngress(source({ requested_actions: [
+    ...requested_actions,
+    { step_id: "service", capability: "windows.service.ensure_running", input: { service_name: "Example" } },
+  ] }), options));
+});
