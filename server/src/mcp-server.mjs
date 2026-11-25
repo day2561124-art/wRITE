@@ -1,3 +1,4 @@
+import { formalAdditionalExperientialResponseProperties } from "./world-simulation-formal-experiential-deliberation-contract.mjs";
 import { formalClaimResponseProperties, formalClaimRelationResponseProperties } from "./world-simulation-post-encoding-claim-continuation-service.mjs";
 import { formalGoalPlanIntentProperties } from "./world-simulation-formal-goal-plan-intent-contract.mjs";
 import {loadTRPGGMBridge,trpgPublicToolDefinition,createWorkbenchTransportBoundary,trpgGatewayFailureCode} from './mcp-trpg-gm-bridge.mjs';
@@ -3455,7 +3456,7 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_submit_world_character_deliberation",
-    description: "[low-risk-write] Submit one current bounded Character Brain experiential-deliberation or post-encoding subjective claim response. For post_encoding_subjective_claim, use only claim_context_token and claim_intents citing the current observer's encoded evidence; the server resumes its frozen resolution once. For post_encoding_subjective_claim_relation, use only relation_context_token and relation_intents (challenges or supersedes using current and prior same-character claim tokens). The current decision declares exactly which stage-specific response field is accepted (Phase76D recall refs, Phase76E transfer mappings, Phase79B qualitative preferences, or Phase79F/J evidence-backed preference revisions). The server validates every ref against the bounded decision, then reprepares the same uncommitted world snapshot. It cannot select an action, author world truth, or provide numeric utility/confidence/probability/reward.",
+    description: "[low-risk-write] Submit one current bounded Character Brain experiential-deliberation or post-encoding subjective claim response. For post_encoding_subjective_claim, use only claim_context_token and claim_intents citing the current observer's encoded evidence; the server resumes its frozen resolution once. For post_encoding_subjective_claim_relation, use only relation_context_token and relation_intents (challenges or supersedes using current and prior same-character claim tokens). For existing experiential stages submit only the field named by response_contract.output_field: recall, transfer, preference, adaptation, revalidation, reuse, longitudinal activation, or qualitative mood interpretation. Empty arrays are valid declines. The server validates every ref against the bounded decision and reprepares the same uncommitted world snapshot. It cannot select an action, author world truth, or provide numeric utility/confidence/probability/reward.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
       prepared_turn_handle: {
@@ -3472,6 +3473,7 @@ const toolDefinitions = [
         properties: {
           ...formalClaimResponseProperties,
           ...formalClaimRelationResponseProperties,
+          ...formalAdditionalExperientialResponseProperties,
           activated_semantic_refs: {
             type: "array",
             maxItems: 64,
