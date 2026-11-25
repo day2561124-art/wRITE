@@ -219,6 +219,8 @@ test('projection append shares only the same attempt fresh mutation verification
   assert.equal(attempts[1][0].prefix_files_checked,2);
   const verified=await journal.verify();
   assert.equal(verified.head.latest_sequence,4);
+  assert.equal(verified.active_operations.length,0);
+  assert.equal(verified.dangling_operations.length,0);
   const headPath=path.join(storageRoot,'head.json');
   const headBefore=await readFile(headPath,'utf8');
   const eventsPath=path.join(storageRoot,'events');
