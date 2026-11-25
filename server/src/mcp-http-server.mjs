@@ -388,7 +388,15 @@ sessionReaper.unref?.();
 // The long-lived HTTP parent owns the world-simulation prepared-turn broker
 // and the bounded developer reload/integration control routes.
 // Legacy raw-story payloads no longer cross MCP child boundaries.
+// Keep the unconfigured HTTP parent lightweight. Only an explicit private
+// retrieval configuration loads the World cognition execution graph.
+const privateRetrievalConfigured = Boolean(process.env.WRITER_PRIVATE_RETRIEVAL_ENDPOINT?.trim()
+  || process.env.WRITER_PRIVATE_RETRIEVAL_MODEL?.trim());
+const privateRetrievalHost = privateRetrievalConfigured
+  ? (await import('./world-simulation-private-retrieval-host-service.mjs')).createConfiguredPrivateWorldRetrievalHost()
+  : {};
 const preparedTurnBroker = createEphemeralWorldSimulationPreparedTurnBroker({
+  ...privateRetrievalHost,
   ownership: 'mcp_http_parent',
   storage_scope: 'mcp_http_parent_process_ephemeral_memory',
 });
