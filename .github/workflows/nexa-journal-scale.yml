@@ -31,4 +31,4 @@ jobs:
       - name: Measure synthetic Journal
         env:
           WRITE_DATA_ROOT: ${{ runner.temp }}/nexa-benchmark-data
-        run: node scripts/benchmark-nexa-journal-verification.mjs 66000
+        run: node scripts/benchmark-nexa-journal-verification.mjs 66000 --pi
