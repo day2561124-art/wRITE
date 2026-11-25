@@ -110,3 +110,17 @@ TRPG Gateway 憑證遭拒時，Nexa 會暫停該連線的 TRPG 工具並重新�
 先由操作員以 `preview <plan.json>` 檢查計畫的精確範圍、到期時間、既有清單摘要和工作區狀態。預覽不寫入任何授權。獨立審核後，以 `apply <plan.json> <reviewed-plan-sha256>` 核對完整計畫摘要及最新清單，再一次建立精確範圍的既有格式授權，並以原發布器 CAS 追加綁定。既有有效授權不得被自動替換或擴大。核准摘要不是認證憑證，實際發行權限仍由獨立主機 ACL 控制。
 
 若批次失敗，嘗試撤銷本批已建立的授權，保留其他記錄，回報需要核對的狀態。此程序不是跨多檔案的原子交易：程序中斷或發布後清理失敗可能留下未綁定授權或已撤銷的綁定，操作員應核對受保護的授權與綁定資料，不得直接重試或刪除其他人的資料。正常的到期、撤銷、嚴格 Intent 及 durable dispatch 檢查不變。這使已明確核准的多個工作流只需一次人工批次操作，不等於對未知的未來工作流自動核發常設權限。
+
+## 獨立核准的有限常設工程政策
+
+本節的正式政策與先前 review-only 模組不同。操作員以受保護的既有 grants 目錄為信任根，使用獨立工具 `scripts/manage-pi-standing-policy.mjs` 預覽、核發、列出及撤銷政策。正式服務只取得讀取及驗證能力，不具備核發權限。不提供 MCP 發行工具或由執行者自行核准的路徑。安裝前仍須獨立驗證正式程式來源、授權目錄 ACL、執行帳戶及 OAuth 主體；不得從一般使用者可寫入的候選目錄提升執行。
+
+政策計畫有精確欄位 `schema_version: 1`、`project_id: writer_workbench`、獨立確認的 `principal`、`scopes`（最多 64 筆已登錄的 `workspace_id` 與 `workstream_id` 配對）、`capabilities`、`expires_at_ms`（核發後最長 30 天）。管理者應理解：此核准涵蓋所列工作區與工作流內不同的工程目標，不限單一 goal；因此必須審核所有配對、能力和期限。未列出的工作區不會自動取得權限。
+
+能力限定一般隔離工作區讀寫、補丁、checkpoint、指定測試及 Git status/commit。不包括短式命令、任何 shell、提權維護、工作流生命週期、完整回歸、整合、推送，亦不支援條件式 failure-recovery 分支。這些原有路徑、明確任務授權、OS 保護和額外工具確認仍維持原狀。
+
+操作員在正式受保護的版本執行 `preview <plan.json>`，核對完整計畫及摘要後，才可用 `issue <plan.json> <reviewed-plan-sha256>` 獨立核發。記錄使用新的政策識別碼、固定摘要、排他發布及不可覆寫記錄。相同主體與工作區/工作流配對的有效政策不可重疊；不同政策的能力不可合併。用 `list` 核對操作員記錄，使用 `revoke <policy-id>` 寫入不可覆寫的撤銷記錄。到期、撤銷與政策檔案內容變更均會拒絕新請求和未完成的後續 dispatch；已完成效果不會被倒轉。若發布回應不明，先查核獨立記錄，不能假設未發行。受保護目錄最多 128 筆政策記錄，包含歷史到期或已撤銷政策；目前不自動清理，不刪除撤銷證據。
+
+工程執行入口使用 `request_kind: standing_engineering`，與一般 compact request 相同提供 intent_id、goal、workspace_id 及明確 requested_actions，不需提供政策識別碼或 task_authorization_id。服務端從可信 OAuth 驗證結果和權威工作區資料選擇唯一有效政策，產生 `standing_authorization`（政策 ID、不可變記錄摘要、驗證主體）並納入嚴格 Intent 和持久 Journal。MCP 客戶端不得自行提供此欄位，未經驗證的直接控制器 admission/execute 不能建立新常設任務。重新啟動的 worker 只能續接已有持久 admission，並在每次 dispatch 和 managed-call gate 重新驗證原政策、完整能力集合、有效期、撤銷以及工作區狀態；找不到記錄、身份不符或內容改變均拒絕，不會降級嘗試其他授權。
+
+正式核發與部署不是 GitHub CI 的一部分。CI 使用獨立暫存 fixture 測試多目標、多工作流與持久控制器，不能據此宣稱正式主機 ACL 或真實遠端 OAuth／worker 已完成實機驗收。
