@@ -151,8 +151,15 @@ export function createPiTaskAuthorizationStore({ root, clock = Date.now } = {}) 
 
 export function createPiTaskPolicy({ store = createPiTaskAuthorizationStore({
   root: process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT,
-}), required = process.env.NEXA_PI_REQUIRE_TASK_AUTHORIZATION === "1" } = {}) {
+}), required = process.env.NEXA_PI_REQUIRE_TASK_AUTHORIZATION === "1", authorizeStanding } = {}) {
   return async function authorizeTask(intent, actions = intent.requested_actions) {
+    // A standing reference never turns the mandatory grant gate off. A
+    // separate independently published policy must authorize the entire
+    // intent, and the trusted controller must install its reader.
+    if (intent.standing_authorization !== undefined) {
+      if (intent.task_authorization_id !== undefined || typeof authorizeStanding !== "function") denied();
+      return authorizeStanding(intent);
+    }
     if (intent.task_authorization_id !== undefined) return store.authorize(intent, actions);
     if (required && actions.some(action => requiresPiTaskGrant(action.capability))) denied();
   };
