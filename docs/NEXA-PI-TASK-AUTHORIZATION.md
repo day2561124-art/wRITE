@@ -53,6 +53,16 @@ Windows 正式環境已觀察到 Node 預設的測試子程序模式在 AppConta
 
 最新批次的 `recovery`、`pending_steps`、`last_error` 和各步驟收據提供接續依據。遇到需要新決策的結果，可用同一份授權提交後續工作。`node scripts/manage-pi-task-authorization.mjs revoke <task-authorization-id>` 會寫入撤銷記錄。Pi 會在新派送前重新檢查其有效性。已獲准派送的操作和事後唯讀對帳維持原本的生命週期。
 
+## 主機核准工程入口（候選版）
+
+此入口只省略請求端傳遞授權識別碼的步驟，不新增工程權限。受保護授權目錄中的 `engineering-bindings.json` 由主機管理者維護；派送帳號維持唯讀。每筆記錄包含由主機確認的 OAuth 主體、已登錄工作區、工作流、精確工程目標及已核發授權識別碼。不使用請求的 actor 欄位作為認證主體，不由 MCP 建立或改寫綁定檔。不存在、格式錯誤、範圍不符或多重匹配時拒絕新入口。
+
+使用 `host_approved_engineering` 提交已有核准範圍內的明確 `requested_actions`，其他欄位仍依原工程意圖契約提供。不得帶入 `task_authorization_id` 或使用語意不明確的短式 `command`。只接受經 OAuth 驗證的遠端工程連線，以及健康、作用中且可變更的隔離工作區與作用中的工作流。未設定主機綁定時不會退回較寬鬆的入口；既有請求種類的行為維持不變。
+
+此入口重用原始授權檢查和持久化控制器，原授權到期或撤銷仍會拒絕後續派送。移除綁定只會拒絕新提交，停止已入列工作必須依原撤銷流程處理。候選版不提供跨工作區或跨任務目標的常設權限，也不改變受保護的 Windows 維護、Git 整合、推送或部署的既有權限邊界。
+
+在正式啟用之前，須驗證授權檔 ACL、OAuth 主體來源、核准與拒絕案例、撤銷後的待執行工作、舊版相容性及復原。未配置的正式主機維持既有工程授權模式。
+
 ## 查詢與對帳
 
 新會話可用 `dev_pi_execution_status` 同時提供 `workstream_id` 和 `workspace_id`，查詢最新批次、第一個待辦步驟、最後錯誤與現有檢查點。檢查點暫時無法查詢時，歷史結果仍包含 `checkpoint_status` 與可用的任務紀錄。用 `next_before_sequence` 翻閱舊批次，再以 `operation_id` 或 `intent_id` 查閱確切請求、完成步驟與測試收據。檔案、提交及整合候選的來源資料仍由 `dev_workspace_get_provenance` 查詢。
