@@ -1,3 +1,4 @@
+import { getWorldSimulationState, getWorldSimulationHistory } from "../../server/src/world-simulation-state-service.mjs";
 import { createPrivateWorldRetrievalExecutor } from "../../server/src/world-simulation-private-retrieval-executor-service.mjs";
 import { createEphemeralWorldSimulationPreparedTurnBroker } from "../../server/src/world-simulation-prepared-turn-ephemeral-broker.mjs";
 import assert from "node:assert/strict";
@@ -14,6 +15,8 @@ import {
 import {
   prepareFormalWorldSimulationTurn,
   submitFormalWorldSimulationCharacterDeliberation,
+  submitFormalWorldSimulationCharacterAction,
+  resolveFormalWorldSimulationTurn,
 } from "../../server/src/world-simulation-formal-turn-transport-service.mjs";
 import {
   buildWorldSimulationPersistentMoodNativeAdoptionContract,
@@ -375,6 +378,114 @@ try {
     formalAliceInput.cognition.persistent_mood_context);
   privateBroker.invalidate({ prepared_turn_handle: privateSurface.prepared_turn_handle });
   assert.equal(privateBroker.getStorageStatus().payload_reference_count, 0);
+
+  // C7: use actual programmatic movement and the same explicit Phase86D
+  // decisions in Native and Formal; no injected causal/appraisal resolver.
+  async function pairedAppraisal(formal) {
+    const world = structuredClone(initial);
+    world.world_rules.default_movement_speed_mps = 1;
+    world.world_rules.collision_radius_m = 0.2;
+    for (const character of actors) {
+      world.characters[character].movement_speed_mps = 1;
+      world.available_actions[character] = [{ action_id: "move-forward",
+        intent: "Move a short distance toward the door", movement: { dx: 0.5, dy: 0 } }];
+    }
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C7 explicit appraisal " + (formal ? "Formal" : "Native"),
+      seed: "c7-explicit-appraisal-" + (formal ? "formal" : "native"),
+      rules: { event_driven: true, persistent_causality: true },
+      initial_world_state: world,
+    }, fixtureOptions);
+    const sid = session.world_simulation_session_id;
+    const broker = createEphemeralWorldSimulationPreparedTurnBroker({ postEncodingOptions: fixtureOptions });
+    const formalOptions = { ...fixtureOptions, preparedTurnBroker: broker };
+    const read = () => getWorldSimulationState(sid, fixtureOptions);
+    const seen = [];
+    for (const [index, event_id] of ["event86b-1", "event86b-2"].entries()) {
+      const before = await read();
+      const interpret = async packet => {
+        const view = packet.native_affective_appraisal_decision;
+        assert.ok(view);
+        assert.equal(view.character, packet.character);
+        assert.equal(view.boundaries.world_truth_authority, false);
+        assert.equal(view.boundaries.action_selection_allowed, false);
+        assert.equal(view.subjective_experience.performed, true);
+        assert.ok(view.concerns.length);
+        assert.equal(JSON.stringify(view).includes("choice_receipt_hash"), false);
+        assert.equal(JSON.stringify(view).includes("world_state_hash"), false);
+        assert.equal(JSON.stringify(view).includes(actors.find(actor => actor !== view.character)), false);
+        assert.equal((await read()).state_hash, before.state_hash);
+        const prior = view.prior_appraisals.at(-1);
+        assert.equal(Boolean(prior), index === 1);
+        seen.push([index, packet.character]);
+        return {
+          appraisal_context_ref: view.context_ref,
+          appraisal_decisions: [{
+            context_ref: view.context_ref, concern_ref: view.concerns[0].concern_ref,
+            ...(prior ? { reappraises_ref: prior.prior_appraisal_ref } : {}),
+            goal_congruence: packet.character === "Alice" ? "helps" : "hinders",
+            expectedness: index ? "expected" : "uncertain",
+            coping_potential: "possible", interpretation: packet.character + " considers the movement.",
+          }],
+        };
+      };
+      if (formal) {
+        let surface = await prepareFormalWorldSimulationTurn({ world_simulation_session_id: sid }, formalOptions);
+        let rounds = 0;
+        while (surface.decision_round_kind !== worldSimulationFormalImpasseDecisionKinds.ACTION) {
+          surface = await submitFormalWorldSimulationCharacterDeliberation({
+            prepared_turn_handle: surface.prepared_turn_handle,
+            decision_handle: surface.current_decision.decision_handle,
+            deliberation_response: { [surface.current_decision.character_input.experiential_deliberation.response_contract.output_field]: [] },
+          }, formalOptions);
+          assert.ok(++rounds < 40);
+        }
+        const handle = surface.prepared_turn_handle;
+        while (surface.current_decision) {
+          surface = await submitFormalWorldSimulationCharacterAction({
+            prepared_turn_handle: handle, decision_handle: surface.current_decision.decision_handle,
+            action_id: "move-forward", request_affective_appraisal: true,
+          }, formalOptions);
+        }
+        surface = await resolveFormalWorldSimulationTurn({ prepared_turn_handle: handle }, formalOptions);
+        assert.equal(surface.resolution_pending, true);
+        while (surface.current_decision) {
+          const decision = surface.current_decision;
+          assert.equal(decision.decision_kind, "post_outcome_affective_appraisal");
+          const response = await interpret(decision.character_input);
+          const input = { prepared_turn_handle: handle, decision_handle: decision.decision_handle };
+          await assert.rejects(() => submitFormalWorldSimulationCharacterDeliberation({
+            ...input, deliberation_response: { ...response, appraisal_context_ref: "forged" },
+          }, formalOptions), { code: "WORLD_SIMULATION_AFFECTIVE_APPRAISAL_INVALID" });
+          await assert.rejects(() => submitFormalWorldSimulationCharacterDeliberation({
+            ...input, deliberation_response: { ...response, appraisal_decisions: [{ ...response.appraisal_decisions[0], intensity: 0.8 }] },
+          }, formalOptions), { code: "WORLD_SIMULATION_AFFECTIVE_APPRAISAL_INVALID" });
+          surface = await submitFormalWorldSimulationCharacterDeliberation({ ...input, deliberation_response: response }, formalOptions);
+        }
+        assert.equal(surface.committed, true);
+        assert.equal(broker.getStorageStatus().payload_reference_count, 0);
+      } else {
+        const result = await runWorldSimulationTurn({ world_simulation_session_id: sid, event_id }, {
+          ...fixtureOptions,
+          characterBrain: async packet => packet.native_affective_appraisal_decision
+            ? interpret(packet) : { action_id: "move-forward", request_affective_appraisal: true },
+        });
+        assert.equal(result.committed, true);
+      }
+      assert.equal((await read()).revision, before.revision + 1);
+    }
+    assert.deepEqual(seen.map(([index, character]) => index + ":" + character).sort(),
+      ["0:Alice", "0:Bob", "1:Alice", "1:Bob"]);
+    const history = await getWorldSimulationHistory(sid, fixtureOptions);
+    return history.turns.map(turn => turn.affective_appraisal_record.projection.appraisals.map(entry => ({
+      character: entry.character, goal: entry.goal, goal_congruence: entry.goal_congruence,
+      expectedness: entry.expectedness, coping_potential: entry.coping_potential,
+      interpretation: entry.interpretation, reappraisal: Boolean(entry.reappraises_ref),
+      action_experience: entry.action_experience,
+    })).sort((a,b) => a.character.localeCompare(b.character)));
+  }
+  assert.deepEqual(await pairedAppraisal(true), await pairedAppraisal(false));
+  console.log("C7 explicit Native/Formal action-aware appraisal parity: PASS");
 
   const contract = buildWorldSimulationPersistentMoodNativeAdoptionContract();
   assert.equal(contract.phase, "Phase89C");
