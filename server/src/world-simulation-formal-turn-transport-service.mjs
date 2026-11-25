@@ -1,4 +1,7 @@
 import { randomBytes } from "node:crypto";
+import { extractFormalGoalPlanIntentFields } from "./world-simulation-formal-goal-plan-intent-contract.mjs";
+import { buildWorldSimulationNativeGoalDecisionView, resolveWorldSimulationNativeGoalDecisionIntents } from "./world-simulation-motivation-goal-integration-service.mjs";
+import { buildWorldSimulationNativeImplementationIntentionView, resolveWorldSimulationNativeImplementationIntentionIntents } from "./world-simulation-goal-to-plan-implementation-intention-service.mjs";
 import { createConfiguredPrivateWorldRetrievalHost } from "./world-simulation-private-retrieval-host-service.mjs";
 
 import { readCommittedWorldSimulationBodyInteroceptiveSignals } from "./world-simulation-body-interoceptive-signal-service.mjs";
@@ -226,6 +229,10 @@ async function assertReceiptFresh(receipt, options) {
 
 async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions) {
   const worldHistory = await getWorldSimulationHistory(sessionId, loopOptions);
+  const goalPlanSnapshot = await getWorldSimulationState(sessionId, loopOptions);
+  if (goalPlanSnapshot.revision !== prepared.state_revision || goalPlanSnapshot.state_hash !== prepared.world_state_hash) {
+    fail("WORLD_SIMULATION_FORMAL_PREPARED_TURN_STALE", "Goal and plan views require the reserved committed snapshot.");
+  }
   const communicationTurnAuthorizationReentry =
     buildWorldSimulationTurnAuthorizationReentry({
       world_history: worldHistory,
@@ -336,6 +343,19 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
       action_commitment_subjective_execution_experience:
         subjectiveExecutionExperience,
     });
+
+    const goalPlanContext = { world_state: goalPlanSnapshot.state,
+      character: characterInput.character, turn_id: prepared.turn_id };
+    const { turn_id: _goalTurnId, ...goalView } = buildWorldSimulationNativeGoalDecisionView(goalPlanContext);
+    const { turn_id: _planTurnId, ...planView } = buildWorldSimulationNativeImplementationIntentionView(goalPlanContext);
+    characterInput.native_goal_decision = cloneJson(goalView);
+    characterInput.native_plan_decision = cloneJson(planView);
+    characterInput.boundaries.native_goal_decision_explicit_intent_only = true;
+    characterInput.boundaries.native_goal_decision_world_write_authority = false;
+    characterInput.boundaries.native_goal_decision_action_authority = false;
+    characterInput.boundaries.native_plan_decision_explicit_intent_only = true;
+    characterInput.boundaries.native_plan_decision_world_write_authority = false;
+    characterInput.boundaries.native_plan_decision_action_authority = false;
 
     // Phase81I re-enters only prior committed Phase81H linked-experience cases
     // that share exact canonical Phase74A action-candidate cues with this final
@@ -980,6 +1000,7 @@ export async function submitFormalWorldSimulationCharacterAction(
     ...(rejectAll
       ? { reject_all: true }
       : { action_id: input.action_id.trim() }),
+    ...extractFormalGoalPlanIntentFields(input),
   });
 
   return preparationSurface(receipt, false);
@@ -999,6 +1020,31 @@ export async function resolveFormalWorldSimulationTurn(input = {}, options = {})
 
   try {
     const loopOptions = formalLoopOptions(options);
+    const goalPlanIntents = acquisition.goal_plan_intents ?? {};
+    const goalDecisions = [];
+    const planDecisions = [];
+    if (Object.keys(goalPlanIntents).length > 0) {
+      const snapshot = await getWorldSimulationState(acquisition.prepared_turn.world_simulation_session_id, loopOptions);
+      if (snapshot.revision !== acquisition.prepared_turn.state_revision
+        || snapshot.state_hash !== acquisition.prepared_turn.world_state_hash) {
+        fail("WORLD_SIMULATION_FORMAL_PREPARED_TURN_STALE", "Goal and plan intents no longer match the committed snapshot.");
+      }
+      for (const packet of acquisition.prepared_turn.decision_packets) {
+        if (!Object.hasOwn(goalPlanIntents, packet.character)) continue;
+        const intent = goalPlanIntents[packet.character];
+        const context = { world_state: snapshot.state, character: packet.character, turn_id: acquisition.prepared_turn.turn_id };
+        if (Object.hasOwn(intent, "goal_intents")) {
+          goalDecisions.push(...resolveWorldSimulationNativeGoalDecisionIntents({
+            ...context, context_token: intent.goal_context_token, goal_intents: intent.goal_intents,
+          }).goal_decisions);
+        }
+        if (Object.hasOwn(intent, "plan_intents")) {
+          planDecisions.push(...resolveWorldSimulationNativeImplementationIntentionIntents({
+            ...context, context_token: intent.plan_context_token, plan_intents: intent.plan_intents,
+          }).implementation_intention_decisions);
+        }
+      }
+    }
     // The final ACTION round already contains the same-snapshot Phase81D/81E
     // projections that shaped the Character Brain surface. Resolve consumes
     // those exact ephemeral projections rather than recomputing cognition after
@@ -1008,6 +1054,8 @@ export async function resolveFormalWorldSimulationTurn(input = {}, options = {})
       acquisition.selected_actions,
       {
         ...loopOptions,
+        ...(goalDecisions.length ? { motivationalGoalResolver: async () => cloneJson(goalDecisions) } : {}),
+        ...(planDecisions.length ? { goalImplementationIntentionResolver: async () => cloneJson(planDecisions) } : {}),
         counterfactualReflectionReentryProjections:
           acquisition.prepared_turn.counterfactual_reflection_reentry_projections ?? [],
         counterfactualLinkedExperienceReentryProjections:

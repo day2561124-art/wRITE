@@ -1,3 +1,4 @@
+import { formalGoalPlanIntentProperties } from "./world-simulation-formal-goal-plan-intent-contract.mjs";
 import {loadTRPGGMBridge,trpgPublicToolDefinition,createWorkbenchTransportBoundary,trpgGatewayFailureCode} from './mcp-trpg-gm-bridge.mjs';
 import { fingerprintMcpMutationRequest, normalizeMcpReconciliationKey, MCP_RECONCILIATION_KEY_PATTERN_SOURCE } from "./mcp-operation-reconciliation-context.mjs";
 import "./mcp-stdio-guard.mjs";
@@ -3548,7 +3549,7 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_submit_world_character_action",
-    description: "[low-risk-write] Submit exactly one current action-selection decision to the parent-process prepared-turn broker. Accepts only the opaque prepared/decision handles and either one existing action_id or reject_all=true. It cannot be used during Phase79M impasse deliberation and cannot author an action object, outcome, state transition, or commit decision.",
+    description: "[low-risk-write] Submit exactly one current action-selection decision to the parent-process prepared-turn broker. Requires opaque prepared/decision handles and either one existing action_id or reject_all=true; optional explicit goal/plan intents must use the current observer-scoped context and source tokens. It cannot be used during Phase79M impasse deliberation and cannot author an action object, outcome, state transition, or commit decision.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
       prepared_turn_handle: {
@@ -3561,6 +3562,7 @@ const toolDefinitions = [
       },
       action_id: { type: "string" },
       reject_all: { type: "boolean" },
+      ...formalGoalPlanIntentProperties,
     }, ["prepared_turn_handle", "decision_handle"], [{
       type: "exactlyOne",
       fields: ["action_id", "reject_all"],

@@ -501,10 +501,19 @@ try {
     [
       "action_id",
       "decision_handle",
+      "goal_context_token",
+      "goal_intents",
+      "plan_context_token",
+      "plan_intents",
       "prepared_turn_handle",
       "reject_all",
     ],
   );
+  assert.equal(submitSchema.properties.goal_intents.maxItems, 8);
+  assert.equal(submitSchema.properties.plan_intents.maxItems, 8);
+  assert.equal(submitSchema.properties.plan_intents.items.additionalProperties, false);
+  assert.equal(submitSchema.properties.goal_intents.items.oneOf.every(item =>
+    item.additionalProperties === false), true);
 
   const resolveSchema =
     publicToolMap.get(
@@ -650,6 +659,18 @@ try {
     portA,
     "phase62a-r1-step4b2-child-b",
   );
+
+  const badGoal = parseToolResult(await childB.callTool({
+    name: "chatgpt_bridge_submit_world_character_action",
+    arguments: {
+      prepared_turn_handle: prepared.prepared_turn_handle,
+      decision_handle: prepared.current_decision.decision_handle,
+      action_id: "open-gate",
+      goal_context_token: "forged",
+      goal_intents: [],
+    },
+  }));
+  assert.equal(badGoal.blocked_code, "WORLD_SIMULATION_NATIVE_GOAL_CONTEXT_MISMATCH");
 
   const submitted = parseToolResult(
     await childB.callTool({

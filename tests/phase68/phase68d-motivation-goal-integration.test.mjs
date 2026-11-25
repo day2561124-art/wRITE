@@ -1,3 +1,10 @@
+import { EventEmitter } from "node:events";
+import { createEphemeralWorldSimulationPreparedTurnBroker } from "../../server/src/world-simulation-prepared-turn-ephemeral-broker.mjs";
+import { attachWorldSimulationPreparedTurnBrokerIpc, createWorldSimulationPreparedTurnBrokerIpcClient } from "../../server/src/world-simulation-prepared-turn-broker-ipc.mjs";
+import {
+  chatgpt_bridge_prepare_world_turn, chatgpt_bridge_submit_world_character_action,
+  chatgpt_bridge_resolve_world_turn,
+} from "../../server/src/mcp-world-simulation-tools.mjs";
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
 import path from "node:path";
@@ -626,7 +633,7 @@ assert.equal(inquiryCandidate.communication.channel, "speech");
 assert.equal(inquiryCandidate.communication.addressee, trustedAlly);
 await rm(fixtureRoot, { recursive: true, force: true });
 try {
-  const session = await beginWorldSimulationSession({
+  const bootstrapInput = {
     simulation_label: "CB-C3 Native goal decision turn",
     seed: "cbc3-native-goal-turn",
     rules: { event_driven: true, persistent_causality: true },
@@ -661,7 +668,8 @@ try {
       },
       available_actions: { [rio]: [inquiryCandidate] },
     },
-  }, sessionOptions);
+  };
+  const session = await beginWorldSimulationSession(bootstrapInput, sessionOptions);
   const characterRuntimeManager = createWorldSimulationCharacterRuntimeManager({
     identityResolver: async (character) => ({
       entity_id: "character_rio", canonical_name: character,
@@ -868,6 +876,124 @@ try {
   assert.equal(afterReentry.state.goal_implementation_intention_history.length,
     afterIdle.state.goal_implementation_intention_history.length);
   assert.equal(brainCalls, 10);
+  // C7-C: reproduce the same Native goal lifecycle via the existing public
+  // Formal action handle, cross-process broker, and canonical World writer.
+  const formalSession = await beginWorldSimulationSession({
+    ...clone(bootstrapInput), simulation_label: "CB-C7 Formal paired goal decision",
+    seed: "cbc7-formal-goal-turn",
+  }, sessionOptions);
+  const formalId = formalSession.world_simulation_session_id;
+  const parent = createEphemeralWorldSimulationPreparedTurnBroker();
+  const parentChild = new EventEmitter();
+  const childProcess = new EventEmitter();
+  parentChild.connected = childProcess.connected = true;
+  parentChild.send = (message, cb) => {
+    queueMicrotask(() => childProcess.emit("message", structuredClone(message)));
+    cb?.(null);
+  };
+  childProcess.send = (message, cb) => {
+    queueMicrotask(() => parentChild.emit("message", structuredClone(message)));
+    cb?.(null);
+  };
+  const detach = attachWorldSimulationPreparedTurnBrokerIpc(parentChild, parent);
+  const child = createWorldSimulationPreparedTurnBrokerIpcClient({ process_like: childProcess });
+  const formalOptions = { ...sessionOptions, preparedTurnBroker: child };
+  const readFormal = () => getWorldSimulationState(formalId, sessionOptions);
+  try {
+    let previousGoalToken;
+    for (const [index, stage] of ["propose", "commit", "plan", "idle"].entries()) {
+      const beforeFormal = await readFormal();
+      const formal = await chatgpt_bridge_prepare_world_turn({
+        world_simulation_session_id: formalId,
+      }, formalOptions);
+      assert.equal(formal.ok, true, JSON.stringify(formal));
+      assert.equal(formal.current_decision.character_input.character, rio);
+      const input = formal.current_decision.character_input;
+      const view = input.native_goal_decision;
+      const plan = input.native_plan_decision;
+      assert.equal(Object.hasOwn(view, "turn_id"), false);
+      assert.equal(Object.hasOwn(plan, "turn_id"), false);
+      assert.equal(JSON.stringify(view).includes(beliefSource.source_event_id), false);
+      assert.equal(input.boundaries.native_goal_decision_action_authority, false);
+      const action = {
+        prepared_turn_handle: formal.prepared_turn_handle,
+        decision_handle: formal.current_decision.decision_handle,
+        reject_all: true,
+      };
+      let decision = {};
+      if (stage === "propose") {
+        decision = {
+          goal_context_token: view.context_token,
+          goal_intents: [{
+            operation: "propose", goal_kind: "achieve_state", domain: "relationships",
+            target_descriptor: { label: "meet_companion" },
+            motivation_basis_tokens: [view.motivation_basis[0].source_token],
+            motivation_relations: ["self_concordant_with"],
+          }],
+        };
+        const bad = await chatgpt_bridge_submit_world_character_action({
+          ...action, ...decision, goal_context_token: "forged",
+        }, formalOptions);
+        assert.equal(bad.blocked_code, "WORLD_SIMULATION_NATIVE_GOAL_CONTEXT_MISMATCH");
+        const wrongSource = clone(decision);
+        wrongSource.goal_intents[0].motivation_basis_tokens = ["other-observer"];
+        assert.equal((await chatgpt_bridge_submit_world_character_action({
+          ...action, ...wrongSource,
+        }, formalOptions)).blocked_code, "WORLD_SIMULATION_NATIVE_GOAL_SOURCE_TOKEN_INVALID");
+        const forbidden = clone(decision);
+        forbidden.goal_intents[0].target_descriptor.world_state_patch = { forged: true };
+        assert.equal((await chatgpt_bridge_submit_world_character_action({
+          ...action, ...forbidden,
+        }, formalOptions)).blocked_code, "WORLD_SIMULATION_FORMAL_GOAL_PLAN_INTENT_INVALID");
+      } else if (stage === "commit") {
+        assert.equal(view.existing_goals[0].state, "proposed");
+        previousGoalToken = view.existing_goals[0].goal_token;
+        decision = { goal_context_token: view.context_token,
+          goal_intents: [{ operation: "commit", goal_token: previousGoalToken }] };
+        assert.equal(plan.committed_goals.length, 0);
+      } else if (stage === "plan") {
+        assert.equal(view.existing_goals[0].state, "committed");
+        assert.equal(plan.committed_goals.length, 1);
+        const planIntent = {
+          goal_token: plan.committed_goals[0].goal_token,
+          cue_descriptor: { cue_kind: "opportunity", label: "companion_requests_help" },
+          response_descriptor: { response_kind: "seek_support", label: "ask_trusted_ally" },
+        };
+        decision = { plan_context_token: plan.context_token, plan_intents: [planIntent] };
+        assert.equal((await chatgpt_bridge_submit_world_character_action({
+          ...action, ...decision, plan_intents: [{ ...planIntent, goal_token: previousGoalToken }],
+        }, formalOptions)).blocked_code, "WORLD_SIMULATION_NATIVE_PLAN_GOAL_TOKEN_INVALID");
+      }
+      assert.equal((await readFormal()).state_hash, beforeFormal.state_hash);
+      const selected = await chatgpt_bridge_submit_world_character_action({ ...action, ...decision }, formalOptions);
+      assert.equal(selected.ready_to_resolve, true, JSON.stringify(selected));
+      assert.equal((await readFormal()).state_hash, beforeFormal.state_hash);
+      assert.equal((await chatgpt_bridge_submit_world_character_action({ ...action, ...decision }, formalOptions)).blocked, true);
+      const resolved = await chatgpt_bridge_resolve_world_turn({
+        prepared_turn_handle: formal.prepared_turn_handle,
+      }, formalOptions);
+      assert.equal(resolved.committed, true, JSON.stringify(resolved));
+      const afterFormal = await readFormal();
+      assert.equal(afterFormal.revision, beforeFormal.revision + 1);
+      const nativeComparison = [afterPropose, afterCommit, afterPlan, afterIdle][index];
+      const summarizeGoals = snapshot => Object.values(projectWorldSimulationEffectiveMotivationalGoals({
+        world_state: snapshot.state,
+      }).goals_by_character[rio] ?? {}).map(goal => ({
+        state: goal.state, goal_kind: goal.goal_kind, domain: goal.domain, target_descriptor: goal.target_descriptor,
+      }));
+      const summarizePlans = snapshot => Object.values(projectWorldSimulationEffectiveGoalImplementationIntentions({
+        world_state: snapshot.state,
+      }).plans_by_character[rio] ?? {}).map(plan => ({
+        state: plan.state, cue_descriptor: plan.cue_descriptor, response_descriptor: plan.response_descriptor,
+      }));
+      assert.deepEqual(summarizeGoals(afterFormal), summarizeGoals(nativeComparison));
+      assert.deepEqual(summarizePlans(afterFormal), summarizePlans(nativeComparison));
+      assert.equal(parent.getStorageStatus().payload_reference_count, 0);
+    }
+  } finally {
+    detach();
+  }
+
 } finally {
   await rm(fixtureRoot, { recursive: true, force: true });
 }
