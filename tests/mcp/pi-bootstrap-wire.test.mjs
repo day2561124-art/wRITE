@@ -64,19 +64,22 @@ test('actual MCP default ingress completes cold lifecycle and terminal no replay
   NEXA_PI_TASK_AUTHORIZATION_ROOT:taskRoot,NEXA_PI_REQUIRE_TASK_AUTHORIZATION:'0'};
  for(const key of Object.keys(environment))if(key.startsWith('WRITER_WORKBENCH_ISOLATED_TEST_')||key==='WRITER_WORKBENCH_TEST_JOURNAL_GROUP')delete environment[key];
  const hook=fileURLToPath(new URL('./pi-bootstrap-wire-cold.fixture.mjs',import.meta.url));
- async function connect(exit){const transport=new StdioClientTransport({command:process.execPath,args:['--import',pathToFileURL(hook).href,path.join(repo,'server','src','mcp-server.mjs')],cwd:repo,env:{...environment,PI_POSTSEAL_WIRE_EXIT:exit?'1':'0'},stderr:'pipe'});transport.stderr?.on('data',chunk=>process.stderr.write(chunk));const client=new Client({name:'pi-postseal-wire-acceptance',version:'1'});clients.push(client);await client.connect(transport);return {client,transport};}
- async function startWorker(exit){
+ async function connect(exit,{standing=false,proof='SYNTHETIC_STANDING_APPROVED'}={}){const transport=new StdioClientTransport({command:process.execPath,args:['--import',pathToFileURL(hook).href,path.join(repo,'server','src','mcp-server.mjs')],cwd:repo,env:{...environment,PI_POSTSEAL_WIRE_EXIT:exit?'1':'0',PI_STANDING_WIRE_FIXTURE:standing?'1':'0',NEXA_PI_REQUIRE_TASK_AUTHORIZATION:standing?'1':'0'},stderr:'pipe'});transport.stderr?.on('data',chunk=>process.stderr.write(chunk));if(standing){const send=transport.send.bind(transport);transport.send=message=>send({...message,params:{...message.params,_meta:{...message.params?._meta,workbench_http_access_token:proof,workbench_purpose:'WORKBENCH'}}});}const client=new Client({name:'pi-postseal-wire-acceptance',version:'1'});clients.push(client);await client.connect(transport);return {client,transport};}
+ async function startWorker(exit,{standing=false}={}){
   const worker=spawn(process.execPath,['--import',pathToFileURL(hook).href,path.join(repo,'server/src/mcp-server.mjs'),'--pi-worker'],
-   {cwd:repo,env:{...environment,PI_POSTSEAL_WIRE_EXIT:exit?'1':'0'},windowsHide:true,stdio:['ignore','ignore','pipe','ipc']});
+   {cwd:repo,env:{...environment,PI_POSTSEAL_WIRE_EXIT:exit?'1':'0',PI_STANDING_WIRE_FIXTURE:standing?'1':'0',NEXA_PI_REQUIRE_TASK_AUTHORIZATION:standing?'1':'0'},windowsHide:true,stdio:['ignore','ignore','pipe','ipc']});
   workers.push(worker);worker.stderr.on('data',chunk=>process.stderr.write(chunk));return worker;
  }
  async function submitAndWait(client,contract){
   let value=facts(await client.callTool({name:'dev_pi_execute_intent',arguments:{intent_json:JSON.stringify(contract)}},undefined,{timeout:300000}));
+  return waitFor(client,value,contract.bootstrap===true);
+ }
+ async function waitFor(client,value,bootstrap=false){
   const deadline=Date.now()+completionTimeoutMs;
   while(!['COMPLETED','FAILED','CANCELLED','BLOCKED','DECISION_REQUIRED'].includes(value.state.status)&&Date.now()<deadline){
    await new Promise(r=>setTimeout(r,100));
    const context=value.intent.context;
-   value=facts(await client.callTool({name:'dev_pi_execution_status',arguments:{operation_id:value.state.operation_id,...(contract.bootstrap?{bootstrap:true}:{workstream_id:context.workstream_id,workspace_id:context.workspace_id})}},undefined,{timeout:300000})).operation;
+   value=facts(await client.callTool({name:'dev_pi_execution_status',arguments:{operation_id:value.state.operation_id,...(bootstrap?{bootstrap:true}:{workstream_id:context.workstream_id,workspace_id:context.workspace_id})}},undefined,{timeout:300000})).operation;
   }return value;
  }
  const first=await connect(false);const toolNames=(await first.client.listTools()).tools.map(t=>t.name);assert(toolNames.includes('dev_capability_get_schema'));assert(toolNames.includes('dev_pi_execute_intent'));
@@ -98,7 +101,7 @@ test('actual MCP default ingress completes cold lifecycle and terminal no replay
  const second=await connect(false);assert.notEqual(second.transport.pid,exit.pid);
  const saved=facts(await second.client.callTool({name:'dev_pi_execution_status',arguments:{intent_id:contract.intent_id,bootstrap:true}})).operation;
  assert.equal(saved.state.operation_id,exit.operation_id);assert.equal(saved.runtime.lifecycle_binding.workspace_id,exit.binding.workspace_id);assert(saved.state.completed_steps.includes('checkpoint'));
- await startWorker(false);
+ const originalWorker=await startWorker(false);
  const resumed=await submitAndWait(second.client,contract);assert.equal(resumed.state.status,'COMPLETED',JSON.stringify({state:resumed.state,runtime:resumed.runtime,receipts:resumed.receipts.map(r=>({step_id:r.step_id,kind:r.kind,evidence:r.step_id==='test'?r.evidence:undefined}))}));assert.equal(resumed.state.operation_id,exit.operation_id);assert.equal(resumed.result.verification.focused,'passed');
  const context={project_id:'writer_workbench',workstream_id:exit.binding.workstream_id,workspace_id:exit.binding.workspace_id};
  let recoveredBuild=false;
@@ -140,6 +143,84 @@ test('actual MCP default ingress completes cold lifecycle and terminal no replay
   assert.equal((await submitAndWait(second.client,repairPlan)).projection_hash,repaired.projection_hash);
   recoveredBuild=true;
  }
+
+ // Real MCP request serialization and actual worker process, with a fixture
+ // verifier (not live OAuth). Stop the original bootstrap worker before
+ // enabling mandatory-grant mode on both new processes.
+ async function drain(worker){
+  if(worker.exitCode!==null)return;
+  const closed=new Promise((resolve,reject)=>{
+   const timer=setTimeout(()=>reject(Error('Standing fixture worker did not drain')),30000);
+   worker.once('close',code=>{clearTimeout(timer);resolve(code);});
+  });
+  worker.send({protocol:'writer-workbench/pi-durable-worker/v1',kind:'drain'});
+  assert.equal(await closed,0);
+ }
+ await drain(originalWorker);
+ const {createPiStandingPolicyPublisher}=await import(pathToFileURL(path.join(repo,'server/src/pi-standing-authorization.mjs')).href);
+ const {resolveDevWorkspaceExecutionContext}=await import(pathToFileURL(path.join(repo,'server/src/mcp-development-workstream-tools.mjs')).href);
+ const publisher=createPiStandingPolicyPublisher({root:taskRoot,resolveWorkspace:resolveDevWorkspaceExecutionContext});
+ const policyPlan={schema_version:1,project_id:'writer_workbench',principal:'wire-standing-operator-fixture',
+  scopes:[{workspace_id:context.workspace_id,workstream_id:context.workstream_id}],
+  capabilities:['filesystem.read','filesystem.patch','workspace.create_checkpoint','verification.focused','git.commit'],
+  expires_at_ms:Date.now()+completionTimeoutMs+300000};
+ const preview=await publisher.preview(policyPlan);
+ assert.equal(preview.publication_performed,false);
+ const policy=await publisher.issue(policyPlan,preview.plan_sha256);
+ const authenticated=await connect(false,{standing:true});
+ const wrong=await connect(false,{standing:true,proof:'SYNTHETIC_STANDING_OTHER'});
+ const readArgs={workspace_id:context.workspace_id,path:actions.find(a=>a.step_id==='write').input.path};
+ const before=facts(await authenticated.client.callTool({name:'dev_read_file',arguments:readArgs}));
+ const gitBefore=facts(await authenticated.client.callTool({name:'dev_git_status',arguments:{workspace_id:context.workspace_id}}));
+ const newText=before.content+'// standing-policy-wire-marker\n';
+ const standingRequest={request_kind:'standing_engineering',intent_id:'wire-standing-lifecycle-0001',
+  goal:'Verify independently approved standing policy through real MCP',workspace_id:context.workspace_id,
+  requested_actions:[
+   {step_id:'read',capability:'filesystem.read',input:{path:readArgs.path}},
+   {step_id:'patch',capability:'filesystem.patch',depends_on:['read'],input:{path:readArgs.path,oldText:before.content,newText,expectedSha256:createHash('sha256').update(before.content).digest('hex')}},
+   {step_id:'standing-checkpoint',capability:'workspace.create_checkpoint',depends_on:['patch'],input:{label:'Standing wire checkpoint'}},
+   {step_id:'verify',capability:'verification.focused',depends_on:['standing-checkpoint'],input:{suite:'mcp_pi_postseal'}},
+   {step_id:'commit',capability:'git.commit',depends_on:['verify'],input:{paths:[readArgs.path],message:'Verify standing policy wire lifecycle',expectedHead:gitBefore.workspace_context.current_head}},
+  ]};
+ const submitStanding=async(client,request)=>facts(await client.callTool({name:'dev_pi_execute_intent',arguments:{intent_json:JSON.stringify(request)}},undefined,{timeout:300000}));
+ await assert.rejects(submitStanding(wrong.client,standingRequest),/PERMISSION_DENIED/u);
+ await wrong.client.close();
+ const queuedStanding=await submitStanding(authenticated.client,standingRequest);
+ assert.equal(queuedStanding.state.status,'CREATED');
+ assert.equal(queuedStanding.intent.task_authorization_id,undefined);
+ assert.equal(queuedStanding.intent.standing_authorization.policy_id,policy.policy_id);
+ assert.equal(queuedStanding.intent.standing_authorization.policy_sha256,policy.policy_sha256);
+ await assert.rejects(submitStanding(authenticated.client,queuedStanding.intent),/PERMISSION_DENIED/u);
+ await authenticated.client.close();
+ const standingWorker=await startWorker(false,{standing:true});
+ const authenticatedAgain=await connect(false,{standing:true});
+ const standingComplete=await waitFor(authenticatedAgain.client,queuedStanding);
+ assert.equal(standingComplete.state.status,'COMPLETED',JSON.stringify({state:standingComplete.state,runtime:standingComplete.runtime}));
+ assert.equal(standingComplete.result.verification.focused,'passed');
+ assert.equal(standingComplete.state.operation_id,queuedStanding.state.operation_id);
+ assert.deepEqual(standingComplete.intent.standing_authorization,queuedStanding.intent.standing_authorization);
+ assert.equal(facts(await authenticatedAgain.client.callTool({name:'dev_read_file',arguments:readArgs})).content,newText);
+ const standingDuplicate=await submitStanding(authenticatedAgain.client,standingRequest);
+ assert.equal(standingDuplicate.projection_hash,standingComplete.projection_hash);
+ await drain(standingWorker);
+ const revokedRequest={request_kind:'standing_engineering',intent_id:'wire-standing-revoked-0001',
+  goal:'Distinct queued goal must stop after independent revocation',workspace_id:context.workspace_id,
+  requested_actions:[{step_id:'patch',capability:'filesystem.patch',input:{path:readArgs.path,oldText:newText,
+   newText:newText+'// forbidden-after-revocation\n',expectedSha256:createHash('sha256').update(newText).digest('hex')}}]};
+ const queuedRevoked=await submitStanding(authenticatedAgain.client,revokedRequest);
+ assert.equal(queuedRevoked.state.status,'CREATED');
+ await publisher.revoke(policy.policy_id);
+ const revocationWorker=await startWorker(false,{standing:true});
+ const revoked=await waitFor(authenticatedAgain.client,queuedRevoked);
+ assert.equal(revoked.state.status,'BLOCKED');
+ assert.equal(revoked.state.last_error.code,'PERMISSION_DENIED');
+ assert.equal(facts(await authenticatedAgain.client.callTool({name:'dev_read_file',arguments:readArgs})).content,newText);
+ await assert.rejects(submitStanding(authenticatedAgain.client,{...revokedRequest,intent_id:'wire-standing-after-revoke'}),/PERMISSION_DENIED/u);
+ await authenticatedAgain.client.close();
+ await drain(revocationWorker);
+ await startWorker(false);
+ console.log(JSON.stringify({standing_wire_verified:true,synthetic_identity_verifier:true,mandatory_grant_mode:true,
+  independent_worker:true,completed:standingComplete.state.status,revoked:revoked.state.status,terminal_duplicate_unchanged:true}));
  const observations=intent('wire-read-checkpoint-0001',context,[{step_id:'workstream',capability:'workspace.get_workstream',input:{workstream_id:context.workstream_id},depends_on:[]},{step_id:'checkpoint',capability:'workspace.get_checkpoint',input:{checkpoint_id:exit.checkpoint.checkpoint_id},depends_on:['workstream']}]);
  const inspected=(await submitAndWait(second.client,observations));assert.equal(inspected.state.status,'COMPLETED');const workstream=facts(inspected.receipts[0].evidence),checkpoint=facts(inspected.receipts[1].evidence);assert.equal(checkpoint.checkpoint_id,exit.checkpoint.checkpoint_id);assert.equal(checkpoint.workspace_id,context.workspace_id);assert.equal(checkpoint.workstream_id,context.workstream_id);assert.equal(checkpoint.git_head,base);
  const transition=async(state,revision)=>{
