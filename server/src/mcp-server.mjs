@@ -1,3 +1,4 @@
+import { formalAppraisalResponseProperties } from "./world-simulation-affective-appraisal-intent-contract.mjs";
 import { formalAdditionalExperientialResponseProperties } from "./world-simulation-formal-experiential-deliberation-contract.mjs";
 import { formalClaimResponseProperties, formalClaimRelationResponseProperties } from "./world-simulation-post-encoding-claim-continuation-service.mjs";
 import { formalGoalPlanIntentProperties } from "./world-simulation-formal-goal-plan-intent-contract.mjs";
@@ -3456,7 +3457,7 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_submit_world_character_deliberation",
-    description: "[low-risk-write] Submit one current bounded Character Brain experiential-deliberation or post-encoding subjective claim response. For post_encoding_subjective_claim, use only claim_context_token and claim_intents citing the current observer's encoded evidence; the server resumes its frozen resolution once. For post_encoding_subjective_claim_relation, use only relation_context_token and relation_intents (challenges or supersedes using current and prior same-character claim tokens). For existing experiential stages submit only the field named by response_contract.output_field: recall, transfer, preference, adaptation, revalidation, reuse, longitudinal activation, or qualitative mood interpretation. Empty arrays are valid declines. The server validates every ref against the bounded decision and reprepares the same uncommitted world snapshot. It cannot select an action, author world truth, or provide numeric utility/confidence/probability/reward.",
+    description: "[low-risk-write] Submit one current bounded Character Brain experiential-deliberation or post-encoding subjective claim response. For post_encoding_subjective_claim, use only claim_context_token and claim_intents citing the current observer's encoded evidence; the server resumes its frozen resolution once. For post_encoding_subjective_claim_relation, use only relation_context_token and relation_intents (challenges or supersedes using current and prior same-character claim tokens). For post_outcome_affective_appraisal use only appraisal_context_ref and appraisal_decisions referencing the current character's concern and prior appraisal evidence. For existing experiential stages submit only the field named by response_contract.output_field: recall, transfer, preference, adaptation, revalidation, reuse, longitudinal activation, or qualitative mood interpretation. Empty arrays are valid declines. The server validates every ref against the bounded decision and reprepares the same uncommitted world snapshot. It cannot select an action, author world truth, or provide numeric utility/confidence/probability/reward.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
       prepared_turn_handle: {
@@ -3473,6 +3474,7 @@ const toolDefinitions = [
         properties: {
           ...formalClaimResponseProperties,
           ...formalClaimRelationResponseProperties,
+          ...formalAppraisalResponseProperties,
           ...formalAdditionalExperientialResponseProperties,
           activated_semantic_refs: {
             type: "array",
@@ -3554,7 +3556,7 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_submit_world_character_action",
-    description: "[low-risk-write] Submit exactly one current action-selection decision to the parent-process prepared-turn broker. Requires opaque prepared/decision handles and either one existing action_id or reject_all=true; optional explicit goal/plan intents must use the current observer-scoped context and source tokens. Set request_subjective_claim_interpretation=true only if the character explicitly wants to interpret its newly encoded subjective experience after action execution. Set request_subjective_claim_relation_interpretation=true only to explicitly compare a new claim against admitted subjective claims. It cannot be used during Phase79M impasse deliberation and cannot author an action object, outcome, state transition, or commit decision.",
+    description: "[low-risk-write] Submit exactly one current action-selection decision to the parent-process prepared-turn broker. Requires opaque prepared/decision handles and either one existing action_id or reject_all=true; optional explicit goal/plan intents must use the current observer-scoped context and source tokens. Set request_subjective_claim_interpretation=true only if the character explicitly wants to interpret its newly encoded subjective experience after action execution. Set request_subjective_claim_relation_interpretation=true only to explicitly compare a new claim against admitted subjective claims. Set request_affective_appraisal=true only for explicit subjective evaluation of the selected action's experienced outcome. It cannot be used during Phase79M impasse deliberation and cannot author an action object, outcome, state transition, or commit decision.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
       prepared_turn_handle: {
@@ -3570,6 +3572,7 @@ const toolDefinitions = [
       ...formalGoalPlanIntentProperties,
       request_subjective_claim_interpretation: { type: "boolean" },
       request_subjective_claim_relation_interpretation: { type: "boolean" },
+      request_affective_appraisal: { type: "boolean" },
     }, ["prepared_turn_handle", "decision_handle"], [{
       type: "exactlyOne",
       fields: ["action_id", "reject_all"],
