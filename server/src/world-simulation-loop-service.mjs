@@ -1,3 +1,4 @@
+import { createWorldSimulationSubjectiveClaimIntentContext } from "./world-simulation-subjective-claim-intent-service.mjs";
 import { analyzeObserverDialogueLearning, learnedDialogueMemoryStage, observerDialogueReferentDescriptor,
   isDialogueCountdownQuestion, observerDialogueClarification, observerDialogueClarificationGoal } from "./observer-dialogue-learning-service.mjs";
 import { admitDialogueAnswerCorrection, admitDialogueClarificationReply, admitDialogueClarificationTarget,
@@ -17112,37 +17113,11 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
       throw error;
     };
     for (const character of nativeClaimCharacters) {
-      // Staged action consequences may have removed conscious admission even
-      // though the pre-turn snapshot originally admitted the character.
-      if (!projectWorldSimulationConsciousCognitionAdmission(stagedWorldState, character).admitted) continue;
-      const source = resolverView.character_evidence.find(item =>
-        sameCharacterName(item.character, character));
-      const memories = array(source?.memories).slice(0, 16);
-      if (!memories.length) continue;
-      // Bind opaque handles to the exact current-turn canonical source set
-      // and pre-turn revision. Phase65 independently verifies every reference.
-      const contextToken = "claim_context_" + hashAgentRunValue({
-        turn_id: prepared.turn_id, character,
-        state_revision: prepared.state_revision,
-        world_state_hash: prepared.world_state_hash, memories,
-      }).slice(0, 32);
-      const sourcesByToken = new Map();
-      const memorySources = memories.map((memory, index) => {
-        const token = "claim_source_" + hashAgentRunValue({
-          context_token: contextToken, index, source_memory_ref: memory.source_memory_ref,
-        }).slice(0, 32);
-        sourcesByToken.set(token, memory.source_memory_ref);
-        const { source_memory_ref, ...visible } = memory;
-        return {source_token: token, ...cloneJson(visible)};
+      const claimContext = createWorldSimulationSubjectiveClaimIntentContext({
+        prepared, stagedWorldState, resolverView, character,
       });
-      const view = {
-        version: "native-subjective-claim-decision-view-v1",
-        character, context_token: contextToken, memory_sources: memorySources,
-        bounded_view_only: true,
-        current_turn_new_subjective_memories_only: true,
-        world_truth_exposed: false, durable_write_authority: false,
-        action_selection_requested: false, source_memory_ids_exposed: false,
-      };
+      if (!claimContext) continue;
+      const view = claimContext.characterView();
       // Reuse the same serialized Character Runtime and its actual ingress
       // revision/consciousness guards. The new memory is staged, not yet a
       // committed World fact or a chance to reselect the preceding action.
@@ -17178,33 +17153,7 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
         },
       }, options, nativeGoalSnapshot);
       if (!completed) fail("Native subjective interpretation callback was not completed.");
-      if (reply == null || reply === "reject_all") continue;
-      if (!isObject(reply) || Object.keys(reply).some(key =>
-        !["claim_context_token", "claim_intents"].includes(key))
-        || !Array.isArray(reply.claim_intents) || reply.claim_intents.length > 8
-        || reply.claim_context_token !== contextToken) {
-        fail("Native subjective interpretation requires an explicit context-bound claim list.");
-      }
-      for (const [index, intent] of reply.claim_intents.entries()) {
-        if (!isObject(intent) || Object.keys(intent).some(key => !["proposition", "evidence"].includes(key))
-          || typeof intent.proposition !== "string" || !intent.proposition.trim()
-          || intent.proposition.length > 2000
-          || !Array.isArray(intent.evidence) || !intent.evidence.length || intent.evidence.length > 12) {
-          fail("Invalid Native subjective claim intent.");
-        }
-        const evidence = intent.evidence.map(item => {
-          if (!isObject(item) || Object.keys(item).some(key => !["source_token", "relation"].includes(key))
-            || !sourcesByToken.has(item.source_token)
-            || !["supports", "conflicts"].includes(item.relation)) {
-            fail("Native subjective claim must cite its own visible evidence token.");
-          }
-          return {source_memory_ref: sourcesByToken.get(item.source_token), relation: item.relation};
-        });
-        proposals.push({
-          proposal_ref: "native_claim_" + hashAgentRunValue({contextToken, index}).slice(0, 24),
-          character, proposition: intent.proposition, evidence,
-        });
-      }
+      proposals.push(...claimContext.admit(reply));
     }
     return proposals;
   };
