@@ -489,6 +489,8 @@ try {
       "claim_intents",
       "preference_decisions",
       "preference_revisions",
+      "relation_context_token",
+      "relation_intents",
       "transfer_mappings",
     ],
   );
@@ -510,6 +512,7 @@ try {
       "prepared_turn_handle",
       "reject_all",
       "request_subjective_claim_interpretation",
+      "request_subjective_claim_relation_interpretation",
     ],
   );
   assert.equal(submitSchema.properties.goal_intents.maxItems, 8);
