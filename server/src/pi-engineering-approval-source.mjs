@@ -14,6 +14,13 @@ function boundedString(value, limit) {
   return typeof value === "string" && value.trim().length > 0
     && value.length <= limit && !value.includes("\u0000");
 }
+function activeWorkspace(context, workspaceId) {
+  return context?.workspace_id === workspaceId
+    && context.workspace_type === "isolated_worktree"
+    && context.lifecycle_state === "active" && context.workstream_state === "active"
+    && context.healthy === true && context.mutation_allowed === true
+    && typeof context.workstream_id === "string" && workstreamPattern.test(context.workstream_id);
+}
 function validBinding(record) {
   return record && typeof record === "object" && !Array.isArray(record)
     && Object.keys(record).length === fields.length
@@ -45,9 +52,8 @@ export function createPiEngineeringApprovalSource({ loadBindings, resolveWorkspa
 
     // Resolve authoritative workspace context, not an identity supplied by the caller.
     const context = await resolveWorkspace({ workspace_id: snapshot.workspace_id }, { mutation: false });
-    if (context?.workspace_id !== snapshot.workspace_id
-      || context.workspace_type !== "isolated_worktree" || context.lifecycle_state !== "active"
-      || context.healthy !== true || !workstreamPattern.test(context.workstream_id ?? "")) denied();
+    if (!activeWorkspace(context, snapshot.workspace_id)) denied();
+    const workstreamId = context.workstream_id;
 
     let bindings;
     try {
@@ -60,7 +66,7 @@ export function createPiEngineeringApprovalSource({ loadBindings, resolveWorkspa
     if (!Array.isArray(bindings) || bindings.length > 128 || !bindings.every(validBinding)) denied();
     const matches = bindings.filter(record => record.principal === authenticatedPrincipal
       && record.workspace_id === context.workspace_id
-      && record.workstream_id === context.workstream_id
+      && record.workstream_id === workstreamId
       && record.goal === snapshot.goal);
     if (matches.length !== 1) denied();
 
@@ -69,8 +75,8 @@ export function createPiEngineeringApprovalSource({ loadBindings, resolveWorkspa
       authorizeTask,
       resolveWorkspace: async (request, options) => {
         const current = await resolveWorkspace(request, options);
-        if (current?.workspace_id !== context.workspace_id
-          || current?.workstream_id !== context.workstream_id) denied();
+        if (!activeWorkspace(current, snapshot.workspace_id)
+          || current.workstream_id !== workstreamId) denied();
         return current;
       },
     });
