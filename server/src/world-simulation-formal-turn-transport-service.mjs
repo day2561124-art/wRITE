@@ -162,6 +162,7 @@ function preparationSurface(receipt, reused) {
       receipt.deliberation_submission_count ?? 0,
     ready_to_resolve: receipt.ready_to_resolve,
     post_encoding_requested: receipt.post_encoding_requested === true,
+    ...(isPostEncodingDecisionKind(receipt.current_decision?.decision_kind) ? { resolution_pending: true, committed: false } : {}),
     reused_existing_prepared_turn: reused === true,
     current_decision: receipt.current_decision,
     boundaries: {
