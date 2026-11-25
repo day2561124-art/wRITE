@@ -765,6 +765,105 @@ try {
   assert.equal(replay.ok, false);
   assert.equal(replay.blocked, true);
 
+  // C7: reproduce actual Phase89B evidence through the public HTTP
+  // transport, not a direct programmatic Formal function. Two prior turns
+  // are produced by the existing Phase86 controlled appraisal fixture.
+  const { initial: moodInitial, actors: moodActors } = await import("../phase86/phase86-native-fixture.mjs");
+  const { beginWorldSimulationSession } = await import("../../server/src/world-simulation-session-service.mjs");
+  const { runWorldSimulationTurn } = await import("../../server/src/world-simulation-loop-service.mjs");
+  const moodSession = await beginWorldSimulationSession({
+    simulation_label: "C7 actual public mood decision", seed: "c7-public-phase89b",
+    rules: { event_driven: true, persistent_causality: true },
+    initial_world_state: structuredClone(moodInitial),
+  });
+  const moodSid = moodSession.world_simulation_session_id;
+  for (const event_id of ["event86b-1", "event86b-2"]) {
+    const result = await runWorldSimulationTurn({ world_simulation_session_id: moodSid, event_id }, {
+      characterBrain: async () => ({ action_id: "wait" }),
+      affectiveAppraisalResolver: async view => {
+        const prior = view.prior_appraisals.at(-1);
+        return [{
+          context_ref: view.context_ref, concern_ref: view.concerns[0].concern_ref,
+          ...(prior ? { reappraises_ref: prior.prior_appraisal_ref } : {}),
+          goal_congruence: view.character === "Alice" ? "hinders" : "helps",
+          expectedness: prior ? "expected" : "unexpected",
+          coping_potential: prior ? "possible" : "limited",
+          interpretation: view.character + " fixture affective meaning",
+        }];
+      },
+      causalAdjudicator: async input => {
+        const next = structuredClone(input.world_state);
+        next.event_queue = next.event_queue.slice(1);
+        return {
+          causal_resolution_id: "c7-public-mood-" + input.event.event_id,
+          next_world_state: next, state_transitions: [],
+          action_outcomes: moodActors.map(actor => ({
+            actor, action_id: "wait", result: "SECRET_C7_PUBLIC_MOOD_CAUSE",
+            causal_evidence: "SECRET_C7_PUBLIC_MOOD_CAUSE",
+            character_experience: { performed: true, perceived_result: "The door stayed shut." },
+          })),
+          knowledge_transitions: [], scheduled_events: [],
+        };
+      },
+    });
+    assert.equal(result.committed, true);
+  }
+  const moodBefore = await getWorldSimulationState(moodSid);
+  let moodSurface = parseToolResult(await childB.callTool({
+    name: "chatgpt_bridge_prepare_world_turn", arguments: { world_simulation_session_id: moodSid },
+  }));
+  assert.equal(moodSurface.ok, true, JSON.stringify(moodSurface));
+  assert.equal(moodSurface.decision_round_kind, "persistent_mood_interpretation");
+  let rounds = 0, authoredMood = 0;
+  while (moodSurface.decision_round_kind !== "action_selection") {
+    const decision = moodSurface.current_decision;
+    const task = decision.character_input.experiential_deliberation;
+    const field = task.response_contract.output_field;
+    assert.ok(Object.hasOwn(publicResponseProperties, field));
+    assert.equal(JSON.stringify(decision).includes("SECRET_C7_PUBLIC_MOOD_CAUSE"), false);
+    const values = field === "mood_interpretations" && decision.character_input.character === "Alice"
+      ? [{ subjective_mood_label: "uneasy", interpretation: "Repeated obstruction still leaves Alice feeling unsettled.",
+        supporting_evidence_refs: task.persistent_affective_tone_evidence.map(item => item.evidence_ref) }]
+      : [];
+    if (values.length) {
+      authoredMood += 1;
+      const bad = parseToolResult(await childB.callTool({
+        name: "chatgpt_bridge_submit_world_character_deliberation", arguments: {
+          prepared_turn_handle: moodSurface.prepared_turn_handle, decision_handle: decision.decision_handle,
+          deliberation_response: { [field]: [{ ...values[0], supporting_evidence_refs: ["forged"] }] },
+        },
+      }));
+      assert.equal(bad.blocked_code, "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_DECISION_OUT_OF_VIEW");
+    }
+    moodSurface = parseToolResult(await childB.callTool({
+      name: "chatgpt_bridge_submit_world_character_deliberation", arguments: {
+        prepared_turn_handle: moodSurface.prepared_turn_handle, decision_handle: decision.decision_handle,
+        deliberation_response: { [field]: values },
+      },
+    }));
+    assert.equal(moodSurface.ok, true, JSON.stringify(moodSurface));
+    assert.ok(++rounds < 40);
+  }
+  assert.equal(authoredMood, 1);
+  assert.equal(moodSurface.current_decision.character_input.character, "Alice");
+  assert.ok(JSON.stringify(moodSurface.current_decision.character_input.cognition.persistent_mood_context).includes("uneasy"));
+  assert.equal((await getWorldSimulationState(moodSid)).state_hash, moodBefore.state_hash);
+  while (moodSurface.current_decision) {
+    moodSurface = parseToolResult(await childB.callTool({
+      name: "chatgpt_bridge_submit_world_character_action", arguments: {
+        prepared_turn_handle: moodSurface.prepared_turn_handle,
+        decision_handle: moodSurface.current_decision.decision_handle, reject_all: true,
+      },
+    }));
+    assert.equal(moodSurface.ok, true, JSON.stringify(moodSurface));
+  }
+  const moodResolved = parseToolResult(await childB.callTool({
+    name: "chatgpt_bridge_resolve_world_turn", arguments: { prepared_turn_handle: moodSurface.prepared_turn_handle },
+  }));
+  assert.equal(moodResolved.committed, true, JSON.stringify(moodResolved));
+  assert.equal((await getWorldSimulationState(moodSid)).revision, moodBefore.revision + 1);
+  console.log("C7 actual HTTP MCP Phase89B mood and same-snapshot replay: PASS");
+
   // Prepare a second handle, then restart the HTTP parent. The world state
   // remains persisted, but the parent-only prepared payload must disappear.
   const restartSession = parseToolResult(
