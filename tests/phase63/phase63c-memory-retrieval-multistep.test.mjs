@@ -1,3 +1,4 @@
+import { createPrivateWorldRetrievalExecutor } from "../../server/src/world-simulation-private-retrieval-executor-service.mjs";
 import { checkpointPrivateWorldRetrievalPreparation } from "../../server/src/world-simulation-private-retrieval-preparation-service.mjs";
 import { getWorldSimulationState } from "../../server/src/world-simulation-state-service.mjs";
 import {
@@ -1078,6 +1079,66 @@ try {
   const afterReplay = await getWorldSimulationState(session.world_simulation_session_id, { fixtureRoot });
   assert.equal(afterReplay.revision, beforeReplay.revision);
   assert.equal(afterReplay.state_hash, beforeReplay.state_hash);
+
+  // C7: a host-owned stage executor must acquire and release one private
+  // context per request. The fixture is a deterministic test backend, not
+  // evidence of actual model-context isolation.
+  const openedStages = [];
+  const closedStages = [];
+  const executor = createPrivateWorldRetrievalExecutor({
+    openStageContext: async (identity) => {
+      openedStages.push(identity.sequence);
+      assert.equal(Object.hasOwn(identity, "trusted_stage_input"), false);
+      assert.equal(Object.hasOwn(identity, "transcript"), false);
+      return {
+        resolve: async (view) => {
+          assert.equal(view.stage, identity.stage);
+          return loopResolver(view);
+        },
+        close: async () => { closedStages.push(identity.sequence); },
+      };
+    },
+  });
+  const privateExecutionInput = { scope: worldScope, event_id: eventId };
+  const privateExecutionOptions = { fixtureRoot, memoryRetrievalTechnicalStepBudget: 4 };
+  const executed = await executor.prepare(privateExecutionInput, privateExecutionOptions);
+  assert.equal(executed.stage_count, 5);
+  assert.deepEqual(openedStages, [0, 1, 2, 3, 4]);
+  assert.deepEqual(closedStages, openedStages);
+  assert.deepEqual(executed.prepared.memory_retrieval_processes, prepared.memory_retrieval_processes);
+  assert.equal(JSON.stringify(executed.prepared.decision_packets).includes(loopTargetAnswer), true);
+  assert.equal(JSON.stringify(executed.prepared.decision_packets).includes(loopHiddenDetail), false);
+  assert.throws(() => createPrivateWorldRetrievalExecutor(), {
+    code: "WORLD_SIMULATION_PRIVATE_RETRIEVAL_PROVIDER_REQUIRED",
+  });
+  let failedContextClosed = false;
+  const failedExecutor = createPrivateWorldRetrievalExecutor({
+    openStageContext: async () => ({
+      resolve: async () => { throw new Error(loopHiddenDetail); },
+      close: async () => { failedContextClosed = true; },
+    }),
+  });
+  await assert.rejects(
+    () => failedExecutor.prepare(privateExecutionInput, privateExecutionOptions),
+    (error) => error.code === "WORLD_SIMULATION_PRIVATE_RETRIEVAL_PROVIDER_FAILED"
+      && !String(error.message).includes(loopHiddenDetail),
+  );
+  assert.equal(failedContextClosed, true);
+  let reusedContextClosed = 0;
+  const reusedContext = {
+    resolve: loopResolver,
+    close: async () => { reusedContextClosed += 1; },
+  };
+  const reusedExecutor = createPrivateWorldRetrievalExecutor({
+    openStageContext: async () => reusedContext,
+  });
+  await assert.rejects(() => reusedExecutor.prepare(privateExecutionInput, privateExecutionOptions), {
+    code: "WORLD_SIMULATION_PRIVATE_RETRIEVAL_PROVIDER_FAILED",
+  });
+  assert.equal(reusedContextClosed, 1);
+  const afterExecutor = await getWorldSimulationState(session.world_simulation_session_id, { fixtureRoot });
+  assert.equal(afterExecutor.revision, beforeReplay.revision);
+  assert.equal(afterExecutor.state_hash, beforeReplay.state_hash);
 
   nativeLoopVerified = true;
 } finally {

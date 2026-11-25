@@ -156,3 +156,14 @@ Further inspection:
 - This slice rejects private replay request/response envelopes and raw recovery stage views nested in public decision input before storing a prepared round. Direct parent and IPC negative cases verify no current decision or private content is returned; ordinary action preparation still proceeds. This is a narrow defense-in-depth guard, not general sanitization or proof of model-context isolation.
 - Native learned-dialogue special-case recovery is not a general recovery policy. Do not substitute it, always-recover behavior, or a dummy failure for general retrieval.
 - Next executable boundary: define an engine-owned, separately isolated recovery executor and a content-safe projection for other stage decisions. The existing private replay helper supplies stage identity and transcript validation. No public schema expansion or adoption until that route is demonstrated end to end. C7-A wider semantic inventory remains open.
+
+
+## C7-B private World preparation executor — 2026-11-25
+
+PR #97 ([CI 45356232668](https://github.com/day2561124-art/wRITE/actions/runs/45356232668)) and PR #98 ([CI 45358151235](https://github.com/day2561124-art/wRITE/actions/runs/45358151235)) each passed all six executed jobs and were merged at `794f20716b8ebeace1e424ee084525d8cd8162d6` and `c5a4bb8b5f1e969f55655de13501fe47764ad26b`. Integrated main full regression is separate.
+
+The private World preparation entry validates the actual committed frontier before and after each checkpoint. The existing Character Runtime Manager handles current-mind/action preparation and committed experience, but has no general independent Phase63C recovery-model provider. The legacy neural memory retriever is not a replacement for V3.
+
+This slice adds an engine-private host executor over that checkpoint entry. The host must explicitly supply a stage-context factory; each pending request acquires a distinct context object, sends only the current trusted stage view, binds the response to the exact request, and closes the context before admitting another stage. Missing provider, provider failure, reuse and close failure must not become cognitive failure or a completed turn. The existing kernel remains the authority on memory materialization and stage semantics.
+
+This lifecycle contract is not a security sandbox or model-context attestation. The test backend is deterministic and not a model. The formal/public action conversation must never be used as the trusted recovery context. Before public adoption, establish a real host-owned backend with independent model-context lifecycle, confirm its data retention/logging boundaries, and integrate the private transcript with parent reservation/repreparation without re-running resolved stages or weakening current deliberation authority. No new public MCP tools or automatic recall policy are installed by this slice.
