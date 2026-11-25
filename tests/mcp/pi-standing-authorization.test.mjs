@@ -185,7 +185,10 @@ test("explicit nonexpiring policy survives time and restart, but never revocatio
   await assert.rejects(f.adapt(source("wrong-principal"), { ...authentication, principal: "other" }),
     { code: "PERMISSION_DENIED" });
   f.contexts.set(first.workspace_id, { ...first, healthy: false });
-  await assert.rejects(f.adapt(source("unhealthy")), { code: "PERMISSION_DENIED" });
+  // Ingress rejects an unhealthy workspace before policy binding; the reader
+  // independently refuses an already-bound intent at the dispatch boundary.
+  await assert.rejects(f.adapt(source("unhealthy")), { code: "WORKSPACE_IDENTITY_MISMATCH" });
+  await assert.rejects(f.reader().authorize(after), { code: "PERMISSION_DENIED" });
   f.contexts.set(first.workspace_id, first);
   await f.controller().submit(after, { authentication });
   await f.publisher.revoke(issued.policy_id);
