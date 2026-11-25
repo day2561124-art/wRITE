@@ -1407,7 +1407,7 @@ assert.deepEqual(
 );
 assert.deepEqual(
   Object.keys(publicToolMap.get("chatgpt_bridge_submit_world_character_action")?.inputSchema?.properties ?? {}).sort(),
-  ["action_id", "decision_handle", "goal_context_token", "goal_intents", "plan_context_token", "plan_intents", "prepared_turn_handle", "reject_all"],
+  ["action_id", "decision_handle", "goal_context_token", "goal_intents", "plan_context_token", "plan_intents", "prepared_turn_handle", "reject_all", "request_subjective_claim_interpretation"],
 );
 assert.deepEqual(
   Object.keys(publicToolMap.get("chatgpt_bridge_submit_world_character_deliberation")?.inputSchema?.properties ?? {}).sort(),
