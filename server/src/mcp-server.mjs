@@ -1,4 +1,4 @@
-import { formalClaimResponseProperties } from "./world-simulation-post-encoding-claim-continuation-service.mjs";
+import { formalClaimResponseProperties, formalClaimRelationResponseProperties } from "./world-simulation-post-encoding-claim-continuation-service.mjs";
 import { formalGoalPlanIntentProperties } from "./world-simulation-formal-goal-plan-intent-contract.mjs";
 import {loadTRPGGMBridge,trpgPublicToolDefinition,createWorkbenchTransportBoundary,trpgGatewayFailureCode} from './mcp-trpg-gm-bridge.mjs';
 import { fingerprintMcpMutationRequest, normalizeMcpReconciliationKey, MCP_RECONCILIATION_KEY_PATTERN_SOURCE } from "./mcp-operation-reconciliation-context.mjs";
@@ -3455,7 +3455,7 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_submit_world_character_deliberation",
-    description: "[low-risk-write] Submit one current bounded Character Brain experiential-deliberation or post-encoding subjective claim response. For post_encoding_subjective_claim, use only claim_context_token and claim_intents citing the current observer's encoded evidence; the server resumes its frozen resolution once. The current decision declares exactly which stage-specific response field is accepted (Phase76D recall refs, Phase76E transfer mappings, Phase79B qualitative preferences, or Phase79F/J evidence-backed preference revisions). The server validates every ref against the bounded decision, then reprepares the same uncommitted world snapshot. It cannot select an action, author world truth, or provide numeric utility/confidence/probability/reward.",
+    description: "[low-risk-write] Submit one current bounded Character Brain experiential-deliberation or post-encoding subjective claim response. For post_encoding_subjective_claim, use only claim_context_token and claim_intents citing the current observer's encoded evidence; the server resumes its frozen resolution once. For post_encoding_subjective_claim_relation, use only relation_context_token and relation_intents (challenges or supersedes using current and prior same-character claim tokens). The current decision declares exactly which stage-specific response field is accepted (Phase76D recall refs, Phase76E transfer mappings, Phase79B qualitative preferences, or Phase79F/J evidence-backed preference revisions). The server validates every ref against the bounded decision, then reprepares the same uncommitted world snapshot. It cannot select an action, author world truth, or provide numeric utility/confidence/probability/reward.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
       prepared_turn_handle: {
@@ -3471,6 +3471,7 @@ const toolDefinitions = [
         additionalProperties: false,
         properties: {
           ...formalClaimResponseProperties,
+          ...formalClaimRelationResponseProperties,
           activated_semantic_refs: {
             type: "array",
             maxItems: 64,
@@ -3551,7 +3552,7 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_submit_world_character_action",
-    description: "[low-risk-write] Submit exactly one current action-selection decision to the parent-process prepared-turn broker. Requires opaque prepared/decision handles and either one existing action_id or reject_all=true; optional explicit goal/plan intents must use the current observer-scoped context and source tokens. Set request_subjective_claim_interpretation=true only if the character explicitly wants to interpret its newly encoded subjective experience after action execution. It cannot be used during Phase79M impasse deliberation and cannot author an action object, outcome, state transition, or commit decision.",
+    description: "[low-risk-write] Submit exactly one current action-selection decision to the parent-process prepared-turn broker. Requires opaque prepared/decision handles and either one existing action_id or reject_all=true; optional explicit goal/plan intents must use the current observer-scoped context and source tokens. Set request_subjective_claim_interpretation=true only if the character explicitly wants to interpret its newly encoded subjective experience after action execution. Set request_subjective_claim_relation_interpretation=true only to explicitly compare a new claim against admitted subjective claims. It cannot be used during Phase79M impasse deliberation and cannot author an action object, outcome, state transition, or commit decision.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
       prepared_turn_handle: {
@@ -3566,6 +3567,7 @@ const toolDefinitions = [
       reject_all: { type: "boolean" },
       ...formalGoalPlanIntentProperties,
       request_subjective_claim_interpretation: { type: "boolean" },
+      request_subjective_claim_relation_interpretation: { type: "boolean" },
     }, ["prepared_turn_handle", "decision_handle"], [{
       type: "exactlyOne",
       fields: ["action_id", "reject_all"],
