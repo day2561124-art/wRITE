@@ -1317,13 +1317,18 @@ export function createDevOperationJournalService({
     }
   }
 
-  async function verify() {
-    // The initial readiness check and the first tool call can overlap. Share the
-    // in-progress disk verification, including its live head confirmation.
+  // This private result never leaves the service without a detached copy.
+  // Narrow readers may select records before copying; all callers still
+  // participate in a fresh physical verification with live head confirmation.
+  async function verifyShared() {
     verificationInFlight ??= verifyStableSnapshot().finally(() => {
       verificationInFlight = null;
     });
-    return structuredClone(await verificationInFlight);
+    return verificationInFlight;
+  }
+
+  async function verify() {
+    return structuredClone(await verifyShared());
   }
 
   async function append(input, {beforeAppend} = {}) {
@@ -1499,7 +1504,8 @@ export function createDevOperationJournalService({
   }
 
   async function readProductionRoutes() {
-    return (await verify()).events.filter(event => event.operation_type === "pi_production_route" && event.stage === "operation_completed");
+    return structuredClone((await verifyShared()).events.filter(event =>
+      event.operation_type === "pi_production_route" && event.stage === "operation_completed"));
   }
 
   // Route decisions reuse the Development Journal append lock and durable hash chain.
@@ -1555,7 +1561,7 @@ export function createDevOperationJournalService({
   }
 
   async function readExecutionProjections() {
-    return executionProjectionEvents((await verify()).events);
+    return structuredClone(executionProjectionEvents((await verifyShared()).events));
   }
 
   // STARTED + COMPLETED share the existing append lock and one head publication.
