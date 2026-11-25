@@ -16596,6 +16596,99 @@ function readWorldSimulationTimeCeiling(options) {
   return Date.parse(value);
 }
 
+// Engine-owned post-encoding resolver. Both turn transports must use the
+// same runtime, exact snapshot and one-shot source-token admission.
+function buildPostEncodingClaimResolver({
+  prepared, claimCharacters, characterRuntimeManager, interpretClaim, options, expectedSnapshot,
+}) {
+  return async (resolverView, stagedWorldState) => {
+    const proposals = [];
+    const fail = (message) => {
+      const error = new Error(message);
+      error.code = "WORLD_SIMULATION_NATIVE_SUBJECTIVE_CLAIM_INTENT_INVALID";
+      throw error;
+    };
+    for (const character of claimCharacters) {
+      const claimContext = createWorldSimulationSubjectiveClaimIntentContext({
+        prepared, stagedWorldState, resolverView, character,
+      });
+      if (!claimContext) continue;
+      const view = claimContext.characterView();
+      // Reuse the same serialized Character Runtime and its actual ingress
+      // revision/consciousness guards. The new memory is staged, not yet a
+      // committed World fact or a chance to reselect the preceding action.
+      let delivered = false;
+      let completed = false;
+      let reply;
+      await runAdmittedWorldSimulationCharacterTurn(characterRuntimeManager, {
+        world_simulation_session_id: prepared.world_simulation_session_id,
+        character,
+        brain_input: {
+          character, native_subjective_claim_decision: view,
+          boundaries: {
+            native_subjective_claim_interpretation_only: true,
+            world_truth_exposed: false, action_selection_authority: false,
+            durable_write_authority: false, world_mutation_authority: false,
+            source_memory_ids_exposed: false,
+          },
+        },
+        characterBrain: async packet => {
+          if (delivered) fail("Duplicate Native subjective interpretation callback.");
+          delivered = true;
+          reply = await interpretClaim({
+            character, native_subjective_claim_decision: cloneJson(view),
+            boundaries: {
+              native_subjective_claim_interpretation_only: true,
+              world_truth_exposed: false, action_selection_authority: false,
+              durable_write_authority: false, world_mutation_authority: false,
+              source_memory_ids_exposed: false,
+            },
+          });
+          completed = true;
+          return reply;
+        },
+      }, options, expectedSnapshot);
+      if (!completed) fail("Native subjective interpretation callback was not completed.");
+      proposals.push(...claimContext.admit(reply));
+    }
+    return proposals;
+  };
+}
+
+// Trusted internal adapter for transports that have already frozen every
+// action. This is not a public MCP input or a caller callback ingress.
+// Causal execution and commitment remain in the single canonical resolve.
+export async function resolveWorldSimulationTurnWithPostEncodingClaimIntents(
+  prepared, selectedActions, { claimCharacters = [], interpretClaim } = {}, options = {},
+) {
+  if (!Array.isArray(claimCharacters) || new Set(claimCharacters).size !== claimCharacters.length
+      || claimCharacters.some(character => !prepared?.decision_packets?.some(packet => packet.character === character))) {
+    const error = new Error("Post-encoding interpretation must be explicitly requested by prepared characters.");
+    error.code = "WORLD_SIMULATION_NATIVE_SUBJECTIVE_CLAIM_INTENT_INVALID";
+    throw error;
+  }
+  if (!claimCharacters.length) return resolveWorldSimulationTurn(prepared, selectedActions, options);
+  if (typeof interpretClaim !== "function" || typeof options.subjectiveClaimResolver === "function"
+      || typeof options[nativeSubjectiveClaimHandoff] === "function") {
+    const error = new Error("Post-encoding claim interpretation requires one trusted interpreter.");
+    error.code = "WORLD_SIMULATION_NATIVE_SUBJECTIVE_CLAIM_RESOLVER_CONFLICT";
+    throw error;
+  }
+  const expectedSnapshot = await getWorldSimulationState(prepared.world_simulation_session_id, options);
+  if (expectedSnapshot.revision !== prepared.state_revision || expectedSnapshot.state_hash !== prepared.world_state_hash) {
+    const error = new Error("Post-encoding interpretation requires the prepared committed snapshot.");
+    error.code = "WORLD_SIMULATION_PREPARED_TURN_STALE";
+    throw error;
+  }
+  const characterRuntimeManager = options.characterRuntimeManager ?? defaultWorldSimulationCharacterRuntimeManager;
+  const resolveClaims = buildPostEncodingClaimResolver({
+    prepared, claimCharacters: [...claimCharacters], characterRuntimeManager, interpretClaim, options, expectedSnapshot,
+  });
+  return resolveWorldSimulationTurn(prepared, selectedActions, {
+    ...options, characterRuntimeManager, [nativeSubjectiveClaimHandoff]: resolveClaims,
+  });
+}
+
 export async function runWorldSimulationTurn(input = {}, options = {}) {
   readWorldSimulationTimeCeiling(options);
   if (typeof options.characterBrain !== "function") {
@@ -17105,58 +17198,10 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
     error.code = "WORLD_SIMULATION_NATIVE_SUBJECTIVE_CLAIM_RESOLVER_CONFLICT";
     throw error;
   }
-  const resolveNativeClaims = async (resolverView, stagedWorldState) => {
-    const proposals = [];
-    const fail = (message) => {
-      const error = new Error(message);
-      error.code = "WORLD_SIMULATION_NATIVE_SUBJECTIVE_CLAIM_INTENT_INVALID";
-      throw error;
-    };
-    for (const character of nativeClaimCharacters) {
-      const claimContext = createWorldSimulationSubjectiveClaimIntentContext({
-        prepared, stagedWorldState, resolverView, character,
-      });
-      if (!claimContext) continue;
-      const view = claimContext.characterView();
-      // Reuse the same serialized Character Runtime and its actual ingress
-      // revision/consciousness guards. The new memory is staged, not yet a
-      // committed World fact or a chance to reselect the preceding action.
-      let delivered = false;
-      let completed = false;
-      let reply;
-      await runAdmittedWorldSimulationCharacterTurn(characterRuntimeManager, {
-        world_simulation_session_id: prepared.world_simulation_session_id,
-        character,
-        brain_input: {
-          character, native_subjective_claim_decision: view,
-          boundaries: {
-            native_subjective_claim_interpretation_only: true,
-            world_truth_exposed: false, action_selection_authority: false,
-            durable_write_authority: false, world_mutation_authority: false,
-            source_memory_ids_exposed: false,
-          },
-        },
-        characterBrain: async packet => {
-          if (delivered) fail("Duplicate Native subjective interpretation callback.");
-          delivered = true;
-          reply = await options.characterBrain({
-            character, native_subjective_claim_decision: cloneJson(view),
-            boundaries: {
-              native_subjective_claim_interpretation_only: true,
-              world_truth_exposed: false, action_selection_authority: false,
-              durable_write_authority: false, world_mutation_authority: false,
-              source_memory_ids_exposed: false,
-            },
-          });
-          completed = true;
-          return reply;
-        },
-      }, options, nativeGoalSnapshot);
-      if (!completed) fail("Native subjective interpretation callback was not completed.");
-      proposals.push(...claimContext.admit(reply));
-    }
-    return proposals;
-  };
+  const resolveNativeClaims = buildPostEncodingClaimResolver({
+    prepared, claimCharacters: nativeClaimCharacters, characterRuntimeManager,
+    interpretClaim: options.characterBrain, options, expectedSnapshot: nativeGoalSnapshot,
+  });
   return resolveWorldSimulationTurn(
     prepared,
     selections,
