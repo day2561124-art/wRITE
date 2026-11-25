@@ -1,3 +1,4 @@
+import { validateWorldSimulationExplicitAppraisalReply } from "./world-simulation-affective-appraisal-intent-contract.mjs";
 import { createWorldSimulationSubjectiveClaimRelationIntentContext } from "./world-simulation-subjective-claim-relation-intent-service.mjs";
 import { createWorldSimulationSubjectiveClaimIntentContext } from "./world-simulation-subjective-claim-intent-service.mjs";
 import { analyzeObserverDialogueLearning, learnedDialogueMemoryStage, observerDialogueReferentDescriptor,
@@ -10609,6 +10610,7 @@ async function resolveSubjectiveMeansFeasibilityInterpretations(
 // Module-private transport: only a final Native Brain reply can opt in.
 // Ordinary direct callers continue to use the existing Phase65 resolver.
 const nativeSubjectiveClaimHandoff = Symbol("native_subjective_claim_handoff");
+const nativeAffectiveAppraisalHandoff = Symbol("native_affective_appraisal_handoff");
 const nativeSubjectiveClaimRelationHandoff = Symbol("native_subjective_claim_relation_handoff");
 const postEncodingCommitPermit = Symbol("post_encoding_commit_permit");
 
@@ -11909,7 +11911,8 @@ export async function resolveWorldSimulationTurn(
   // The resolver sees one character's own goal/experience context per call.
   // The record remains speculative until the existing atomic world commit.
   let affectiveAppraisalRecord = null;
-  if (typeof options.affectiveAppraisalResolver === "function") {
+  const nativeAppraisalResolver = options[nativeAffectiveAppraisalHandoff];
+  if (typeof nativeAppraisalResolver === "function" || typeof options.affectiveAppraisalResolver === "function") {
     const contextBundle = buildWorldSimulationActionAwareAffectiveContexts({
       world_simulation_session_id: sessionId, state_revision: snapshot.revision, world_state_hash: snapshot.state_hash,
       selected_action_intents: selected, subjective_choice_commitment_receipts: subjectiveChoiceCommitmentReceipts,
@@ -11919,7 +11922,9 @@ export async function resolveWorldSimulationTurn(
     });
     const decisions = [];
     for (const view of worldSimulationAffectiveAppraisalResolverViews(contextBundle)) {
-      const raw = await options.affectiveAppraisalResolver(cloneJson(view));
+      const raw = typeof nativeAppraisalResolver === "function"
+        ? await nativeAppraisalResolver(cloneJson(view), causalResolution.next_world_state)
+        : await options.affectiveAppraisalResolver(cloneJson(view));
       if (!Array.isArray(raw) || raw.some((entry) => entry?.context_ref !== view.context_ref)) {
         const error = new Error("affectiveAppraisalResolver must return decisions for its own character context.");
         error.code = "WORLD_SIMULATION_AFFECTIVE_APPRAISAL_INVALID";
@@ -16256,7 +16261,7 @@ export async function resolveWorldSimulationTurn(
         true,
     },
     coping_intentions: { recorded_count: copingIntentionCommitments.records.length, effectiveness_established: false },
-    affective_appraisal: { resolver_used: typeof options.affectiveAppraisalResolver === "function",
+    affective_appraisal: { resolver_used: typeof options.affectiveAppraisalResolver === "function" || typeof options[nativeAffectiveAppraisalHandoff] === "function",
       appraisal_count: affectiveAppraisalRecord?.projection.appraisals.length ?? 0,
       same_turn_character_feedback_allowed: false, current_mood_established: false },
     memory_interpretation_turn: cloneJson(memoryInterpretationTurn.summary),
@@ -16712,13 +16717,49 @@ function buildPostEncodingClaimRelationResolver({
   };
 }
 
+// Use the exact Phase86D bounded observer view, after outcome and hard
+// consistency checks, with the same consciousness/committed-frontier guard.
+function buildPostOutcomeAffectiveAppraisalResolver({
+  prepared, appraisalCharacters, characterRuntimeManager, interpretClaim, options, expectedSnapshot,
+}) {
+  return async (view, stagedWorldState) => {
+    if (!appraisalCharacters.includes(view.character)
+        || !projectWorldSimulationConsciousCognitionAdmission(stagedWorldState, view.character).admitted) return [];
+    const packet = () => ({
+      character: view.character,
+      native_affective_appraisal_decision: cloneJson(view),
+      boundaries: {
+        native_affective_appraisal_only: true, world_truth_exposed: false,
+        durable_write_authority: false, world_mutation_authority: false,
+        action_selection_authority: false, numeric_intensity_allowed: false,
+      },
+    });
+    let delivered = false, completed = false, reply;
+    const fail = () => { const error = new Error("Invalid explicit appraisal callback."); error.code = "WORLD_SIMULATION_AFFECTIVE_APPRAISAL_INVALID"; throw error; };
+    await runAdmittedWorldSimulationCharacterTurn(characterRuntimeManager, {
+      world_simulation_session_id: prepared.world_simulation_session_id,
+      character: view.character, brain_input: packet(),
+      characterBrain: async () => {
+        if (delivered) fail();
+        delivered = true;
+        reply = await interpretClaim(packet());
+        completed = true;
+        return reply;
+      },
+    }, options, expectedSnapshot);
+    if (!completed) fail();
+    if (reply == null || reply === "reject_all") return [];
+    return validateWorldSimulationExplicitAppraisalReply(reply, view).appraisal_decisions;
+  };
+}
+
 // Trusted internal adapter for transports that have already frozen every
 // action. This is not a public MCP input or a caller callback ingress.
 // Causal execution and commitment remain in the single canonical resolve.
 export async function resolveWorldSimulationTurnWithPostEncodingClaimIntents(
-  prepared, selectedActions, { claimCharacters = [], relationCharacters = [], interpretClaim, permitCommit } = {}, options = {},
+  prepared, selectedActions, { claimCharacters = [], relationCharacters = [], appraisalCharacters = [], interpretClaim, permitCommit } = {}, options = {},
 ) {
-  if ([claimCharacters, relationCharacters].some(characters => !Array.isArray(characters)
+  if ([claimCharacters, relationCharacters, appraisalCharacters].some(characters => !Array.isArray(characters)
       || new Set(characters).size !== characters.length
       || characters.some(character => !prepared?.decision_packets?.some(packet => packet.character === character)))) {
     const error = new Error("Post-encoding interpretation must be explicitly requested by prepared characters.");
@@ -16731,10 +16772,11 @@ export async function resolveWorldSimulationTurnWithPostEncodingClaimIntents(
     throw error;
   }
   const commitOptions = permitCommit ? { [postEncodingCommitPermit]: permitCommit } : {};
-  if (!claimCharacters.length && !relationCharacters.length) return resolveWorldSimulationTurn(prepared, selectedActions, { ...options, ...commitOptions });
+  if (!claimCharacters.length && !relationCharacters.length && !appraisalCharacters.length) return resolveWorldSimulationTurn(prepared, selectedActions, { ...options, ...commitOptions });
   if (typeof interpretClaim !== "function"
       || (claimCharacters.length && (typeof options.subjectiveClaimResolver === "function" || typeof options[nativeSubjectiveClaimHandoff] === "function"))
-      || (relationCharacters.length && (typeof options.subjectiveClaimRelationResolver === "function" || typeof options[nativeSubjectiveClaimRelationHandoff] === "function"))) {
+      || (relationCharacters.length && (typeof options.subjectiveClaimRelationResolver === "function" || typeof options[nativeSubjectiveClaimRelationHandoff] === "function"))
+      || (appraisalCharacters.length && (typeof options.affectiveAppraisalResolver === "function" || typeof options[nativeAffectiveAppraisalHandoff] === "function"))) {
     const error = new Error("Post-encoding claim interpretation requires one trusted interpreter.");
     error.code = "WORLD_SIMULATION_NATIVE_SUBJECTIVE_CLAIM_RESOLVER_CONFLICT";
     throw error;
@@ -16752,8 +16794,12 @@ export async function resolveWorldSimulationTurnWithPostEncodingClaimIntents(
   const resolveRelations = buildPostEncodingClaimRelationResolver({
     prepared, relationCharacters: [...relationCharacters], characterRuntimeManager, interpretClaim, options, expectedSnapshot,
   });
+  const resolveAppraisals = buildPostOutcomeAffectiveAppraisalResolver({
+    prepared, appraisalCharacters: [...appraisalCharacters], characterRuntimeManager, interpretClaim, options, expectedSnapshot,
+  });
   return resolveWorldSimulationTurn(prepared, selectedActions, {
     ...options, ...commitOptions, characterRuntimeManager,
+    ...(appraisalCharacters.length ? { [nativeAffectiveAppraisalHandoff]: resolveAppraisals } : {}),
     ...(claimCharacters.length ? { [nativeSubjectiveClaimHandoff]: resolveClaims } : {}),
     ...(relationCharacters.length ? { [nativeSubjectiveClaimRelationHandoff]: resolveRelations } : {}),
   });
@@ -17268,6 +17314,18 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
     error.code = "WORLD_SIMULATION_NATIVE_SUBJECTIVE_CLAIM_RESOLVER_CONFLICT";
     throw error;
   }
+  const nativeAppraisalCharacters = prepared.decision_packets
+    .map(packet => packet.character)
+    .filter(character => isObject(selections[character]) && selections[character].request_affective_appraisal === true);
+  if (nativeAppraisalCharacters.length && typeof options.affectiveAppraisalResolver === "function") {
+    const error = new Error("Native appraisal and legacy resolver cannot both author this turn.");
+    error.code = "WORLD_SIMULATION_AFFECTIVE_APPRAISAL_RESOLVER_CONFLICT";
+    throw error;
+  }
+  const resolveNativeAppraisals = buildPostOutcomeAffectiveAppraisalResolver({
+    prepared, appraisalCharacters: nativeAppraisalCharacters, characterRuntimeManager,
+    interpretClaim: options.characterBrain, options, expectedSnapshot: nativeGoalSnapshot,
+  });
   const nativeRelationCharacters = prepared.decision_packets
     .map(packet => packet.character)
     .filter(character => isObject(selections[character])
@@ -17291,6 +17349,7 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
     {
       ...options,
       [nativeSubjectiveClaimHandoff]: nativeClaimCharacters.length ? resolveNativeClaims : null,
+      [nativeAffectiveAppraisalHandoff]: nativeAppraisalCharacters.length ? resolveNativeAppraisals : null,
       [nativeSubjectiveClaimRelationHandoff]: nativeRelationCharacters.length ? resolveNativeRelations : null,
       ...(nativePlanDecisions.length
         ? { goalImplementationIntentionResolver: async () => cloneJson(nativePlanDecisions) }
