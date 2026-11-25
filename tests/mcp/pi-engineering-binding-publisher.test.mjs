@@ -86,3 +86,30 @@ test("concurrent publication is refused and malformed existing evidence is not o
   await assert.rejects(f.publisher.publish({ expected_current_sha256: null, bindings: [f.binding] }));
   assert.equal(await readFile(file, "utf8"), "{malformed");
 });
+
+test("one operator-approved binding serves successive exact-scope intents until the original grant is revoked", async t => {
+  const f = await fixture(t);
+  await f.publisher.publish({ expected_current_sha256: null, bindings: [f.binding] });
+  const first = await f.adapt(f.source, { authenticatedPrincipal: principal });
+  const secondSource = {
+    ...f.source,
+    intent_id: "binding-publisher-fixture-next",
+    requested_actions: [{ step_id: "write-next", capability: "filesystem.write",
+      input: { path: "second-fixture.txt", content: "second fixture" } }],
+  };
+  const second = await f.adapt(secondSource, { authenticatedPrincipal: principal });
+  assert.notEqual(first.intent_id, second.intent_id);
+  assert.equal(first.task_authorization_id, f.grant.task_authorization_id);
+  assert.equal(second.task_authorization_id, f.grant.task_authorization_id);
+  await f.store.authorize(first);
+  await f.store.authorize(second);
+  await assert.rejects(f.adapt({ ...secondSource, goal: "Unapproved new goal" },
+    { authenticatedPrincipal: principal }), { code: "PERMISSION_DENIED" });
+  await assert.rejects(f.adapt(secondSource, { authenticatedPrincipal: "other-principal" }),
+    { code: "PERMISSION_DENIED" });
+  await f.store.revoke(f.grant.task_authorization_id);
+  await assert.rejects(f.adapt(secondSource, { authenticatedPrincipal: principal }),
+    { code: "PERMISSION_DENIED" });
+  await assert.rejects(f.store.authorize(first), { code: "PERMISSION_DENIED" });
+  await assert.rejects(f.store.authorize(second), { code: "PERMISSION_DENIED" });
+});
