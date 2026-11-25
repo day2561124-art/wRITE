@@ -123,4 +123,6 @@ TRPG Gateway 憑證遭拒時，Nexa 會暫停該連線的 TRPG 工具並重新�
 
 工程執行入口使用 `request_kind: standing_engineering`，與一般 compact request 相同提供 intent_id、goal、workspace_id 及明確 requested_actions，不需提供政策識別碼或 task_authorization_id。服務端從可信 OAuth 驗證結果和權威工作區資料選擇唯一有效政策，產生 `standing_authorization`（政策 ID、不可變記錄摘要、驗證主體）並納入嚴格 Intent 和持久 Journal。MCP 客戶端不得自行提供此欄位，未經驗證的直接控制器 admission/execute 不能建立新常設任務。重新啟動的 worker 只能續接已有持久 admission，並在每次 dispatch 和 managed-call gate 重新驗證原政策、完整能力集合、有效期、撤銷以及工作區狀態；找不到記錄、身份不符或內容改變均拒絕，不會降級嘗試其他授權。
 
+永久政策使用 `expires_at_ms: null` 的記錄格式。舊版讀取器（包括 R9）無法驗證此格式，且即使已有撤銷記錄，仍可能在列舉時拒絕整批政策。正式核發永久政策之後，只能切換至支援此格式且經驗證的版本；撤銷政策本身不代表可以回退至舊版。不得刪除歷史核准或撤銷記錄來規避相容性檢查。
+
 正式核發與部署不是 GitHub CI 的一部分。CI 使用獨立暫存 fixture 測試多目標、多工作流與持久控制器，不能據此宣稱正式主機 ACL 或真實遠端 OAuth／worker 已完成實機驗收。
