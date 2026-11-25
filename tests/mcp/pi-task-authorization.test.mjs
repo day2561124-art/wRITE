@@ -6,6 +6,7 @@ import test from "node:test";
 import { createDevOperationJournalService } from "../../server/src/mcp-development-journal-tools.mjs";
 import { createPowerShellMaintenanceTool } from "../../server/src/mcp-powershell-maintenance-tools.mjs";
 import { adaptAuthorizedPiRequest } from "../../server/src/pi-execution-policy.mjs";
+import { adaptHostAuthorizedEngineeringRequest } from "../../server/src/pi-engineering-ingress.mjs";
 import { hashExecutionInput } from "../../server/src/pi-execution-contract.mjs";
 import { createPiProductionExecutionController } from "../../server/src/pi-production-execution-controller.mjs";
 import { createPiProductionRouteStore } from "../../server/src/pi-production-execution-route.mjs";
@@ -353,4 +354,31 @@ test("verified Journal health reports the unresolved terminal identity", async t
   assert.equal(health.ambiguous_terminal_count, 1);
   assert.equal(health.ambiguous_terminal_operations[0].terminal_event_id, terminal.journal_event_id);
   assert.equal(health.ambiguous_terminal_operations[0].operation_id, operation.operation_id);
+});
+
+test("host-bound engineering request retains durable dispatch and revocation checks", async t => {
+  const f = await fixture(t);
+  const build = (intent_id, requested_actions) => adaptHostAuthorizedEngineeringRequest({
+    request_kind: "autonomous_engineering", intent_id, goal,
+    workspace_id: context.workspace_id, requested_actions,
+  }, { resolveWorkspace: async () => workspace,
+    approvedGrantId: f.grant.task_authorization_id, authorizeTask: f.store.authorize });
+  const first = await build("host-ingress-dispatch", [
+    { ...write, input: { ...write.input, content: "fixed" } },
+    { ...verify, depends_on: ["write"] },
+  ]);
+  const done = await f.controller().execute(first);
+  assert.equal(done.state.status, "COMPLETED");
+  assert.deepEqual(f.calls, ["dev_create_file", "dev_run_tests"]);
+  assert.equal((await f.controller().execute(first)).state.operation_id, done.state.operation_id);
+  const queued = await build("host-ingress-revoked", [verify]);
+  const submitted = await f.controller().submit(queued);
+  await f.store.revoke(f.grant.task_authorization_id);
+  const restarted = f.controller();
+  const blocked = await restarted.execute(queued);
+  assert.equal(blocked.state.status, "BLOCKED");
+  assert.equal(blocked.state.last_error.code, "PERMISSION_DENIED");
+  assert.deepEqual(f.calls, ["dev_create_file", "dev_run_tests"]);
+  assert.equal((await restarted.inspect({ operation_id: submitted.state.operation_id, context })).state.status, "BLOCKED");
+  assert.equal((await f.journal.status()).chain_verified, true);
 });
