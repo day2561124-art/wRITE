@@ -5948,9 +5948,7 @@ const piStandingAuthorizationReader = createPiStandingAuthorizationReader({
   root: process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT,
   resolveWorkspace: resolveDevWorkspaceExecutionContext,
 });
-const piProductionController = createPiProductionExecutionController({
-  authorizeTask: createPiTaskPolicy({ authorizeStanding: piStandingAuthorizationReader.authorize }),
-  transport: {
+const piProductionController = createPiProductionExecutionController({ transport: {
   requestTimeoutMs:300000,longRequestTimeoutMs:8*60*60*1000,queryTimeoutMs:120000,
   callTool: params => callToolDirect(params),
   queryOperation: args => dev_workspace_get_operation(args),
@@ -5998,7 +5996,7 @@ const piProductionController = createPiProductionExecutionController({
     return piLifecycleScopeVerifier({context, step});
   },
   requestTimeoutMs: 1800000, queryTimeoutMs: 300000,
-} });
+}, authorizeTask: createPiTaskPolicy({ authorizeStanding: piStandingAuthorizationReader.authorize }) });
 async function callTool(params, authentication) {
   const name = params?.name;
   if(!workbenchTransportBoundary.isToolAllowed(name))throw new Error("GM_CONNECTION_TOOL_DENIED");
