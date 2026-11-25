@@ -291,6 +291,8 @@ const transportSource = await readFile(
   "server/src/world-simulation-formal-turn-transport-service.mjs",
   "utf8",
 );
+const resolutionSource = await readFile("server/src/world-simulation-formal-resolution-engine-service.mjs", "utf8");
+assert.match(transportSource, /runFormalWorldResolution\(acquisition, loopOptions\)/);
 const stateSource = await readFile("server/src/world-simulation-state-service.mjs", "utf8");
 
 assert.match(loopSource, /adoptWorldSimulationCounterfactualReflectionReentry/);
@@ -305,11 +307,11 @@ assert.match(transportSource, /const characterInput = buildWorldSimulationCharac
 assert.match(transportSource, /adoptWorldSimulationCounterfactualReflectionReentry/);
 assert.match(transportSource, /characterInput\.counterfactual_reflection_reentry\s*=\s*cloneJson/);
 assert.match(
-  transportSource,
+  resolutionSource,
   /counterfactualReflectionReentryProjections:\s*\n\s*acquisition\.prepared_turn\.counterfactual_reflection_reentry_projections \?\? \[\]/,
 );
 assert.match(
-  transportSource,
+  resolutionSource,
   /same-snapshot Phase81D\/81E[\s\S]*rather than recomputing cognition after[\s\S]*action submission/,
 );
 assert.match(

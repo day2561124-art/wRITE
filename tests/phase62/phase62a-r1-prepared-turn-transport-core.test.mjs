@@ -1,3 +1,4 @@
+import { createPostEncodingClaimContinuation } from "../../server/src/world-simulation-post-encoding-claim-continuation-service.mjs";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { rm } from "node:fs/promises";
@@ -21,6 +22,7 @@ import {
   prepareFormalWorldSimulationTurn,
   resolveFormalWorldSimulationTurn,
   submitFormalWorldSimulationCharacterAction,
+  submitFormalWorldSimulationCharacterDeliberation,
   worldSimulationFormalTurnTransportVersion,
 } from "../../server/src/world-simulation-formal-turn-transport-service.mjs";
 import {
@@ -620,6 +622,98 @@ try {
     }),
     (error) => error?.code === "WORLD_SIMULATION_PREPARED_TURN_NOT_READY",
   );
+
+  // Parent-owned post-encoding interpretation: actual causal action is
+  // frozen, one bounded new-memory view is returned before any World write,
+  // then a different IPC child resumes that same execution.
+  const claimBroker = createEphemeralWorldSimulationPreparedTurnBroker({
+    postEncodingOptions: options,
+  });
+  const claimSession = await beginFormalWorldSimulationSession({
+    simulation_label: "C7 Formal staged claim", seed: "c7-formal-staged-claim",
+    rules: { event_driven: true, persistent_causality: true },
+    initial_world_state: initialWorldState(),
+  }, options);
+  const claimSessionId = claimSession.world_simulation_session_id;
+  const pairA = linkedProcessPair();
+  const detachA = attachWorldSimulationPreparedTurnBrokerIpc(pairA.parentChild, claimBroker);
+  const claimOptionsA = { ...options, preparedTurnBroker: createWorldSimulationPreparedTurnBrokerIpcClient({ process_like: pairA.childProcess }) };
+  const claimPrepared = await prepareFormalWorldSimulationTurn({ world_simulation_session_id: claimSessionId }, claimOptionsA);
+  const claimHandle = claimPrepared.prepared_turn_handle;
+  const claimBefore = await getWorldSimulationState(claimSessionId, options);
+  const chosen = await submitFormalWorldSimulationCharacterAction({
+    prepared_turn_handle: claimHandle, decision_handle: claimPrepared.current_decision.decision_handle,
+    action_id: "open-gate", request_subjective_claim_interpretation: true,
+  }, claimOptionsA);
+  assert.equal(chosen.post_encoding_requested, true);
+  await assert.rejects(() => claimOptionsA.preparedTurnBroker.takeForResolution({
+    prepared_turn_handle: claimHandle,
+  }), { code: "WORLD_SIMULATION_POST_ENCODING_REQUIRED" });
+  const pending = await resolveFormalWorldSimulationTurn({ prepared_turn_handle: claimHandle }, claimOptionsA);
+  assert.equal(pending.resolution_pending, true);
+  assert.equal(pending.committed, false);
+  assert.equal(pending.current_decision.decision_kind, "post_encoding_subjective_claim");
+  const claimDecision = pending.current_decision;
+  const claimView = claimDecision.character_input.native_subjective_claim_decision;
+  assert.equal(claimView.character, actor);
+  assert.equal(claimView.world_truth_exposed, false);
+  assert.ok(claimView.memory_sources.length);
+  assert.equal(JSON.stringify(pending).includes(unretrievedSecret), false);
+  assert.equal(JSON.stringify(claimView).includes("source_memory_ref"), false);
+  assert.equal((await getWorldSimulationState(claimSessionId, options)).state_hash, claimBefore.state_hash);
+  pairA.parentChild.emit("exit");
+  detachA();
+  const pairB = linkedProcessPair();
+  const detachB = attachWorldSimulationPreparedTurnBrokerIpc(pairB.parentChild, claimBroker);
+  const claimOptionsB = { ...options, preparedTurnBroker: createWorldSimulationPreparedTurnBrokerIpcClient({ process_like: pairB.childProcess }) };
+  try {
+    const resumed = await prepareFormalWorldSimulationTurn({ world_simulation_session_id: claimSessionId }, claimOptionsB);
+    assert.equal(resumed.current_decision.decision_handle, claimDecision.decision_handle);
+    const repeated = await resolveFormalWorldSimulationTurn({ prepared_turn_handle: claimHandle }, claimOptionsB);
+    assert.equal(repeated.current_decision.decision_handle, claimDecision.decision_handle);
+    const claimInput = {
+      prepared_turn_handle: claimHandle, decision_handle: claimDecision.decision_handle,
+      deliberation_response: { claim_context_token: claimView.context_token, claim_intents: [{
+        proposition: "我經歷了門前的這次事件。",
+        evidence: [{ source_token: claimView.memory_sources[0].source_token, relation: "supports" }],
+      }] },
+    };
+    await assert.rejects(() => submitFormalWorldSimulationCharacterDeliberation({
+      ...claimInput, deliberation_response: { ...claimInput.deliberation_response, claim_context_token: "forged" },
+    }, claimOptionsB), { code: "WORLD_SIMULATION_NATIVE_SUBJECTIVE_CLAIM_INTENT_INVALID" });
+    await assert.rejects(() => submitFormalWorldSimulationCharacterAction({
+      prepared_turn_handle: claimHandle, decision_handle: claimDecision.decision_handle, reject_all: true,
+    }, claimOptionsB), { code: "WORLD_SIMULATION_PREPARED_TURN_NOT_ACCEPTING_DECISIONS" });
+    assert.equal((await getWorldSimulationState(claimSessionId, options)).state_hash, claimBefore.state_hash);
+    const committedClaim = await submitFormalWorldSimulationCharacterDeliberation(claimInput, claimOptionsB);
+    assert.equal(committedClaim.committed, true);
+    const claimAfter = await getWorldSimulationState(claimSessionId, options);
+    assert.equal(claimAfter.revision, claimBefore.revision + 1);
+    assert.equal(claimAfter.state.scenes[sceneId].doors["gate-a"].open, true);
+    assert.equal(claimAfter.state.subjective_claim_history.filter(row => row.character === actor).length, 1);
+    assert.equal(claimAfter.state.subjective_belief_revision_history.filter(row => row.character === actor).length, 1);
+    assert.equal(claimBroker.getStorageStatus().payload_reference_count, 0);
+    await assert.rejects(() => resolveFormalWorldSimulationTurn({ prepared_turn_handle: claimHandle }, claimOptionsB),
+      { code: "WORLD_SIMULATION_PREPARED_TURN_NOT_READY" });
+    await assert.rejects(() => submitFormalWorldSimulationCharacterDeliberation(claimInput, claimOptionsB));
+  } finally { detachB(); }
+
+  // A timed-out suspended resolver cannot later obtain a commit permit.
+  let cancelledPermit, expiry;
+  const expiring = createPostEncodingClaimContinuation({ leaseMs: 10, onTerminal: result => { expiry = result; } });
+  const expiredStart = expiring.start(async ({ interpretClaim, permitCommit }) => {
+    cancelledPermit = permitCommit;
+    await interpretClaim({ character: actor, native_subjective_claim_decision: {
+      character: actor, context_token: "context", memory_sources: [],
+      bounded_view_only: true, world_truth_exposed: false,
+    } });
+    return { committed: permitCommit() };
+  });
+  assert.ok((await expiredStart).decision);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(expiry.error_code, "WORLD_SIMULATION_POST_ENCODING_LEASE_EXPIRED");
+  assert.throws(() => cancelledPermit(), { code: "WORLD_SIMULATION_POST_ENCODING_LEASE_INACTIVE" });
+  assert.equal(expiring.current(), null);
 
   // Stale prepared turn is invalidated before a new preparation is created.
   const staleBroker = createEphemeralWorldSimulationPreparedTurnBroker();

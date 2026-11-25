@@ -487,6 +487,8 @@ const transportSource = await readFile(
   "server/src/world-simulation-formal-turn-transport-service.mjs",
   "utf8",
 );
+const resolutionSource = await readFile("server/src/world-simulation-formal-resolution-engine-service.mjs", "utf8");
+assert.match(transportSource, /runFormalWorldResolution\(acquisition, loopOptions\)/);
 const brokerSource = await readFile(
   "server/src/world-simulation-prepared-turn-ephemeral-broker.mjs",
   "utf8",
@@ -499,8 +501,8 @@ assert.match(loopSource, /counterfactualPreparativeRevalidationResolver/);
 assert.match(loopSource, /counterfactual_preparative_revalidation/);
 assert.match(loopSource, /counterfactualPreparativeRevalidationProjections/);
 assert.match(transportSource, /counterfactual_preparative_revalidation_resolver_views/);
-assert.match(transportSource, /counterfactualPreparativeRevalidationProjections/);
-assert.match(transportSource, /acquisition\.prepared_turn\.counterfactual_preparative_revalidation_projections/);
+assert.match(resolutionSource, /counterfactualPreparativeRevalidationProjections/);
+assert.match(resolutionSource, /acquisition\.prepared_turn\.counterfactual_preparative_revalidation_projections/);
 assert.match(brokerSource, /worldSimulationFormalImpasseDecisionKinds\.PHASE81E/);
 
 console.log(JSON.stringify({

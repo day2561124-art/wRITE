@@ -14,6 +14,8 @@ const allowedOperations = new Set([
   "prepared_turn_submit_decision",
   "prepared_turn_submit_deliberation",
   "prepared_turn_take_for_resolution",
+  "prepared_turn_start_post_encoding_resolution",
+  "prepared_turn_submit_post_encoding_claim",
   "prepared_turn_complete_resolution",
   "prepared_turn_abort_resolution",
   "prepared_turn_invalidate",
@@ -77,7 +79,7 @@ export function createWorldSimulationPreparedTurnBrokerIpcClient(options = {}) {
       const timer = setTimeout(() => {
         pending.delete(requestId);
         reject(new Error("prepared_turn_parent_broker_timeout"));
-      }, operation === "prepared_turn_prepare_private_retrieval" ? privateRetrievalTimeoutMs : timeoutMs);
+      }, ["prepared_turn_prepare_private_retrieval", "prepared_turn_start_post_encoding_resolution", "prepared_turn_submit_post_encoding_claim"].includes(operation) ? privateRetrievalTimeoutMs : timeoutMs);
       pending.set(requestId, { resolve, reject, timer });
       processLike.send({
         protocol: worldSimulationPreparedTurnBrokerProtocol,
@@ -124,10 +126,18 @@ export function createWorldSimulationPreparedTurnBrokerIpcClient(options = {}) {
       ...(payload.reject_all === true
         ? { reject_all: true }
         : { action_id: payload.action_id }),
-      ...Object.fromEntries(["goal_context_token", "goal_intents", "plan_context_token", "plan_intents"]
+      ...Object.fromEntries(["goal_context_token", "goal_intents", "plan_context_token", "plan_intents", "request_subjective_claim_interpretation"]
         .filter(key => Object.hasOwn(payload, key)).map(key => [key, payload[key]])),
     }),
     submitDeliberation: (payload) => request("prepared_turn_submit_deliberation", {
+      prepared_turn_handle: payload.prepared_turn_handle,
+      decision_handle: payload.decision_handle,
+      deliberation_response: payload.deliberation_response,
+    }),
+    startPostEncodingResolution: (payload) => request("prepared_turn_start_post_encoding_resolution", {
+      prepared_turn_handle: payload.prepared_turn_handle,
+    }),
+    submitPostEncodingClaim: (payload) => request("prepared_turn_submit_post_encoding_claim", {
       prepared_turn_handle: payload.prepared_turn_handle,
       decision_handle: payload.decision_handle,
       deliberation_response: payload.deliberation_response,
@@ -182,6 +192,8 @@ export function attachWorldSimulationPreparedTurnBrokerIpc(
       ...payload,
       preparer_owner_id: ownerId,
     }),
+    prepared_turn_start_post_encoding_resolution: (payload) => broker.startPostEncodingResolution({ prepared_turn_handle: payload.prepared_turn_handle }),
+    prepared_turn_submit_post_encoding_claim: (payload) => broker.submitPostEncodingClaim({ prepared_turn_handle: payload.prepared_turn_handle, decision_handle: payload.decision_handle, deliberation_response: payload.deliberation_response }),
     prepared_turn_take_for_resolution: (payload) => broker.takeForResolution({
       ...payload,
       resolver_owner_id: ownerId,

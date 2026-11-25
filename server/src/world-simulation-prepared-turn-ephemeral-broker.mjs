@@ -1,3 +1,4 @@
+import { createPostEncodingClaimContinuation, postEncodingClaimDecisionKind } from "./world-simulation-post-encoding-claim-continuation-service.mjs";
 import { randomBytes } from "node:crypto";
 import { bindFormalGoalPlanIntents } from "./world-simulation-formal-goal-plan-intent-contract.mjs";
 import { isPrivateWorldRetrievalExecutor } from "./world-simulation-private-retrieval-authority-service.mjs";
@@ -152,6 +153,7 @@ function assertNoPrivateRetrievalArtifact(characterInput) {
 }
 
 function publicDecision(record) {
+  if (record.post_encoding_continuation) return record.post_encoding_continuation.current();
   if (record.lifecycle_status !== "prepared") return null;
   const decision = record.decisions[record.current_decision_index];
   if (!decision || decision.status !== "pending") return null;
@@ -176,7 +178,8 @@ function publicReceipt(record) {
     invalidated_at: record.invalidated_at ?? null,
     lifecycle_status: record.lifecycle_status,
     status: record.lifecycle_status,
-    decision_round_kind: record.decision_round_kind ?? null,
+    decision_round_kind: record.post_encoding_continuation?.state() === "pending" ? postEncodingClaimDecisionKind : record.decision_round_kind ?? null,
+    post_encoding_requested: record.decisions.some(decision => decision.request_subjective_claim_interpretation === true),
     decision_count: record.decisions.length,
     submitted_decision_count:
       record.decisions.filter((decision) => decision.status === "submitted").length,
@@ -212,6 +215,8 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
       memoryRetrievalTechnicalStepBudget: options.privateRetrievalOptions.memoryRetrievalTechnicalStepBudget,
     }),
   });
+  const postEncodingOptions = Object.freeze(options.postEncodingOptions?.fixtureRoot ? { fixtureRoot: options.postEncodingOptions.fixtureRoot } : {});
+  const postEncodingLeaseMs = options.postEncodingLeaseMs ?? 120_000;
   const records = new Map();
   const activeBySession = new Map();
   const brokerStorageScope = options.storage_scope
@@ -237,6 +242,7 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
     delete record.private_retrieval_transcript;
     delete record.private_retrieval_preparation_hash;
     delete record.private_retrieval_inflight;
+    delete record.post_encoding_continuation;
     for (const decision of record.decisions) {
       delete decision.character_input;
       delete decision.candidate_action_ids;
@@ -650,6 +656,10 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
     }
 
     const goalPlanIntents = bindFormalGoalPlanIntents(input, expected.character_input);
+    if (input.request_subjective_claim_interpretation !== undefined && typeof input.request_subjective_claim_interpretation !== "boolean") {
+      fail("WORLD_SIMULATION_NATIVE_SUBJECTIVE_CLAIM_INTENT_INVALID", "Interpretation request must be a boolean.");
+    }
+    expected.request_subjective_claim_interpretation = input.request_subjective_claim_interpretation === true;
     expected.goal_plan_intents = goalPlanIntents;
     expected.status = "submitted";
     expected.selection = rejectAll
@@ -743,7 +753,8 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
     };
   }
 
-  function takeForResolution(input = {}) {
+  const postEncodingOwner = `post_encoding_parent_${randomBytes(16).toString("hex")}`;
+  function takeForResolution(input = {}, postEncodingInternal = false) {
     const record = recordForHandle(input.prepared_turn_handle);
     if (record.lifecycle_status !== "ready_to_resolve") {
       fail(
@@ -756,6 +767,9 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
         "WORLD_SIMULATION_PREPARED_TURN_NOT_READY",
         "Only a completed action-selection round may enter world resolution.",
       );
+    }
+    if (!postEncodingInternal && record.decisions.some(decision => decision.request_subjective_claim_interpretation === true)) {
+      fail("WORLD_SIMULATION_POST_ENCODING_REQUIRED", "Requested interpretation requires the parent-owned continuation.");
     }
     const ownerId = requiredString(
       input.resolver_owner_id,
@@ -782,6 +796,70 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
         .filter(decision => Object.keys(decision.goal_plan_intents ?? {}).length > 0)
         .map(decision => [decision.character, cloneJson(decision.goal_plan_intents)])),
     };
+  }
+
+  // Runs once in the broker process, not in a replaceable HTTP child.
+  // Only bounded decision packets or terminal summaries cross IPC.
+  async function startPostEncodingResolution(input = {}) {
+    const record = recordForHandle(input.prepared_turn_handle);
+    if (record.post_encoding_continuation) {
+      return await postEncodingBoundary(record, record.post_encoding_continuation);
+    }
+    if (!record.decisions.some(decision => decision.request_subjective_claim_interpretation === true)) {
+      fail("WORLD_SIMULATION_POST_ENCODING_NOT_REQUESTED", "No character requested post-encoding interpretation.");
+    }
+    const continuation = createPostEncodingClaimContinuation({
+      leaseMs: postEncodingLeaseMs,
+      onTerminal: outcome => {
+        if (record.post_encoding_continuation !== continuation) return;
+        terminal(record, outcome.result ? (outcome.result.committed ? "committed" : "blocked") : "invalidated",
+          { reason: outcome.error_code });
+      },
+    });
+    const acquisition = takeForResolution({
+      prepared_turn_handle: record.prepared_turn_handle, resolver_owner_id: postEncodingOwner,
+    }, true);
+    const claimCharacters = record.decisions.filter(decision => decision.request_subjective_claim_interpretation === true)
+      .map(decision => decision.character);
+    record.post_encoding_continuation = continuation;
+    continuation.start(async ({ interpretClaim, permitCommit }) => {
+      const { runFormalWorldResolution, summarizeFormalWorldResolution } =
+        await import("./world-simulation-formal-resolution-engine-service.mjs");
+      const result = await runFormalWorldResolution(acquisition, postEncodingOptions, {
+        claimCharacters, interpretClaim,
+        permitCommit: () => {
+          assertResolutionLease({
+            prepared_turn_handle: record.prepared_turn_handle, resolver_owner_id: postEncodingOwner,
+            resolution_token: acquisition.resolution_token,
+          });
+          return permitCommit();
+        },
+      });
+      return summarizeFormalWorldResolution(result);
+    });
+    return await postEncodingBoundary(record, continuation);
+  }
+
+  async function postEncodingBoundary(record, continuation, pendingResult) {
+    const boundary = await (pendingResult ?? continuation.wait());
+    if (boundary.terminal) {
+      if (record.post_encoding_continuation === continuation) {
+        terminal(record, boundary.terminal.result
+          ? (boundary.terminal.result.committed ? "committed" : "blocked")
+          : "invalidated", { reason: boundary.terminal.error_code });
+      }
+      if (boundary.terminal.error_code) fail(boundary.terminal.error_code, "Post-encoding resolution failed.");
+      return { receipt: publicReceipt(record), result: boundary.terminal.result };
+    }
+    return { receipt: publicReceipt(record), result: null };
+  }
+
+  async function submitPostEncodingClaim(input = {}) {
+    const record = recordForHandle(input.prepared_turn_handle);
+    const continuation = record.post_encoding_continuation;
+    if (!continuation) fail("WORLD_SIMULATION_POST_ENCODING_LEASE_INACTIVE", "No active post-encoding decision.");
+    return await postEncodingBoundary(record, continuation,
+      continuation.submit(input.decision_handle, input.deliberation_response));
   }
 
   function assertResolutionLease(input) {
@@ -829,6 +907,10 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
   function invalidate(input = {}) {
     const record = recordForHandle(input.prepared_turn_handle);
     if (terminalStatuses.has(record.lifecycle_status)) return publicReceipt(record);
+    if (record.post_encoding_continuation) {
+      record.post_encoding_continuation.cancel(input.reason ?? "invalidated_by_transport_core");
+      return publicReceipt(record);
+    }
     return terminal(record, "invalidated", {
       reason: input.reason ?? "invalidated_by_transport_core",
     });
@@ -873,7 +955,9 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
     getActiveReceipt,
     submitDecision,
     submitDeliberation,
-    takeForResolution,
+    takeForResolution: input => takeForResolution(input),
+    startPostEncodingResolution,
+    submitPostEncodingClaim,
     completeResolution,
     abortResolution,
     invalidate,
