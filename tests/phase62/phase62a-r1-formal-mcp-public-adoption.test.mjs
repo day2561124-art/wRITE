@@ -485,6 +485,8 @@ try {
     ).sort(),
     [
       "activated_semantic_refs",
+      "claim_context_token",
+      "claim_intents",
       "preference_decisions",
       "preference_revisions",
       "transfer_mappings",
@@ -507,6 +509,7 @@ try {
       "plan_intents",
       "prepared_turn_handle",
       "reject_all",
+      "request_subjective_claim_interpretation",
     ],
   );
   assert.equal(submitSchema.properties.goal_intents.maxItems, 8);
