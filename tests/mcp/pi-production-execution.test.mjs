@@ -4,6 +4,7 @@ import test from "node:test";
 import "./pi-execution-policy.test.mjs";
 import "./pi-task-authorization.test.mjs";
 import "./pi-task-grant-boundary.test.mjs";
+import "./pi-engineering-ingress.test.mjs";
 import "./pi-production-async-dispatch.test.mjs";
 import {mkdtemp,rm,readFile} from "node:fs/promises";
 import os from "node:os";
