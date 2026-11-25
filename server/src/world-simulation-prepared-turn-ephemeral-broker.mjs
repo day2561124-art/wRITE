@@ -153,7 +153,8 @@ function assertNoPrivateRetrievalArtifact(characterInput) {
 }
 
 const requestsPostEncoding = decision => decision.request_subjective_claim_interpretation === true
-  || decision.request_subjective_claim_relation_interpretation === true;
+  || decision.request_subjective_claim_relation_interpretation === true
+  || decision.request_affective_appraisal === true;
 
 function publicDecision(record) {
   if (record.post_encoding_continuation) return record.post_encoding_continuation.current();
@@ -665,6 +666,10 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
     if (input.request_subjective_claim_relation_interpretation !== undefined && typeof input.request_subjective_claim_relation_interpretation !== "boolean") {
       fail("WORLD_SIMULATION_NATIVE_SUBJECTIVE_CLAIM_RELATION_INTENT_INVALID", "Relation interpretation request must be a boolean.");
     }
+    if (input.request_affective_appraisal !== undefined && typeof input.request_affective_appraisal !== "boolean") {
+      fail("WORLD_SIMULATION_AFFECTIVE_APPRAISAL_INVALID", "Appraisal request must be a boolean.");
+    }
+    expected.request_affective_appraisal = input.request_affective_appraisal === true;
     expected.request_subjective_claim_interpretation = input.request_subjective_claim_interpretation === true;
     expected.request_subjective_claim_relation_interpretation = input.request_subjective_claim_relation_interpretation === true;
     expected.goal_plan_intents = goalPlanIntents;
@@ -830,12 +835,14 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
       .map(decision => decision.character);
     const relationCharacters = record.decisions.filter(decision => decision.request_subjective_claim_relation_interpretation === true)
       .map(decision => decision.character);
+    const appraisalCharacters = record.decisions.filter(decision => decision.request_affective_appraisal === true)
+      .map(decision => decision.character);
     record.post_encoding_continuation = continuation;
     continuation.start(async ({ interpretClaim, permitCommit }) => {
       const { runFormalWorldResolution, summarizeFormalWorldResolution } =
         await import("./world-simulation-formal-resolution-engine-service.mjs");
       const result = await runFormalWorldResolution(acquisition, postEncodingOptions, {
-        claimCharacters, relationCharacters, interpretClaim,
+        claimCharacters, relationCharacters, appraisalCharacters, interpretClaim,
         permitCommit: () => {
           assertResolutionLease({
             prepared_turn_handle: record.prepared_turn_handle, resolver_owner_id: postEncodingOwner,
