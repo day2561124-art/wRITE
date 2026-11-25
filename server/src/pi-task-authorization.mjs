@@ -12,6 +12,13 @@ const allowed = new Set([
 const maxRecordBytes = 16 * 1024;
 const unconfinedShell = new Set(["host.powershell", "workspace.powershell"]);
 
+// This is only the task-grant layer. A false result does not authorize execution:
+// the strict intent contract, dispatch, workspace and tool-specific gates still apply.
+export function requiresPiTaskGrant(capability) {
+  return unconfinedShell.has(capability)
+    || (allowed.has(capability) && capabilityDefinition(capability).effect);
+}
+
 function denied() {
   throw Object.assign(new Error("PERMISSION_DENIED"), { code: "PERMISSION_DENIED" });
 }
@@ -147,7 +154,6 @@ export function createPiTaskPolicy({ store = createPiTaskAuthorizationStore({
 }), required = process.env.NEXA_PI_REQUIRE_TASK_AUTHORIZATION === "1" } = {}) {
   return async function authorizeTask(intent, actions = intent.requested_actions) {
     if (intent.task_authorization_id !== undefined) return store.authorize(intent, actions);
-    if (required && actions.some(action => unconfinedShell.has(action.capability)
-      || (allowed.has(action.capability) && capabilityDefinition(action.capability).effect))) denied();
+    if (required && actions.some(action => requiresPiTaskGrant(action.capability))) denied();
   };
 }

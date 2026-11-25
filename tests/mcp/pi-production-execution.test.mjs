@@ -3,6 +3,11 @@ import test from "node:test";
 // Keep policy regressions in the existing Pi production test entrypoint.
 import "./pi-execution-policy.test.mjs";
 import "./pi-task-authorization.test.mjs";
+import "./pi-task-grant-boundary.test.mjs";
+import "./pi-engineering-ingress.test.mjs";
+import "./pi-standing-policy-review.test.mjs";
+import "./pi-standing-policy-evidence.test.mjs";
+import "./pi-engineering-binding-publisher.test.mjs";
 import "./pi-production-async-dispatch.test.mjs";
 import {mkdtemp,rm,readFile} from "node:fs/promises";
 import os from "node:os";

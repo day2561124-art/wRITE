@@ -174,7 +174,9 @@ import {
 } from "./mcp-development-test-tools.mjs";
 import { createPiProductionRouteStore } from "./pi-production-execution-route.mjs";
 import { createPiProductionExecutionController, guardPiDirectExecution } from "./pi-production-execution-controller.mjs";
-import { adaptAuthorizedPiRequest } from "./pi-execution-policy.mjs";
+import { adaptPiEngineeringIngress } from "./pi-engineering-ingress.mjs";
+import { createPiEngineeringApprovalSource, loadPiEngineeringApprovalBindings } from "./pi-engineering-approval-source.mjs";
+import { createPiTaskAuthorizationStore } from "./pi-task-authorization.mjs";
 import { createPiLifecycleScopeVerifier } from "./pi-lifecycle-scope.mjs";
 import { dev_pi_runtime_status, dev_pi_execute_readonly } from "./mcp-pi-agent-tools.mjs";
 import { PI_READ_ONLY_LIMITS } from "./pi-codemode-bridge.mjs";
@@ -1180,7 +1182,7 @@ function devAdditionalFilesystemAuditChanges(tool, result) {
   }
 }
 
-async function auditedToolCall(tool, args, actor) {
+async function auditedToolCall(tool, args, actor, authentication) {
   const {markIsolationBeforeDispatch}=await import('./mcp-workstream-prewrite-failure.mjs');
   const markBeforeHandler = error => markIsolationBeforeDispatch(markPowerShellPreDispatchFailure(error, tool.name));
   let before;try{before=await auditSnapshotMap();}catch(error){throw markBeforeHandler(error);}
@@ -1216,7 +1218,7 @@ async function auditedToolCall(tool, args, actor) {
     await assertPiManagedMcpCall();
     result = await traceSpan("capability.execution",()=>{
       handlerInvoked = true;
-      return tool.handler(effectiveArgs);
+      return tool.handler(effectiveArgs, tool.name === "dev_pi_execute_intent" ? authentication : undefined);
     });
   } catch (error) {
     if (!handlerInvoked) markPowerShellPreDispatchFailure(error, tool.name);
@@ -2151,17 +2153,20 @@ const toolDefinitions = [
   },
   {
     name: "dev_pi_execute_intent",
-    description: "Default engineering ingress. Routine work accepts intent_id, goal, registered isolated workspace_id, requested_actions, and the operator-issued task_authorization_id. Pi derives mechanical contract fields for autonomous_engineering. Legacy autonomous PowerShell, authorized_engineering, and full ExecutionIntent inputs remain subject to server policy. reconcile_only needs the exact operation identity and context. Duplicate intents return durable state.",
+    description: "Default engineering ingress. Routine work accepts intent_id, goal, registered isolated workspace_id, requested_actions, and the operator-issued task_authorization_id. host_approved_engineering accepts explicit requested_actions and resolves an existing operator-approved grant from the authenticated host binding when configured. Pi derives mechanical contract fields for autonomous_engineering. Legacy autonomous PowerShell, authorized_engineering, and full ExecutionIntent inputs remain subject to server policy. reconcile_only needs the exact operation identity and context. Duplicate intents return durable state.",
     risk: "high-risk-write",
     annotations: { readOnlyHint: false },
     inputSchema: baseSchema({ intent_json: { type: "string", minLength: 1, maxLength: 524288 } }, ["intent_json"]),
-    handler: async args => {
+    handler: async (args, authentication) => {
       let intent; try { intent = JSON.parse(args.intent_json); } catch { throw new Error("INVALID_EXECUTION_INTENT_JSON"); }
       if (intent?.request_kind === "reconcile_only") {
         const {request_kind,...request}=intent;
         return jsonContent(await piProductionController.reconcileOnly(request));
       }
-      intent = await adaptAuthorizedPiRequest(intent, { resolveWorkspace: resolveDevWorkspaceExecutionContext });
+      intent = await adaptPiEngineeringIngress(intent, {
+        authentication, resolveWorkspace: resolveDevWorkspaceExecutionContext,
+        approvalSource: piEngineeringApprovalSource,
+      });
       return jsonContent(await piProductionController.submit(intent));
     },
   },
@@ -5929,6 +5934,13 @@ const piLifecycleScopeVerifier = createPiLifecycleScopeVerifier({
 // The controller's default route is backed by the same authoritative Journal.
 // Retain piProductionRoute for guardPiDirectExecution below; do not substitute
 // the unified snapshot for explicitly injected custom routes.
+// The protected grant root is owned by the operator. This ingress can only
+// select pre-existing grants; it has no grant publication path.
+const piEngineeringApprovalSource = createPiEngineeringApprovalSource({
+  loadBindings: () => loadPiEngineeringApprovalBindings(process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT),
+  resolveWorkspace: resolveDevWorkspaceExecutionContext,
+  authorizeTask: createPiTaskAuthorizationStore({ root: process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT }).authorize,
+});
 const piProductionController = createPiProductionExecutionController({ transport: {
   requestTimeoutMs:300000,longRequestTimeoutMs:8*60*60*1000,queryTimeoutMs:120000,
   callTool: params => callToolDirect(params),
@@ -5978,17 +5990,17 @@ const piProductionController = createPiProductionExecutionController({ transport
   },
   requestTimeoutMs: 1800000, queryTimeoutMs: 300000,
 } });
-async function callTool(params) {
+async function callTool(params, authentication) {
   const name = params?.name;
   if(!workbenchTransportBoundary.isToolAllowed(name))throw new Error("GM_CONNECTION_TOOL_DENIED");
   if (workspaceRoutingEnabledForProfile && (workspaceAwareDeveloperToolNames.has(name) || ["dev_workspace_begin_workstream","dev_workspace_update_workstream","dev_workspace_end_workstream","dev_workspace_create_isolated","dev_workspace_create_checkpoint","dev_workspace_integrate","dev_git_push","dev_pi_execute_readonly"].includes(name))) {
     await guardPiDirectExecution({ route: piProductionRoute, tool: name, mutation: toolRegistry.get(name)?.risk !== "read", params, auditFallback: auditPiFallback, resolveWorkspace: resolveDevWorkspaceExecutionContext });
   }
   if (name === "dev_pi_execute_intent" && params?._meta?.reconciliation_key !== undefined) throw new Error("PI_INTENT_OWNS_IDEMPOTENCY");
-  return callToolDirect(params);
+  return callToolDirect(params, authentication);
 }
 
-async function callToolDirect(params) {
+async function callToolDirect(params, authentication) {
   if (!isObject(params)) {
     throw new Error("tools/call params must be an object.");
   }
@@ -6026,7 +6038,7 @@ async function callToolDirect(params) {
     const mutationArgs = args;
     // MCP metadata carries transport identity without weakening strict tool argument schemas.
     const key = normalizeMcpReconciliationKey(params._meta?.reconciliation_key);
-    if (!key) return auditedToolCall(tool, mutationArgs, actor);
+    if (!key) return auditedToolCall(tool, mutationArgs, actor, authentication);
     const {createPiReliableExecutionStore}=await import("./pi-reliable-execution-store.mjs");
     await createPiReliableExecutionStore().assertMutationAuthorized(key);
     const effectiveArgs = prepareToolArguments(tool, mutationArgs);
@@ -6049,7 +6061,7 @@ async function callToolDirect(params) {
         const context = await resolveDevWorkspaceExecutionContext({ workspace_id: mutationArgs.workspace_id }, { mutation: true });
         return { workspace_id: context.workspace_id, workstream_id: context.workstream_id };
       },
-    }, () => auditedToolCall(tool, mutationArgs, actor));
+    }, () => auditedToolCall(tool, mutationArgs, actor, authentication));
     if (!outcome.reconciled) {
       return { ...outcome.value, _meta: { ...outcome.value?._meta,
         reconciliation_key: key, operation_id: outcome.operation.operation_id } };
@@ -6135,7 +6147,7 @@ async function dispatch(message) {
 
   if (message.method === "tools/call") {
     try {
-      return makeResult(message.id, await callTool(message.params));
+      return makeResult(message.id, await callTool(message.params, authentication));
     } catch (error) {
       if (isJournalIsolationFailure(error)) {
         return makeResult(message.id, journalIsolationResult(error));
