@@ -63,6 +63,8 @@ test('actual MCP default ingress completes cold lifecycle and terminal no replay
  const environment={...process.env,MCP_TOOL_PROFILE:'chatgpt_developer',PI_POSTSEAL_WIRE_FIXTURE_ROOT:repo,
   NEXA_PI_TASK_AUTHORIZATION_ROOT:taskRoot,NEXA_PI_REQUIRE_TASK_AUTHORIZATION:'0'};
  for(const key of Object.keys(environment))if(key.startsWith('WRITER_WORKBENCH_ISOLATED_TEST_')||key==='WRITER_WORKBENCH_TEST_JOURNAL_GROUP')delete environment[key];
+ // Never inherit a configured live project or external data root into this fixture.
+ delete environment.NEXA_MANAGED_PROJECT_ROOT;delete environment.WRITE_DATA_ROOT;
  const hook=fileURLToPath(new URL('./pi-bootstrap-wire-cold.fixture.mjs',import.meta.url));
  async function connect(exit,{standing=false,proof='SYNTHETIC_STANDING_APPROVED'}={}){const transport=new StdioClientTransport({command:process.execPath,args:['--import',pathToFileURL(hook).href,path.join(repo,'server','src','mcp-server.mjs')],cwd:repo,env:{...environment,PI_POSTSEAL_WIRE_EXIT:exit?'1':'0',PI_STANDING_WIRE_FIXTURE:standing?'1':'0',NEXA_PI_REQUIRE_TASK_AUTHORIZATION:standing?'1':'0'},stderr:'pipe'});transport.stderr?.on('data',chunk=>process.stderr.write(chunk));if(standing){const send=transport.send.bind(transport);transport.send=message=>send({...message,params:{...message.params,_meta:{...message.params?._meta,workbench_http_access_token:proof,workbench_purpose:'WORKBENCH'}}});}const client=new Client({name:'pi-postseal-wire-acceptance',version:'1'});clients.push(client);await client.connect(transport);return {client,transport};}
  async function startWorker(exit,{standing=false}={}){
@@ -157,16 +159,21 @@ test('actual MCP default ingress completes cold lifecycle and terminal no replay
   assert.equal(await closed,0);
  }
  await drain(originalWorker);
- const {createPiStandingPolicyPublisher}=await import(pathToFileURL(path.join(repo,'server/src/pi-standing-authorization.mjs')).href);
- const {resolveDevWorkspaceExecutionContext}=await import(pathToFileURL(path.join(repo,'server/src/mcp-development-workstream-tools.mjs')).href);
- const publisher=createPiStandingPolicyPublisher({root:taskRoot,resolveWorkspace:resolveDevWorkspaceExecutionContext});
+ // Exercise the operator CLI in its own fixture process, rather than
+ // injecting an issuer into the runtime. The plan lives outside the repo.
+ const policyCli=async(...args)=>JSON.parse((await exec(process.execPath,
+  [path.join(repo,'scripts/manage-pi-standing-policy.mjs'),...args],
+  {cwd:repo,env:environment,windowsHide:true,shell:false,timeout:60000,maxBuffer:1024*1024})).stdout);
  const policyPlan={schema_version:1,project_id:'writer_workbench',principal:'wire-standing-operator-fixture',
   scopes:[{workspace_id:context.workspace_id,workstream_id:context.workstream_id}],
   capabilities:['filesystem.read','filesystem.patch','workspace.create_checkpoint','verification.focused','git.commit'],
   expires_at_ms:Date.now()+completionTimeoutMs+300000};
- const preview=await publisher.preview(policyPlan);
+ const planFile=path.join(root,'standing-policy-plan.json');
+ await writeFile(planFile,JSON.stringify(policyPlan));
+ const preview=await policyCli('preview',planFile);
  assert.equal(preview.publication_performed,false);
- const policy=await publisher.issue(policyPlan,preview.plan_sha256);
+ const policy=await policyCli('issue',planFile,preview.plan_sha256);
+ assert.equal(policy.publication_performed,true);
  const authenticated=await connect(false,{standing:true});
  const wrong=await connect(false,{standing:true,proof:'SYNTHETIC_STANDING_OTHER'});
  const readArgs={workspace_id:context.workspace_id,path:actions.find(a=>a.step_id==='write').input.path};
@@ -209,7 +216,7 @@ test('actual MCP default ingress completes cold lifecycle and terminal no replay
    newText:newText+'// forbidden-after-revocation\n',expectedSha256:createHash('sha256').update(newText).digest('hex')}}]};
  const queuedRevoked=await submitStanding(authenticatedAgain.client,revokedRequest);
  assert.equal(queuedRevoked.state.status,'CREATED');
- await publisher.revoke(policy.policy_id);
+ assert.equal((await policyCli('revoke',policy.policy_id)).revoked,true);
  const revocationWorker=await startWorker(false,{standing:true});
  const revoked=await waitFor(authenticatedAgain.client,queuedRevoked);
  assert.equal(revoked.state.status,'BLOCKED');
