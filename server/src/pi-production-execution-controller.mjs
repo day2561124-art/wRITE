@@ -145,6 +145,10 @@ export function createPiProductionExecutionController({journal=defaultJournal,ro
    if((await route.inspect()).mode!=="pi_default")reliableFailure("PERMISSION_DENIED");
    if(typeof authorizeDispatch!=="function")reliableFailure("DISPATCH_AUTHORITY_REQUIRED");
    await authorizeDispatch();
+   if(intent.standing_authorization===undefined)return runPiManagedMcpCall(async()=>{
+    await authorizeTask(intent,[action]);
+    return transport.callTool(params);
+   },authorizeDispatch);
    const authorizeBoundDispatch=async()=>{
     await authorizeDispatch();
     // Revalidate policy on every managed-call gate as well as initial
