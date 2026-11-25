@@ -246,7 +246,7 @@ function validateFailureRecovery(intent) {
 export function createExecutionIntent(input) {
   const intent = jsonCopy(input).value;
   fields(intent, ["schema_version", "intent_id", "goal", "context", "constraints", "requested_actions",
-    "mutation_plan", "verification", "completion_conditions", "permissions", "decision_boundaries"], ["bootstrap", "task_authorization_id"]);
+    "mutation_plan", "verification", "completion_conditions", "permissions", "decision_boundaries"], ["bootstrap", "task_authorization_id", "standing_authorization"]);
   if (intent.schema_version !== 1) fail("UNSUPPORTED_INTENT_VERSION");
   string(intent.intent_id, 128); string(intent.goal, 4096);
   fields(intent.context, ["project_id", "workstream_id", "workspace_id"]);
@@ -254,6 +254,16 @@ export function createExecutionIntent(input) {
   const bootstrap=intent.bootstrap===true;
   if (intent.task_authorization_id !== undefined && (bootstrap || typeof intent.task_authorization_id !== "string"
     || !PI_TASK_AUTHORIZATION_ID.test(intent.task_authorization_id))) fail("INVALID_TASK_AUTHORIZATION_ID");
+  if (intent.standing_authorization !== undefined) {
+    const proof = intent.standing_authorization;
+    fields(proof, ["policy_id", "policy_sha256", "principal"]);
+    if (bootstrap || intent.task_authorization_id !== undefined
+      || intent.context.workspace_id === "dev_workspace_shared_repository_v1"
+      || typeof proof.policy_id !== "string" || !/^pi_standing_[a-f0-9]{32}$/u.test(proof.policy_id)
+      || typeof proof.policy_sha256 !== "string" || !sha256Pattern.test(proof.policy_sha256)
+      || typeof proof.principal !== "string" || !proof.principal.trim()
+      || proof.principal.length > 512 || proof.principal.includes("\u0000")) fail("INVALID_STANDING_AUTHORIZATION");
+  }
   if(bootstrap && (intent.context.workstream_id!==null || intent.context.workspace_id!=="dev_workspace_shared_repository_v1")) fail("INVALID_BOOTSTRAP_CONTEXT");
   if (intent.context.project_id !== "writer_workbench" || (!bootstrap && !workstreamPattern.test(intent.context.workstream_id))
     || !workspacePattern.test(intent.context.workspace_id)) fail("INVALID_EXECUTION_CONTEXT");
@@ -261,6 +271,8 @@ export function createExecutionIntent(input) {
   if (!intent.completion_conditions.length || REQUIRED_DECISION_BOUNDARIES.some(x => !intent.decision_boundaries.includes(x))) fail("MISSING_DECISION_BOUNDARY");
   fields(intent.permissions, PERMISSIONS);
   if (PERMISSIONS.some(x => typeof intent.permissions[x] !== "boolean")) fail("INVALID_PERMISSION_MODEL");
+  if (intent.standing_authorization !== undefined
+    && ["workspace_create", "integrate", "push"].some(key => intent.permissions[key])) fail("INVALID_STANDING_AUTHORIZATION");
   if (!Array.isArray(intent.requested_actions) || !intent.requested_actions.length || intent.requested_actions.length > 100) fail("INVALID_ACTIONS");
   if (!Array.isArray(intent.mutation_plan) || intent.mutation_plan.length > 100) fail("INVALID_MUTATION_PLAN");
   const plans = new Map();

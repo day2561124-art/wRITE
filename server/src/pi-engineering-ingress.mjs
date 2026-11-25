@@ -1,4 +1,4 @@
-import { hashExecutionInput, PI_TASK_AUTHORIZATION_ID } from "./pi-execution-contract.mjs";
+import { createExecutionIntent, hashExecutionInput, PI_TASK_AUTHORIZATION_ID } from "./pi-execution-contract.mjs";
 import { adaptAuthorizedPiRequest } from "./pi-execution-policy.mjs";
 import { requiresPiTaskGrant } from "./pi-task-authorization.mjs";
 
@@ -50,9 +50,28 @@ export async function adaptHostAuthorizedEngineeringRequest(source, {
 // identity. Explicit host requests and mandatory-grant automatic binding
 // both require an already approved grant.
 export async function adaptPiEngineeringIngress(source, {
-  authentication, resolveWorkspace, approvalSource,
+  authentication, resolveWorkspace, approvalSource, standingApprovalSource,
   requireTaskAuthorization = false,
 } = {}) {
+  // Evidence is host-derived. Neither a full raw intent nor an ordinary
+  // compact envelope may supply a standing authorization claim.
+  if (source && Object.hasOwn(source, "standing_authorization")) denied();
+  if (source?.request_kind === "standing_engineering") {
+    if (authentication?.ok !== true || authentication.local !== false
+      || typeof authentication.principal !== "string" || !authentication.principal.trim()
+      || typeof standingApprovalSource !== "function"
+      || Object.hasOwn(source, "task_authorization_id") || Object.hasOwn(source, "command")
+      || !Array.isArray(source.requested_actions) || source.requested_actions.length === 0
+      || !source.requested_actions.every(action => automaticBindingCapabilities.has(action?.capability))
+      || source.requested_actions.some(action => action?.on_failure !== undefined)) denied();
+    hashExecutionInput(source);
+    const request = JSON.parse(JSON.stringify(source));
+    request.request_kind = "autonomous_engineering";
+    const intent = await adaptAuthorizedPiRequest(request, { resolveWorkspace });
+    return createExecutionIntent(await standingApprovalSource(intent, {
+      authenticatedPrincipal: authentication.principal,
+    }));
+  }
   // When task grants are mandatory, an explicit-action autonomous request
   // may reuse an independently published host binding. Never select or issue
   // new authority, silently convert a command, or fall back after denial.
