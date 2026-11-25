@@ -1,3 +1,5 @@
+import { lstat, readFile } from "node:fs/promises";
+import path from "node:path";
 import { PI_TASK_AUTHORIZATION_ID, hashExecutionInput } from "./pi-execution-contract.mjs";
 import { adaptHostAuthorizedEngineeringRequest } from "./pi-engineering-ingress.mjs";
 
@@ -73,4 +75,23 @@ export function createPiEngineeringApprovalSource({ loadBindings, resolveWorkspa
       },
     });
   };
+}
+
+// The installation's existing task-authorization directory is operator-owned.
+// This loader is read-only; it neither publishes grants nor accepts a path
+// from the MCP request. Missing or malformed data fails closed.
+export async function loadPiEngineeringApprovalBindings(root) {
+  try {
+    if (typeof root !== "string" || !path.isAbsolute(root)) denied();
+    const directory = await lstat(root);
+    if (!directory.isDirectory() || directory.isSymbolicLink()) denied();
+    const file = path.join(root, "engineering-bindings.json");
+    const record = await lstat(file);
+    if (!record.isFile() || record.isSymbolicLink() || record.size > 256 * 1024) denied();
+    const bytes = await readFile(file);
+    if (bytes.length > 256 * 1024) denied();
+    return JSON.parse(bytes.toString("utf8"));
+  } catch {
+    denied();
+  }
 }
