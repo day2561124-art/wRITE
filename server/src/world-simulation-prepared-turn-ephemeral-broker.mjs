@@ -1,4 +1,4 @@
-import { createPostEncodingClaimContinuation, postEncodingClaimDecisionKind } from "./world-simulation-post-encoding-claim-continuation-service.mjs";
+import { createPostEncodingClaimContinuation } from "./world-simulation-post-encoding-claim-continuation-service.mjs";
 import { randomBytes } from "node:crypto";
 import { bindFormalGoalPlanIntents } from "./world-simulation-formal-goal-plan-intent-contract.mjs";
 import { isPrivateWorldRetrievalExecutor } from "./world-simulation-private-retrieval-authority-service.mjs";
@@ -152,6 +152,9 @@ function assertNoPrivateRetrievalArtifact(characterInput) {
   }
 }
 
+const requestsPostEncoding = decision => decision.request_subjective_claim_interpretation === true
+  || decision.request_subjective_claim_relation_interpretation === true;
+
 function publicDecision(record) {
   if (record.post_encoding_continuation) return record.post_encoding_continuation.current();
   if (record.lifecycle_status !== "prepared") return null;
@@ -178,8 +181,8 @@ function publicReceipt(record) {
     invalidated_at: record.invalidated_at ?? null,
     lifecycle_status: record.lifecycle_status,
     status: record.lifecycle_status,
-    decision_round_kind: record.post_encoding_continuation?.state() === "pending" ? postEncodingClaimDecisionKind : record.decision_round_kind ?? null,
-    post_encoding_requested: record.decisions.some(decision => decision.request_subjective_claim_interpretation === true),
+    decision_round_kind: record.post_encoding_continuation?.current()?.decision_kind ?? record.decision_round_kind ?? null,
+    post_encoding_requested: record.decisions.some(requestsPostEncoding),
     decision_count: record.decisions.length,
     submitted_decision_count:
       record.decisions.filter((decision) => decision.status === "submitted").length,
@@ -659,7 +662,11 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
     if (input.request_subjective_claim_interpretation !== undefined && typeof input.request_subjective_claim_interpretation !== "boolean") {
       fail("WORLD_SIMULATION_NATIVE_SUBJECTIVE_CLAIM_INTENT_INVALID", "Interpretation request must be a boolean.");
     }
+    if (input.request_subjective_claim_relation_interpretation !== undefined && typeof input.request_subjective_claim_relation_interpretation !== "boolean") {
+      fail("WORLD_SIMULATION_NATIVE_SUBJECTIVE_CLAIM_RELATION_INTENT_INVALID", "Relation interpretation request must be a boolean.");
+    }
     expected.request_subjective_claim_interpretation = input.request_subjective_claim_interpretation === true;
+    expected.request_subjective_claim_relation_interpretation = input.request_subjective_claim_relation_interpretation === true;
     expected.goal_plan_intents = goalPlanIntents;
     expected.status = "submitted";
     expected.selection = rejectAll
@@ -768,7 +775,7 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
         "Only a completed action-selection round may enter world resolution.",
       );
     }
-    if (!postEncodingInternal && record.decisions.some(decision => decision.request_subjective_claim_interpretation === true)) {
+    if (!postEncodingInternal && record.decisions.some(requestsPostEncoding)) {
       fail("WORLD_SIMULATION_POST_ENCODING_REQUIRED", "Requested interpretation requires the parent-owned continuation.");
     }
     const ownerId = requiredString(
@@ -805,7 +812,7 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
     if (record.post_encoding_continuation) {
       return await postEncodingBoundary(record, record.post_encoding_continuation);
     }
-    if (!record.decisions.some(decision => decision.request_subjective_claim_interpretation === true)) {
+    if (!record.decisions.some(requestsPostEncoding)) {
       fail("WORLD_SIMULATION_POST_ENCODING_NOT_REQUESTED", "No character requested post-encoding interpretation.");
     }
     const continuation = createPostEncodingClaimContinuation({
@@ -821,12 +828,14 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
     }, true);
     const claimCharacters = record.decisions.filter(decision => decision.request_subjective_claim_interpretation === true)
       .map(decision => decision.character);
+    const relationCharacters = record.decisions.filter(decision => decision.request_subjective_claim_relation_interpretation === true)
+      .map(decision => decision.character);
     record.post_encoding_continuation = continuation;
     continuation.start(async ({ interpretClaim, permitCommit }) => {
       const { runFormalWorldResolution, summarizeFormalWorldResolution } =
         await import("./world-simulation-formal-resolution-engine-service.mjs");
       const result = await runFormalWorldResolution(acquisition, postEncodingOptions, {
-        claimCharacters, interpretClaim,
+        claimCharacters, relationCharacters, interpretClaim,
         permitCommit: () => {
           assertResolutionLease({
             prepared_turn_handle: record.prepared_turn_handle, resolver_owner_id: postEncodingOwner,
