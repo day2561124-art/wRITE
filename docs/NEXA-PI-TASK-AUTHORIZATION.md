@@ -115,7 +115,7 @@ TRPG Gateway 憑證遭拒時，Nexa 會暫停該連線的 TRPG 工具並重新�
 
 本節的正式政策與先前 review-only 模組不同。操作員以受保護的既有 grants 目錄為信任根，使用獨立工具 `scripts/manage-pi-standing-policy.mjs` 預覽、核發、列出及撤銷政策。正式服務只取得讀取及驗證能力，不具備核發權限。不提供 MCP 發行工具或由執行者自行核准的路徑。安裝前仍須獨立驗證正式程式來源、授權目錄 ACL、執行帳戶及 OAuth 主體；不得從一般使用者可寫入的候選目錄提升執行。
 
-政策計畫有精確欄位 `schema_version: 1`、`project_id: writer_workbench`、獨立確認的 `principal`、`scopes`（最多 64 筆已登錄的 `workspace_id` 與 `workstream_id` 配對）、`capabilities`、`expires_at_ms`（核發後最長 30 天）。管理者應理解：此核准涵蓋所列工作區與工作流內不同的工程目標，不限單一 goal；因此必須審核所有配對、能力和期限。未列出的工作區不會自動取得權限。
+政策計畫有精確欄位 `schema_version: 1`、`project_id: writer_workbench`、獨立確認的 `principal`、`scopes`（最多 64 筆已登錄的 `workspace_id` 與 `workstream_id` 配對）、`capabilities`、`expires_at_ms`（明確指定 `null` 表示永久有效直到撤銷；指定整數時間戳則維持核發後最長 30 天）。不得省略期限欄位，既有有限期政策不會自動變成永久政策。永久政策也必須經獨立操作員核准，且每次派送仍需重新驗證身份、記錄摘要、撤銷狀態、工作區健康與能力範圍。管理者應理解：此核准涵蓋所列工作區與工作流內不同的工程目標，不限單一 goal；因此必須審核所有配對、能力和期限。未列出的工作區不會自動取得權限。
 
 能力限定一般隔離工作區讀寫、補丁、checkpoint、指定測試及 Git status/commit。不包括短式命令、任何 shell、提權維護、工作流生命週期、完整回歸、整合、推送，亦不支援條件式 failure-recovery 分支。這些原有路徑、明確任務授權、OS 保護和額外工具確認仍維持原狀。
 
