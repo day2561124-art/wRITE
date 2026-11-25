@@ -42,16 +42,6 @@ export function createPiEngineeringBindingPublisher({ root, resolveWorkspace, au
     const snapshot = validatePiEngineeringBindingSnapshot(bindings);
     const encoded = JSON.stringify(snapshot) + "\n";
     if (Buffer.byteLength(encoded, "utf8") > 256 * 1024) fail("BINDING_MANIFEST_TOO_LARGE");
-    const scopes = new Set();
-    const principalsByGrant = new Map();
-    for (const record of snapshot) {
-      const scope = JSON.stringify([record.principal, record.workspace_id, record.workstream_id, record.goal]);
-      if (scopes.has(scope)) fail("AMBIGUOUS_BINDING");
-      scopes.add(scope);
-      const existingPrincipal = principalsByGrant.get(record.task_authorization_id);
-      if (existingPrincipal !== undefined && existingPrincipal !== record.principal) fail("AMBIGUOUS_GRANT_PRINCIPAL");
-      principalsByGrant.set(record.task_authorization_id, record.principal);
-    }
     const dir = await protectedDirectory(root);
     const target = path.join(dir, "engineering-bindings.json");
     const lock = path.join(dir, ".engineering-bindings.publish.lock");
