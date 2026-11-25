@@ -13,6 +13,7 @@ const context = {
   workspace_id: "dev_workspace_" + "a".repeat(24),
   workstream_id: "dev_workstream_20261125-010000_" + "b".repeat(12),
   workspace_type: "isolated_worktree", lifecycle_state: "active",
+  workstream_state: "active",
   healthy: true, mutation_allowed: true,
 };
 const goal = "Verify the engineering ingress fixture";
@@ -247,4 +248,28 @@ test("legacy ingress retains its existing contract and does not consult the appr
   });
   assert.equal(intent.task_authorization_id, f.grant.task_authorization_id);
   await f.store.authorize(intent);
+});
+
+test("host approval is refused for an inactive workstream or a changed authoritative context", async t => {
+  const f = await fixture(t);
+  const a = approvalFixture(f);
+  const invalid = [
+    { workstream_state: "paused" }, { workstream_state: "completed" },
+    { lifecycle_state: "verifying" }, { mutation_allowed: false },
+    { healthy: false }, { workstream_id: "dev_workstream_20261125-010000_" + "c".repeat(12) },
+  ];
+  for (const change of invalid) {
+    for (const changesAfterFirstRead of [false, true]) {
+      let calls = 0;
+      const adapt = createPiEngineeringApprovalSource({
+        loadBindings: async () => [a.binding],
+        authorizeTask: f.store.authorize,
+        resolveWorkspace: async () => {
+          calls++;
+          return { ...context, ...(!changesAfterFirstRead || calls > 1 ? change : {}) };
+        },
+      });
+      await assert.rejects(adapt(source(), { authenticatedPrincipal: principal }), { code: "PERMISSION_DENIED" });
+    }
+  }
 });
