@@ -2,8 +2,7 @@ import { checkpointPrivateWorldRetrievalPreparation } from "./world-simulation-p
 import { bindPrivateRetrievalStageResponse } from "./world-simulation-private-retrieval-replay-service.mjs";
 
 const MAX_STAGE_CONTEXTS = 1024;
-const executors = new WeakSet();
-export const isPrivateWorldRetrievalExecutor = (value) => executors.has(value);
+import { registerPrivateWorldRetrievalExecutor } from "./world-simulation-private-retrieval-authority-service.mjs";
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
 function fail(code) {
@@ -113,6 +112,5 @@ export function createPrivateWorldRetrievalExecutor({ openStageContext, maxDurat
       return { prepared: checkpoint.result, stage_count: transcript.length };
     },
   });
-  executors.add(executor);
-  return executor;
+  return registerPrivateWorldRetrievalExecutor(executor);
 }
