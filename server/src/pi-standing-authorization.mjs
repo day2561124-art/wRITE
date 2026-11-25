@@ -11,6 +11,13 @@ const workstreamPattern = /^dev_workstream_[0-9]{8}-[0-9]{6}_[a-f0-9]{12}$/u;
 const maxBytes = 64 * 1024;
 const maxPolicies = 128;
 const maxDuration = 30 * 86400000;
+// Runtime allowlist is deliberately independent of the review inventory.
+// A change to the review-only classification cannot grant new authority.
+const ordinaryCapabilities = new Set([
+  "filesystem.read", "filesystem.list", "filesystem.write", "filesystem.patch",
+  "workspace.create_checkpoint", "verification.focused", "verification.affected",
+  "git.status", "git.commit",
+]);
 const exact = (value, keys) => value && typeof value === "object" && !Array.isArray(value)
   && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 const principalValid = value => typeof value === "string" && value.trim().length > 0
@@ -30,6 +37,7 @@ function validPlan(plan) {
     && Array.isArray(plan.capabilities) && plan.capabilities.length > 0 && plan.capabilities.length <= 9
     && new Set(plan.capabilities).size === plan.capabilities.length
     && plan.capabilities.every(capability => typeof capability === "string"
+      && ordinaryCapabilities.has(capability)
       && reviewEngineeringCapability(capability) === "standing_scope_candidate")
     && Number.isSafeInteger(plan.expires_at_ms);
 }
