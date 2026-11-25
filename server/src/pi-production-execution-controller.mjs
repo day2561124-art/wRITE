@@ -109,7 +109,7 @@ export function createPiProductionExecutionController({journal=defaultJournal,ro
   }
   return projectVerifiedPiJournalHistory(verified.events);
  }
- async function prepare(source,{readJournal=journal,events:inspectionEvents,routeEvents:inspectionRoutes,durable=false}={}){
+ async function prepare(source,{readJournal=journal,events:inspectionEvents,routeEvents:inspectionRoutes,durable=false,standingAdmissionPrincipal}={}){
   const intent=createExecutionIntent(source);if(intent.context.project_id!=="writer_workbench")reliableFailure("PERMISSION_DENIED");
   const combined=unifiedDefault&&inspectionEvents===undefined&&inspectionRoutes===undefined
    ?await unifiedSnapshot({recoverOnReadFailure:true}):null;
@@ -134,6 +134,8 @@ export function createPiProductionExecutionController({journal=defaultJournal,ro
      reliableFailure('PI_DURABLE_QUEUE_FULL');
    if(existing){const first=history.find(e=>e.execution_projection.state.operation_id===existing.execution_projection.state.operation_id&&e.execution_projection.revision===1);
     if(stableJson(first?.execution_projection.command.production_binding)!==stableJson(binding))reliableFailure("PRODUCTION_ENROLLMENT_CONFLICT");return;}
+   if(intent.standing_authorization!==undefined
+     && standingAdmissionPrincipal!==intent.standing_authorization.principal)reliableFailure("PERMISSION_DENIED");
    await authorizeTask(intent);
    const current=validatePiProductionRouteHistory(allEvents.filter(e=>e.operation_type==="pi_production_route"&&e.stage==="operation_completed"));
    if(current.mode!=="pi_default"||current.revision!==binding.route_revision||current.route_hash!==binding.route_hash)reliableFailure("PRODUCTION_ROUTE_DISABLED");
@@ -143,16 +145,24 @@ export function createPiProductionExecutionController({journal=defaultJournal,ro
    if((await route.inspect()).mode!=="pi_default")reliableFailure("PERMISSION_DENIED");
    if(typeof authorizeDispatch!=="function")reliableFailure("DISPATCH_AUTHORITY_REQUIRED");
    await authorizeDispatch();
-   return runPiManagedMcpCall(async()=>{
+   const authorizeBoundDispatch=async()=>{
+    await authorizeDispatch();
+    // Revalidate policy on every managed-call gate as well as initial
+    // dispatch. Durable workers use the original pinned intent evidence.
     await authorizeTask(intent,[action]);
-    return transport.callTool(params);
-   },authorizeDispatch);
+   };
+   return runPiManagedMcpCall(()=>transport.callTool(params),authorizeBoundDispatch);
   }});
   return {intent,store,engine:createPiReliableExecutionEngine({store,adapter,...(retryPolicy?{retryPolicy}:{}),executionHook})};
  }
  const stopped=r=>r.runtime.isolation||['COMPLETED','FAILED','CANCELLED','DECISION_REQUIRED','BLOCKED'].includes(r.state.status);
- async function submit(source){
-  const {intent,store}=await traceSpan('pi.prepare',()=>prepare(source,{durable:true}));
+ async function submit(source,{authentication}={}){
+  const standingAdmissionPrincipal=authentication?.ok===true&&authentication.local===false
+    ?authentication.principal:undefined;
+  if(source?.standing_authorization!==undefined
+    && (typeof standingAdmissionPrincipal!=="string"
+      || standingAdmissionPrincipal!==source.standing_authorization.principal))reliableFailure("PERMISSION_DENIED");
+  const {intent,store}=await traceSpan('pi.prepare',()=>prepare(source,{durable:true,standingAdmissionPrincipal}));
   let record=await traceSpan('pi.admission',()=>store.admit(intent,...(retryPolicy?[{retry_policy:retryPolicy}]:[])));
   if(!stopped(record)&&record.command?.production_binding?.worker_protocol!=='writer-workbench/pi-durable-worker/v1'){
    // The current command changes after every transition. Enrollment is also
