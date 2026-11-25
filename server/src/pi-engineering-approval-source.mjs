@@ -36,29 +36,30 @@ function validBinding(record) {
 // Shared structural validation for the reader and the separate operator
 // publication workflow. Successful validation never grants execution rights.
 export function validatePiEngineeringBindingSnapshot(raw) {
+  let bindings;
   try {
     hashExecutionInput(raw);
-    const bindings = JSON.parse(JSON.stringify(raw));
+    bindings = JSON.parse(JSON.stringify(raw));
     if (!Array.isArray(bindings) || bindings.length > 128 || !bindings.every(validBinding)) denied();
-    // Apply the same uniqueness rules at publication and at runtime.
-    // A damaged or independently edited host manifest must not bind one
-    // grant to multiple principals, even if a single lookup would match.
-    const scopes = new Set();
-    const principalsByGrant = new Map();
-    for (const binding of bindings) {
-      const scope = JSON.stringify([binding.principal, binding.workspace_id, binding.workstream_id, binding.goal]);
-      if (scopes.has(scope)) throw Object.assign(new Error("AMBIGUOUS_BINDING"), { code: "AMBIGUOUS_BINDING" });
-      scopes.add(scope);
-      const existing = principalsByGrant.get(binding.task_authorization_id);
-      if (existing !== undefined && existing !== binding.principal) {
-        throw Object.assign(new Error("AMBIGUOUS_GRANT_PRINCIPAL"), { code: "AMBIGUOUS_GRANT_PRINCIPAL" });
-      }
-      principalsByGrant.set(binding.task_authorization_id, binding.principal);
-    }
-    return bindings;
   } catch {
     denied();
   }
+  // Apply the same uniqueness rules at publication and at runtime.
+  // A damaged or independently edited host manifest must not bind one
+  // grant to multiple principals, even if a single lookup would match.
+  const scopes = new Set();
+  const principalsByGrant = new Map();
+  for (const binding of bindings) {
+    const scope = JSON.stringify([binding.principal, binding.workspace_id, binding.workstream_id, binding.goal]);
+    if (scopes.has(scope)) throw Object.assign(new Error("AMBIGUOUS_BINDING"), { code: "AMBIGUOUS_BINDING" });
+    scopes.add(scope);
+    const existing = principalsByGrant.get(binding.task_authorization_id);
+    if (existing !== undefined && existing !== binding.principal) {
+      throw Object.assign(new Error("AMBIGUOUS_GRANT_PRINCIPAL"), { code: "AMBIGUOUS_GRANT_PRINCIPAL" });
+    }
+    principalsByGrant.set(binding.task_authorization_id, binding.principal);
+  }
+  return bindings;
 }
 
 // Host-owned binding provider. These dependencies MUST originate in the
