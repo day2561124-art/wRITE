@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { bindFormalGoalPlanIntents } from "./world-simulation-formal-goal-plan-intent-contract.mjs";
 
 import {
   hashCanonicalValue,
@@ -226,6 +227,7 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
       delete decision.character_input;
       delete decision.candidate_action_ids;
       delete decision.resolver_binding;
+      delete decision.goal_plan_intents;
     }
     record.preparer_owner_id = null;
     record.resolution_token = null;
@@ -562,6 +564,8 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
       );
     }
 
+    const goalPlanIntents = bindFormalGoalPlanIntents(input, expected.character_input);
+    expected.goal_plan_intents = goalPlanIntents;
     expected.status = "submitted";
     expected.selection = rejectAll
       ? "reject_all"
@@ -688,6 +692,9 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
       resolution_token: token,
       prepared_turn: cloneJson(record.prepared_turn),
       selected_actions: selectedActions,
+      goal_plan_intents: Object.fromEntries(record.decisions
+        .filter(decision => Object.keys(decision.goal_plan_intents ?? {}).length > 0)
+        .map(decision => [decision.character, cloneJson(decision.goal_plan_intents)])),
     };
   }
 
