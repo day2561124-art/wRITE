@@ -808,7 +808,14 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
     if (!record.decisions.some(decision => decision.request_subjective_claim_interpretation === true)) {
       fail("WORLD_SIMULATION_POST_ENCODING_NOT_REQUESTED", "No character requested post-encoding interpretation.");
     }
-    const continuation = createPostEncodingClaimContinuation({ leaseMs: postEncodingLeaseMs });
+    const continuation = createPostEncodingClaimContinuation({
+      leaseMs: postEncodingLeaseMs,
+      onTerminal: outcome => {
+        if (record.post_encoding_continuation !== continuation) return;
+        terminal(record, outcome.result ? (outcome.result.committed ? "committed" : "blocked") : "invalidated",
+          { reason: outcome.error_code });
+      },
+    });
     const acquisition = takeForResolution({
       prepared_turn_handle: record.prepared_turn_handle, resolver_owner_id: postEncodingOwner,
     }, true);
@@ -900,7 +907,10 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
   function invalidate(input = {}) {
     const record = recordForHandle(input.prepared_turn_handle);
     if (terminalStatuses.has(record.lifecycle_status)) return publicReceipt(record);
-    if (record.post_encoding_continuation) record.post_encoding_continuation.cancel();
+    if (record.post_encoding_continuation) {
+      record.post_encoding_continuation.cancel(input.reason ?? "invalidated_by_transport_core");
+      return publicReceipt(record);
+    }
     return terminal(record, "invalidated", {
       reason: input.reason ?? "invalidated_by_transport_core",
     });
