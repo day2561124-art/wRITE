@@ -1,8 +1,10 @@
+import { validateWorldSimulationExplicitAppraisalReply } from "./world-simulation-affective-appraisal-intent-contract.mjs";
 import { randomBytes } from "node:crypto";
 
 export const postEncodingClaimDecisionKind = "post_encoding_subjective_claim";
 export const postEncodingClaimRelationDecisionKind = "post_encoding_subjective_claim_relation";
-export const isPostEncodingDecisionKind = kind => [postEncodingClaimDecisionKind, postEncodingClaimRelationDecisionKind].includes(kind);
+export const postOutcomeAppraisalDecisionKind = "post_outcome_affective_appraisal";
+export const isPostEncodingDecisionKind = kind => [postEncodingClaimDecisionKind, postEncodingClaimRelationDecisionKind, postOutcomeAppraisalDecisionKind].includes(kind);
 const clone = value => JSON.parse(JSON.stringify(value));
 function fail(code) { const error = new Error(code); error.code = code; throw error; }
 const invalid = "WORLD_SIMULATION_NATIVE_SUBJECTIVE_CLAIM_INTENT_INVALID";
@@ -103,15 +105,20 @@ export function createPostEncodingClaimContinuation({ leaseMs = 120_000, onTermi
     if (state !== "running" || pending) fail(inactive);
     const relation = packet?.native_subjective_claim_relation_decision;
     const claim = packet?.native_subjective_claim_decision;
-    if (Boolean(relation) === Boolean(claim)) fail(invalid);
-    const view = relation ?? claim;
-    if (view?.character !== packet?.character || view?.bounded_view_only !== true
+    const appraisal = packet?.native_affective_appraisal_decision;
+    if ([relation, claim, appraisal].filter(Boolean).length !== 1) fail(invalid);
+    const view = relation ?? claim ?? appraisal;
+    if (appraisal) {
+      if (view.character !== packet.character || view.boundaries?.subjective_appraisal_only !== true
+          || view.boundaries?.world_truth_authority !== false || !Array.isArray(view.concerns)
+          || packet.boundaries?.action_selection_authority !== false) fail("WORLD_SIMULATION_AFFECTIVE_APPRAISAL_INVALID");
+    } else if (view?.character !== packet?.character || view?.bounded_view_only !== true
         || view?.world_truth_exposed !== false
         || (relation ? (!Array.isArray(view.current_claims) || !Array.isArray(view.prior_claims)) : !Array.isArray(view.memory_sources))) fail(relation ? invalidRelation : invalid);
     return new Promise((resolve, reject) => {
       const decision = {
         decision_index: sequence++, decision_handle: "world_decision_" + randomBytes(16).toString("hex"),
-        decision_kind: relation ? postEncodingClaimRelationDecisionKind : postEncodingClaimDecisionKind, character_input: clone(packet),
+        decision_kind: appraisal ? postOutcomeAppraisalDecisionKind : relation ? postEncodingClaimRelationDecisionKind : postEncodingClaimDecisionKind, character_input: clone(packet),
       };
       pending = { decision, resolve, reject };
       state = "pending";
@@ -146,7 +153,9 @@ export function createPostEncodingClaimContinuation({ leaseMs = 120_000, onTermi
     if (state !== "pending" || !pending || pending.decision.decision_handle !== decisionHandle) fail("WORLD_SIMULATION_DECISION_ORDER_VIOLATION");
     const validated = pending.decision.decision_kind === postEncodingClaimRelationDecisionKind
       ? validateRelationReply(reply, pending.decision.character_input.native_subjective_claim_relation_decision)
-      : validateReply(reply, pending.decision.character_input.native_subjective_claim_decision);
+      : pending.decision.decision_kind === postOutcomeAppraisalDecisionKind
+        ? validateWorldSimulationExplicitAppraisalReply(reply, pending.decision.character_input.native_affective_appraisal_decision)
+        : validateReply(reply, pending.decision.character_input.native_subjective_claim_decision);
     const waiting = pending;
     pending = null; state = "running";
     waiting.resolve(validated);
