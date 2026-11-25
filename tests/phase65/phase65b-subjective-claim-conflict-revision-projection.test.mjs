@@ -1,3 +1,8 @@
+import { createEphemeralWorldSimulationPreparedTurnBroker } from "../../server/src/world-simulation-prepared-turn-ephemeral-broker.mjs";
+import {
+  prepareFormalWorldSimulationTurn, submitFormalWorldSimulationCharacterAction,
+  submitFormalWorldSimulationCharacterDeliberation, resolveFormalWorldSimulationTurn,
+} from "../../server/src/world-simulation-formal-turn-transport-service.mjs";
 import assert from "node:assert/strict";
 import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
@@ -1498,6 +1503,132 @@ try {
       .sole_final_world_state_writer,
     true,
   );
+  // C7-C: both native and Formal use the same explicit observer-scoped
+  // claim and relation decisions, rather than a legacy resolver guessing
+  // relations from the world or overwriting a past claim.
+  async function compareExplicitTransport(formal) {
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C7 explicit relation " + (formal ? "Formal" : "Native"),
+      seed: "c7-explicit-relation-" + (formal ? "formal" : "native"),
+      rules: { event_driven: true, persistent_causality: true },
+      initial_world_state: structuredClone(nativeWorldState),
+    }, nativeOptions);
+    const sid = session.world_simulation_session_id;
+    const broker = createEphemeralWorldSimulationPreparedTurnBroker({ postEncodingOptions: nativeOptions });
+    const formalOptions = { ...nativeOptions, preparedTurnBroker: broker };
+    const read = () => getWorldSimulationState(sid, nativeOptions);
+    let firstClaim, priorContext, relationVisits = 0;
+    const types = [];
+    for (const [index, event_id] of [nativeFirstEventId, nativeSecondEventId].entries()) {
+      const before = await read();
+      const interpret = async packet => {
+        const current = await read();
+        assert.equal(current.revision, before.revision);
+        assert.equal(current.state_hash, before.state_hash);
+        assert.equal(packet.character, nativeObserver);
+        const claim = packet.native_subjective_claim_decision;
+        const relation = packet.native_subjective_claim_relation_decision;
+        if (claim) {
+          types.push("claim");
+          assert.ok(claim.memory_sources.length);
+          return { claim_context_token: claim.context_token, claim_intents: [{
+            proposition: index === 0 ? nativePriorClaimText : nativeCurrentClaimText,
+            evidence: [{ source_token: claim.memory_sources[0].source_token, relation: "supports" }],
+          }] };
+        }
+        assert.ok(relation);
+        types.push("relation");
+        relationVisits++;
+        assert.equal(index, 1);
+        assert.equal(relation.current_claims.length, 1);
+        assert.equal(relation.prior_claims.length, 1);
+        assert.equal(relation.current_claims[0].proposition, nativeCurrentClaimText);
+        assert.equal(relation.prior_claims[0].proposition, nativePriorClaimText);
+        assert.equal(relation.world_truth_exposed, false);
+        assert.equal(JSON.stringify(relation).includes("claim_event_id\""), false);
+        assert.equal(JSON.stringify(relation).includes(firstClaim.claim_event_id), false);
+        return { relation_context_token: relation.context_token, relation_intents: [{
+          source_claim_token: relation.current_claims[0].claim_token,
+          target_claim_token: relation.prior_claims[0].claim_token,
+          relation: "challenges",
+        }] };
+      };
+      if (formal) {
+        const prepared = await prepareFormalWorldSimulationTurn({ world_simulation_session_id: sid }, formalOptions);
+        const handle = prepared.prepared_turn_handle;
+        const selected = await submitFormalWorldSimulationCharacterAction({
+          prepared_turn_handle: handle,
+          decision_handle: prepared.current_decision.decision_handle,
+          reject_all: true, request_subjective_claim_interpretation: true,
+          request_subjective_claim_relation_interpretation: true,
+        }, formalOptions);
+        assert.equal(selected.ready_to_resolve, true);
+        let boundary = await resolveFormalWorldSimulationTurn({ prepared_turn_handle: handle }, formalOptions);
+        assert.equal(boundary.resolution_pending, true);
+        let rounds = 0;
+        while (boundary.current_decision) {
+          const decision = boundary.current_decision;
+          const response = await interpret(decision.character_input);
+          if (decision.decision_kind === "post_encoding_subjective_claim") priorContext = response.claim_context_token;
+          else {
+            assert.equal(decision.decision_kind, "post_encoding_subjective_claim_relation");
+            const invalid = { prepared_turn_handle: handle, decision_handle: decision.decision_handle,
+              deliberation_response: { ...response, relation_context_token: priorContext } };
+            await assert.rejects(() => submitFormalWorldSimulationCharacterDeliberation(invalid, formalOptions),
+              { code: "WORLD_SIMULATION_NATIVE_SUBJECTIVE_CLAIM_RELATION_INTENT_INVALID" });
+            await assert.rejects(() => submitFormalWorldSimulationCharacterDeliberation({
+              ...invalid, deliberation_response: { ...response, relation_intents: [{
+                ...response.relation_intents[0], target_claim_token: "foreign_claim_token",
+              }] },
+            }, formalOptions), { code: "WORLD_SIMULATION_NATIVE_SUBJECTIVE_CLAIM_RELATION_INTENT_INVALID" });
+            assert.equal((await read()).state_hash, before.state_hash);
+          }
+          boundary = await submitFormalWorldSimulationCharacterDeliberation({
+            prepared_turn_handle: handle, decision_handle: decision.decision_handle, deliberation_response: response,
+          }, formalOptions);
+          assert.ok(++rounds <= 2);
+        }
+        assert.equal(boundary.committed, true);
+        assert.equal(broker.getStorageStatus().payload_reference_count, 0);
+      } else {
+        const result = await runWorldSimulationTurn({ world_simulation_session_id: sid, event_id }, {
+          ...nativeOptions,
+          characterBrain: async packet => packet.native_subjective_claim_decision || packet.native_subjective_claim_relation_decision
+            ? interpret(packet)
+            : { action_id: "reject_all", request_subjective_claim_interpretation: true,
+              request_subjective_claim_relation_interpretation: true },
+        });
+        assert.equal(result.committed, true);
+      }
+      const after = await read();
+      assert.equal(after.revision, before.revision + 1);
+      if (index === 0) {
+        firstClaim = structuredClone(Object.values(after.state.subjective_claim_events)[0]);
+        assert.equal(Object.values(after.state.subjective_claim_relation_events ?? {}).length, 0);
+      } else {
+        assert.deepEqual(after.state.subjective_claim_events[firstClaim.claim_event_id], firstClaim);
+      }
+    }
+    assert.deepEqual(types, ["claim", "claim", "relation"]);
+    assert.equal(relationVisits, 1);
+    const result = await read();
+    return {
+      propositions: Object.values(result.state.subjective_claim_events).map(item => item.proposition).sort(),
+      relations: Object.values(result.state.subjective_claim_relation_events).map(item => ({
+        relation: item.relation, semantic_state: item.semantic_state,
+      })),
+      belief_revisions: result.state.subjective_belief_revision_history.length,
+    };
+  }
+  const explicitNative = await compareExplicitTransport(false);
+  const explicitFormal = await compareExplicitTransport(true);
+  assert.deepEqual(explicitFormal, explicitNative);
+  assert.equal(explicitFormal.propositions.length, 2);
+  assert.equal(explicitFormal.relations.length, 1);
+  assert.equal(explicitFormal.relations[0].relation, "challenges");
+  assert.equal(explicitFormal.relations[0].semantic_state.world_truth_verified, false);
+  console.log("C7 paired explicit Native/Formal claim relation pipeline: PASS");
+
 } finally {
   await rm(
     nativeFixtureRoot,
