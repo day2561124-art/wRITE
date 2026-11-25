@@ -1,3 +1,4 @@
+import { createWorldSimulationSubjectiveClaimRelationIntentContext } from "./world-simulation-subjective-claim-relation-intent-service.mjs";
 import { createWorldSimulationSubjectiveClaimIntentContext } from "./world-simulation-subjective-claim-intent-service.mjs";
 import { analyzeObserverDialogueLearning, learnedDialogueMemoryStage, observerDialogueReferentDescriptor,
   isDialogueCountdownQuestion, observerDialogueClarification, observerDialogueClarificationGoal } from "./observer-dialogue-learning-service.mjs";
@@ -10608,6 +10609,7 @@ async function resolveSubjectiveMeansFeasibilityInterpretations(
 // Module-private transport: only a final Native Brain reply can opt in.
 // Ordinary direct callers continue to use the existing Phase65 resolver.
 const nativeSubjectiveClaimHandoff = Symbol("native_subjective_claim_handoff");
+const nativeSubjectiveClaimRelationHandoff = Symbol("native_subjective_claim_relation_handoff");
 const postEncodingCommitPermit = Symbol("post_encoding_commit_permit");
 
 async function resolveSubjectiveClaimProposals(
@@ -10729,10 +10731,13 @@ async function resolveSubjectiveClaimRelationProposals(
   preparedTurn,
   options,
 ) {
+  const nativeResolver = options[nativeSubjectiveClaimRelationHandoff];
   const resolver =
-    typeof options.subjectiveClaimRelationResolver === "function"
-      ? options.subjectiveClaimRelationResolver
-      : null;
+    typeof nativeResolver === "function"
+      ? view => nativeResolver(view, worldState)
+      : typeof options.subjectiveClaimRelationResolver === "function"
+        ? options.subjectiveClaimRelationResolver
+        : null;
 
   const resolverView =
     buildWorldSimulationSubjectiveClaimConflictRevisionResolverView({
@@ -16661,14 +16666,61 @@ function buildPostEncodingClaimResolver({
   };
 }
 
+// Separate explicit relation stage follows the current-turn claim writer's
+// speculative projection. It never receives a causal outcome or another
+// observer's claims, and cannot choose or repeat the frozen action.
+function buildPostEncodingClaimRelationResolver({
+  prepared, relationCharacters, characterRuntimeManager, interpretClaim, options, expectedSnapshot,
+}) {
+  return async (resolverView, stagedWorldState) => {
+    const proposals = [];
+    const fail = message => {
+      const error = new Error(message);
+      error.code = "WORLD_SIMULATION_NATIVE_SUBJECTIVE_CLAIM_RELATION_INTENT_INVALID";
+      throw error;
+    };
+    for (const character of relationCharacters) {
+      const context = createWorldSimulationSubjectiveClaimRelationIntentContext({
+        prepared, stagedWorldState, resolverView, character,
+      });
+      if (!context) continue;
+      const packet = () => ({
+        character, native_subjective_claim_relation_decision: context.characterView(),
+        boundaries: {
+          native_subjective_claim_relation_interpretation_only: true,
+          world_truth_exposed: false, action_selection_authority: false,
+          durable_write_authority: false, world_mutation_authority: false,
+          claim_event_ids_exposed: false,
+        },
+      });
+      let delivered = false, completed = false, reply;
+      await runAdmittedWorldSimulationCharacterTurn(characterRuntimeManager, {
+        world_simulation_session_id: prepared.world_simulation_session_id,
+        character, brain_input: packet(),
+        characterBrain: async () => {
+          if (delivered) fail("Duplicate Native claim relation callback.");
+          delivered = true;
+          reply = await interpretClaim(packet());
+          completed = true;
+          return reply;
+        },
+      }, options, expectedSnapshot);
+      if (!completed) fail("Native claim relation callback was not completed.");
+      proposals.push(...context.admit(reply));
+    }
+    return proposals;
+  };
+}
+
 // Trusted internal adapter for transports that have already frozen every
 // action. This is not a public MCP input or a caller callback ingress.
 // Causal execution and commitment remain in the single canonical resolve.
 export async function resolveWorldSimulationTurnWithPostEncodingClaimIntents(
-  prepared, selectedActions, { claimCharacters = [], interpretClaim, permitCommit } = {}, options = {},
+  prepared, selectedActions, { claimCharacters = [], relationCharacters = [], interpretClaim, permitCommit } = {}, options = {},
 ) {
-  if (!Array.isArray(claimCharacters) || new Set(claimCharacters).size !== claimCharacters.length
-      || claimCharacters.some(character => !prepared?.decision_packets?.some(packet => packet.character === character))) {
+  if ([claimCharacters, relationCharacters].some(characters => !Array.isArray(characters)
+      || new Set(characters).size !== characters.length
+      || characters.some(character => !prepared?.decision_packets?.some(packet => packet.character === character)))) {
     const error = new Error("Post-encoding interpretation must be explicitly requested by prepared characters.");
     error.code = "WORLD_SIMULATION_NATIVE_SUBJECTIVE_CLAIM_INTENT_INVALID";
     throw error;
@@ -16679,9 +16731,10 @@ export async function resolveWorldSimulationTurnWithPostEncodingClaimIntents(
     throw error;
   }
   const commitOptions = permitCommit ? { [postEncodingCommitPermit]: permitCommit } : {};
-  if (!claimCharacters.length) return resolveWorldSimulationTurn(prepared, selectedActions, { ...options, ...commitOptions });
-  if (typeof interpretClaim !== "function" || typeof options.subjectiveClaimResolver === "function"
-      || typeof options[nativeSubjectiveClaimHandoff] === "function") {
+  if (!claimCharacters.length && !relationCharacters.length) return resolveWorldSimulationTurn(prepared, selectedActions, { ...options, ...commitOptions });
+  if (typeof interpretClaim !== "function"
+      || (claimCharacters.length && (typeof options.subjectiveClaimResolver === "function" || typeof options[nativeSubjectiveClaimHandoff] === "function"))
+      || (relationCharacters.length && (typeof options.subjectiveClaimRelationResolver === "function" || typeof options[nativeSubjectiveClaimRelationHandoff] === "function"))) {
     const error = new Error("Post-encoding claim interpretation requires one trusted interpreter.");
     error.code = "WORLD_SIMULATION_NATIVE_SUBJECTIVE_CLAIM_RESOLVER_CONFLICT";
     throw error;
@@ -16696,8 +16749,13 @@ export async function resolveWorldSimulationTurnWithPostEncodingClaimIntents(
   const resolveClaims = buildPostEncodingClaimResolver({
     prepared, claimCharacters: [...claimCharacters], characterRuntimeManager, interpretClaim, options, expectedSnapshot,
   });
+  const resolveRelations = buildPostEncodingClaimRelationResolver({
+    prepared, relationCharacters: [...relationCharacters], characterRuntimeManager, interpretClaim, options, expectedSnapshot,
+  });
   return resolveWorldSimulationTurn(prepared, selectedActions, {
-    ...options, ...commitOptions, characterRuntimeManager, [nativeSubjectiveClaimHandoff]: resolveClaims,
+    ...options, ...commitOptions, characterRuntimeManager,
+    ...(claimCharacters.length ? { [nativeSubjectiveClaimHandoff]: resolveClaims } : {}),
+    ...(relationCharacters.length ? { [nativeSubjectiveClaimRelationHandoff]: resolveRelations } : {}),
   });
 }
 
@@ -17210,6 +17268,19 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
     error.code = "WORLD_SIMULATION_NATIVE_SUBJECTIVE_CLAIM_RESOLVER_CONFLICT";
     throw error;
   }
+  const nativeRelationCharacters = prepared.decision_packets
+    .map(packet => packet.character)
+    .filter(character => isObject(selections[character])
+      && selections[character].request_subjective_claim_relation_interpretation === true);
+  if (nativeRelationCharacters.length && typeof options.subjectiveClaimRelationResolver === "function") {
+    const error = new Error("Native claim relation interpretation and legacy resolver cannot both author this turn.");
+    error.code = "WORLD_SIMULATION_NATIVE_SUBJECTIVE_CLAIM_RELATION_RESOLVER_CONFLICT";
+    throw error;
+  }
+  const resolveNativeRelations = buildPostEncodingClaimRelationResolver({
+    prepared, relationCharacters: nativeRelationCharacters, characterRuntimeManager,
+    interpretClaim: options.characterBrain, options, expectedSnapshot: nativeGoalSnapshot,
+  });
   const resolveNativeClaims = buildPostEncodingClaimResolver({
     prepared, claimCharacters: nativeClaimCharacters, characterRuntimeManager,
     interpretClaim: options.characterBrain, options, expectedSnapshot: nativeGoalSnapshot,
@@ -17220,6 +17291,7 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
     {
       ...options,
       [nativeSubjectiveClaimHandoff]: nativeClaimCharacters.length ? resolveNativeClaims : null,
+      [nativeSubjectiveClaimRelationHandoff]: nativeRelationCharacters.length ? resolveNativeRelations : null,
       ...(nativePlanDecisions.length
         ? { goalImplementationIntentionResolver: async () => cloneJson(nativePlanDecisions) }
         : {}),
