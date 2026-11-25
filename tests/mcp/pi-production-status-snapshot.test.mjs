@@ -257,9 +257,12 @@ test('narrow verified readers return detached records and still reject unrelated
   assert.deepEqual(await journal.verify(),expected,'narrow outputs never alias the verified cache');
   const file=path.join(storageRoot,'events',(await readdir(path.join(storageRoot,'events'))).sort()[0]);
   await writeFile(file,(await readFile(file,'utf8'))+' ');
+  const headPath=path.join(storageRoot,'head.json');
+  const headBefore=await readFile(headPath,'utf8');
   const outcomes=await Promise.allSettled([journal.readProductionRoutes(),journal.readExecutionProjections()]);
   for(const outcome of outcomes){
     assert.equal(outcome.status,'rejected');
     assert.match(outcome.reason.message,/immutable prefix/u);
   }
+  assert.equal(await readFile(headPath,'utf8'),headBefore,'observational reads never publish a new head');
 });
