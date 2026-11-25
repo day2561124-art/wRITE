@@ -7,12 +7,8 @@ import { buildWorldSimulationSubjectiveActionDeliberationView } from "./world-si
 export const worldSimulationAffectiveActionAppraisalVersion = "phase86d-action-aware-affective-appraisal-v1";
 export const worldSimulationAffectiveAppraisalVersion = "phase86a-goal-relative-affective-appraisal-v1";
 export const worldSimulationAffectiveReappraisalVersion = "phase86c-experience-grounded-reappraisal-v1";
-export const affectiveAppraisalMaxConcerns = 8;
-export const affectiveAppraisalDimensions = Object.freeze({
-  goal_congruence: Object.freeze(["helps", "hinders", "mixed", "unrelated", "uncertain"]),
-  expectedness: Object.freeze(["expected", "unexpected", "uncertain"]),
-  coping_potential: Object.freeze(["possible", "limited", "uncertain"]),
-});
+import { affectiveAppraisalMaxConcerns, affectiveAppraisalDimensions } from "./world-simulation-affective-appraisal-intent-contract.mjs";
+export { affectiveAppraisalMaxConcerns, affectiveAppraisalDimensions };
 const object = (v) => v && typeof v === "object" && !Array.isArray(v);
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const text = (v) => typeof v === "string" && v.trim() ? v.trim() : null;
