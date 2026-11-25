@@ -1,5 +1,4 @@
 import { randomBytes } from "node:crypto";
-import { isPrivateWorldRetrievalExecutor } from "./world-simulation-private-retrieval-executor-service.mjs";
 
 import {
   hashCanonicalValue,
@@ -202,7 +201,8 @@ export function createWorldSimulationPreparedTurnHandle(date = new Date()) {
 
 export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
   const privateRetrievalExecutor = options.privateRetrievalExecutor ?? null;
-  if (privateRetrievalExecutor !== null && !isPrivateWorldRetrievalExecutor(privateRetrievalExecutor)) {
+  if (privateRetrievalExecutor !== null && (typeof privateRetrievalExecutor.prepare !== "function"
+      || typeof privateRetrievalExecutor.replay !== "function")) {
     fail("WORLD_SIMULATION_PRIVATE_RETRIEVAL_PROVIDER_INVALID", "Private retrieval requires a host-owned executor.");
   }
   const privateRetrievalOptions = Object.freeze({
