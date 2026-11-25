@@ -117,6 +117,54 @@ function responseField(kind) {
   }
 }
 
+// Public MCP schema for the already supported engine decisions. Static
+// shape admission never replaces the per-character canonical task validator.
+const schemaRef = { type: "string" };
+const schemaRefs = (maxItems = worldSimulationFormalImpasseMaximumReferenceItems, minItems = 0) => ({
+  type: "array", minItems, maxItems, uniqueItems: true, items: schemaRef,
+});
+const schemaDecisions = (properties, required = Object.keys(properties), maxItems = maximumDecisionItems) => ({
+  type: "array", maxItems, items: { type: "object", additionalProperties: false, properties, required },
+});
+const reuseDecisionProperties = {
+  reentry_candidate_ref: schemaRef,
+  retain_matched_current_cue_refs: schemaRefs(),
+  drop_unmatched_retained_cue_refs: schemaRefs(),
+  incorporate_current_additional_cue_refs: schemaRefs(),
+};
+export const formalAdditionalExperientialResponseProperties = Object.freeze({
+  adaptation_decisions: schemaDecisions({
+    analogy_candidate_ref: schemaRef,
+    retain_aligned_current_cue_refs: schemaRefs(),
+    drop_historical_cue_refs: schemaRefs(),
+    incorporate_current_cue_refs: schemaRefs(),
+  }, ["analogy_candidate_ref"]),
+  reuse_decisions: schemaDecisions(reuseDecisionProperties),
+  preparative_revalidation_decisions: schemaDecisions({
+    reentry_candidate_ref: schemaRef,
+    applicability_judgment: { type: "string", enum: [
+      "currently_applicable_as_deliberative_evidence",
+      "currently_not_applicable_as_deliberative_evidence",
+      "current_applicability_unresolved",
+    ] },
+    retain_matched_current_cue_refs: schemaRefs(),
+    address_historical_difference_cue_refs: schemaRefs(),
+    incorporate_current_additional_cue_refs: schemaRefs(),
+  }),
+  linked_experience_reuse_decisions: schemaDecisions(reuseDecisionProperties),
+  reuse_outcome_deliberation_decisions: schemaDecisions(reuseDecisionProperties),
+  activated_longitudinal_case_refs: schemaRefs(maximumDecisionItems),
+  mood_interpretations: schemaDecisions({
+    subjective_mood_label: { type: "string", minLength: 1, maxLength: 96 },
+    interpretation: { type: "string", minLength: 1, maxLength: 512 },
+    // Actual evidence count remains limited by the canonical Phase89B view.
+    supporting_evidence_refs: { type: "array", minItems: 1, uniqueItems: true, items: schemaRef },
+  }, undefined, 1),
+});
+export const formalExperientialResponseFields = Object.freeze(
+  [...new Set(Object.values(worldSimulationFormalImpasseDecisionKinds).map(responseField).filter(Boolean))].sort(),
+);
+
 function assertResponseEnvelope(characterInput, response) {
   const kind = text(characterInput?.decision_kind);
   const field = responseField(kind);
