@@ -386,6 +386,19 @@ await expectCorrupt("unexpected-event-entry", async (storageRoot) => {
   } finally { await clean(fixture); }
 }
 
+// Exercise the standalone synthetic generator in ordinary regression runs.
+{
+  const benchmark = fileURLToPath(new URL("../../scripts/benchmark-nexa-journal-verification.mjs", import.meta.url));
+  const { stdout } = await execFileAsync(process.execPath, [benchmark, "32"], {
+    timeout: 60000, windowsHide: true, maxBuffer: 1024 * 1024,
+  });
+  const result = JSON.parse(stdout);
+  assert.equal(result.event_count, 32);
+  assert.deepEqual(result.measurements.map(row => row.label), ["cold", "warm", "coalesced"]);
+  assert.equal(result.measurements[0].verification[0].suffix_files_loaded, 32);
+  assert.equal(result.measurements[1].verification[0].prefix_files_checked, 32);
+}
+
 // R6: cold validation spans multiple worker batches; warm validation rechecks file
 // versions without reading bodies. Appends from this process and a child remain visible.
 {
