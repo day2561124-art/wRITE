@@ -257,3 +257,34 @@ test("VA-6 development gate fails closed and does not wash timeout or missing ev
   } }), /Complete workspace snapshot/u);
   assert.throws(() => developmentReceipt(passed, { operationId: null }), /Journal operation identity/u);
 });
+
+test("fixed AppContainer development evidence is complete and fail-closed", () => {
+  const fixed = { ...passed, suite: "mcp_hermetic_core", isolation_mode: "appcontainer",
+    execution_mode: "fixed_node", input_manifest_sha256: "f".repeat(64), input_file_count: 5,
+    job_terminated: true, cleanup_pending: false, workspace_writes: false, post_snapshot_verified: true };
+  const route = { verificationRoute: "fixed_appcontainer" };
+  const receipt = developmentReceipt(fixed, route);
+  assert.equal(receipt.gate_result, "passed");
+  assert.equal(receipt.commit, null);
+  assert.deepEqual(receipt.tests_selected, ["mcp_hermetic_core"]);
+  assert.deepEqual(receipt.isolation_evidence, {
+    route: "fixed_appcontainer", isolation_mode: "appcontainer", execution_mode: "fixed_node",
+    input_manifest_sha256: "f".repeat(64), input_file_count: 5, job_terminated: true,
+    cleanup_pending: false, workspace_writes: false, post_snapshot_verified: true,
+  });
+  for (const [field, value] of [
+    ["suite", "all"], ["isolation_mode", "host"], ["execution_mode", "powershell"],
+    ["input_manifest_sha256", "invalid"], ["input_file_count", 4],
+    ["job_terminated", false], ["cleanup_pending", true], ["workspace_writes", true],
+    ["post_snapshot_verified", false], ["exit_code", 1], ["passed", false],
+  ]) {
+    assert.equal(developmentReceipt({ ...fixed, [field]: value }, route).gate_result, "failed", field);
+  }
+  for (const field of Object.keys(receipt.isolation_evidence).filter(key => key !== "route")) {
+    const missing = { ...fixed };
+    delete missing[field];
+    assert.equal(developmentReceipt(missing, route).gate_result, "failed", field);
+  }
+  assert.equal(developmentReceipt(fixed).isolation_evidence, undefined);
+  assert.throws(() => developmentReceipt(fixed, { verificationRoute: "unknown" }), /Unknown development verification route/u);
+});
