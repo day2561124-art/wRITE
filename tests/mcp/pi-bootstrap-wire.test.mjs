@@ -180,7 +180,7 @@ test('actual MCP default ingress completes cold lifecycle and terminal no replay
  const before=facts(await authenticated.client.callTool({name:'dev_read_file',arguments:readArgs}));
  const gitBefore=facts(await authenticated.client.callTool({name:'dev_git_status',arguments:{workspace_id:context.workspace_id}}));
  const newText=before.content+'// standing-policy-wire-marker\n';
- const standingRequest={request_kind:'standing_engineering',intent_id:'wire-standing-lifecycle-0001',
+ const standingRequest={request_kind:'autonomous_engineering',intent_id:'wire-standing-lifecycle-0001',
   goal:'Verify independently approved standing policy through real MCP',workspace_id:context.workspace_id,
   requested_actions:[
    {step_id:'read',capability:'filesystem.read',input:{path:readArgs.path}},
@@ -207,10 +207,10 @@ test('actual MCP default ingress completes cold lifecycle and terminal no replay
  assert.equal(standingComplete.state.operation_id,queuedStanding.state.operation_id);
  assert.deepEqual(standingComplete.intent.standing_authorization,queuedStanding.intent.standing_authorization);
  assert.equal(facts(await authenticatedAgain.client.callTool({name:'dev_read_file',arguments:readArgs})).content,newText);
- const standingDuplicate=await submitStanding(authenticatedAgain.client,standingRequest);
+ const standingDuplicate=await submitStanding(authenticatedAgain.client,{...standingRequest,request_kind:'standing_engineering'});
  assert.equal(standingDuplicate.projection_hash,standingComplete.projection_hash);
  await drain(standingWorker);
- const revokedRequest={request_kind:'standing_engineering',intent_id:'wire-standing-revoked-0001',
+ const revokedRequest={request_kind:'autonomous_engineering',intent_id:'wire-standing-revoked-0001',
   goal:'Distinct queued goal must stop after independent revocation',workspace_id:context.workspace_id,
   requested_actions:[{step_id:'patch',capability:'filesystem.patch',input:{path:readArgs.path,oldText:newText,
    newText:newText+'// forbidden-after-revocation\n',expectedSha256:createHash('sha256').update(newText).digest('hex')}}]};
