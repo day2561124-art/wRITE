@@ -618,7 +618,11 @@ export function createDevTestRunner({
     let journalOperation;
     let workspaceSnapshot;
     try {
-      workspaceSnapshot = await computeWorkspaceSnapshot(context);
+      // A fixed isolated gate takes fresh local evidence at both boundaries.
+      // Ordinary development runners keep their existing snapshot reuse policy.
+      workspaceSnapshot = await computeWorkspaceSnapshot(context, scoped ? {
+        allowParentSnapshotAuthority: false, allowMemoryFingerprintCache: false,
+      } : {});
       journalOperation = await journal.begin({
         operation_type: "test_evidence",
         tool_name: "dev_run_tests",
@@ -708,7 +712,9 @@ export function createDevTestRunner({
     if (scoped) {
       result = { ...result, post_snapshot_verified: false };
       try {
-        const after = await computeWorkspaceSnapshot(context);
+        const after = await computeWorkspaceSnapshot(context, {
+          allowParentSnapshotAuthority: false, allowMemoryFingerprintCache: false,
+        });
         if (after.workspace_snapshot_id !== workspaceSnapshot.workspace_snapshot_id || after.head !== workspaceSnapshot.head) {
           throw new Error("ISOLATED_VERIFICATION_SNAPSHOT_CHANGED");
         }
