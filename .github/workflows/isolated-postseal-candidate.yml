@@ -44,4 +44,11 @@ jobs:
       - name: Install pinned Pi sidecar dependencies
         run: npm ci --prefix scripts/pi-runtime --ignore-scripts --no-audit --no-fund
       - name: Execute existing complete postseal suite
+        id: postseal
         run: node tests/tools/mcp-pi-postseal.test.mjs
+      # The complete suite intentionally stops at the first failing script.
+      # Collect independent Windows sandbox evidence even if an earlier
+      # script failed; the original suite failure still fails the job.
+      - name: Diagnose Windows AppContainer after failed postseal
+        if: ${{ !cancelled() && runner.os == 'Windows' && steps.postseal.outcome == 'failure' }}
+        run: node --test tests/mcp/pi-workspace-appcontainer.test.mjs
