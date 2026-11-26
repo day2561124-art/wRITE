@@ -80,6 +80,7 @@ jobs:
           param([Parameter(Mandatory=$true)][string]$Root)
           $ErrorActionPreference = 'Stop'
           $run = Join-Path $Root 'run'
+          [IO.File]::WriteAllText((Join-Path $run 'probe-entered.txt'), 'entered')
           $node = Join-Path $Root 'tools\node.exe'
           $test = Join-Path $Root 'source\tests\mcp\pi-workspace-appcontainer.test.mjs'
           $env:TEMP = $run
@@ -104,19 +105,47 @@ jobs:
           }
           '@ | Set-Content -LiteralPath $script -Encoding UTF8
             $exe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-            $args = '-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "' + $script + '" -Root "' + $root + '"'
-            $action = New-ScheduledTaskAction -Execute $exe -Argument $args -WorkingDirectory $source
+            # Capture failures before the PowerShell script can write its own result.
+            # The wrapper contains only fixed fixture paths on the disposable runner.
+            $wrapper = Join-Path $root 'probe.cmd'
+            @(
+              '@echo off'
+              ('echo entered>"' + (Join-Path $run 'wrapper-entered.txt') + '"')
+              ('"' + $exe + '" -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "' + $script + '" -Root "' + $root + '" >"' + (Join-Path $run 'bootstrap.log') + '" 2>&1')
+              ('echo %ERRORLEVEL%>"' + (Join-Path $run 'wrapper-exit.txt') + '"')
+              'exit /b %ERRORLEVEL%'
+            ) | Set-Content -LiteralPath $wrapper -Encoding ASCII
+            $cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
+            $arguments = '/d /c ""' + $wrapper + '""'
+            $action = New-ScheduledTaskAction -Execute $cmd -Argument $arguments -WorkingDirectory $source
             $null = Register-ScheduledTask -TaskName $task -Action $action -User "$env:COMPUTERNAME\$account" -Password $password -RunLevel Limited
             $createdTask = $true
             $password = $null
             $secure.Dispose()
             $principal = (Get-ScheduledTask -TaskName $task).Principal
             if ([string]$principal.LogonType -ne 'Password' -or [string]$principal.RunLevel -ne 'Limited') { throw 'Task principal mismatch' }
+            $start = Get-Date
+            $prior = (Get-ScheduledTaskInfo -TaskName $task).LastRunTime
             Start-ScheduledTask -TaskName $task
             $deadline = [datetime]::UtcNow.AddMinutes(5)
             $resultPath = Join-Path $run 'result.json'
             while (!(Test-Path -LiteralPath $resultPath)) {
-              if ([datetime]::UtcNow -gt $deadline) { throw 'Session 0 probe timed out' }
+              $info = Get-ScheduledTaskInfo -TaskName $task
+              $state = (Get-ScheduledTask -TaskName $task).State
+              if (($info.LastRunTime -ne $prior -and $state -eq 'Ready') -or
+                  (Test-Path -LiteralPath (Join-Path $run 'wrapper-exit.txt')) -or
+                  [datetime]::UtcNow -gt $deadline) {
+                Write-Output "TASK_STATE=$state; LAST_RUN_RESULT=$($info.LastTaskResult); LAST_RUN_TIME=$($info.LastRunTime)"
+                foreach ($name in @('wrapper-entered.txt','probe-entered.txt','wrapper-exit.txt','bootstrap.log','test.log')) {
+                  $file = Join-Path $run $name
+                  Write-Output "DIAGNOSTIC_FILE=$name; EXISTS=$(Test-Path -LiteralPath $file)"
+                  if (Test-Path -LiteralPath $file) { Get-Content -LiteralPath $file -Tail 40 }
+                }
+                Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-TaskScheduler/Operational';StartTime=$start} -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Message -like "*$task*" } |
+                  Select-Object -First 12 TimeCreated,Id,Message | Format-List
+                throw 'Session 0 probe ended or timed out without result'
+              }
               Start-Sleep -Seconds 2
             }
             $observed = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
