@@ -1,0 +1,47 @@
+name: Isolated postseal candidate verification
+
+# Stacked candidate review only; this does not change the production dispatcher.
+on:
+  pull_request:
+    branches: [nexa/fixed-isolated-verification]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: isolated-postseal-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  postseal:
+    name: Exact candidate postseal (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify exact candidate identity
+        shell: pwsh
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -cne $env:EXPECTED_HEAD) {
+            throw 'Exact candidate checkout mismatch.'
+          }
+          Write-Output "Candidate HEAD: $actual"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: npm ci
+      - name: Install pinned Pi sidecar dependencies
+        run: npm ci --prefix scripts/pi-runtime --ignore-scripts --no-audit --no-fund
+      - name: Execute existing complete postseal suite
+        run: node tests/tools/mcp-pi-postseal.test.mjs
