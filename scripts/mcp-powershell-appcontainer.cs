@@ -207,8 +207,10 @@ internal static class PowerShellAppContainer {
                 + "\0TEMP=" + scratch + "\0TMP=" + scratch + "\0USERPROFILE=" + scratch + "\0WINDIR=" + windows + "\0\0");
             const string loader = "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'; "
                 + "[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); "
-                + "New-PSDrive -Name Nexa -PSProvider FileSystem -Root $env:NEXA_SANDBOX_WORK -Scope Global | Out-Null; "
-                + "Set-Location -LiteralPath (Join-Path 'Nexa:\\' $env:NEXA_SANDBOX_CWD); "
+                // AppContainer may lack normal module discovery. Load only the OS-owned module, never staged source.
+                + "Microsoft.PowerShell.Core\\Import-Module -Name ([IO.Path]::Combine($PSHOME, 'Modules\\Microsoft.PowerShell.Management\\Microsoft.PowerShell.Management.psd1')) -ErrorAction Stop; "
+                + "Microsoft.PowerShell.Management\\New-PSDrive -Name Nexa -PSProvider FileSystem -Root $env:NEXA_SANDBOX_WORK -Scope Global | Out-Null; "
+                + "Microsoft.PowerShell.Management\\Set-Location -LiteralPath (Microsoft.PowerShell.Management\\Join-Path 'Nexa:\\' $env:NEXA_SANDBOX_CWD); "
                 + "$global:LASTEXITCODE = 0; & ([scriptblock]::Create([IO.File]::ReadAllText($env:NEXA_SANDBOX_SCRIPT))); "
                 + "$successful = $?; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; if (-not $successful) { exit 1 }; exit 0";
             // The sole direct Node route has a server-fixed entrypoint and identical token/job controls.
