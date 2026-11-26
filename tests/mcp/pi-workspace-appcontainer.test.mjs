@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { createServer } from "node:net";
 import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
@@ -7,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { FIXED_ISOLATED_SUITE, FIXED_ISOLATED_SOURCE_PATHS, fixedIsolatedVerificationPlan, runFixedIsolatedVerification } from "../../server/src/mcp-fixed-isolated-verification.mjs";
+import { createDevTestRunner } from "../../server/src/mcp-development-test-tools.mjs";
 import { createDevOperationJournalService } from "../../server/src/mcp-development-journal-tools.mjs";
 import { createPowerShellMaintenanceTool } from "../../server/src/mcp-powershell-maintenance-tools.mjs";
 import { fingerprintMcpMutationRequest } from "../../server/src/mcp-operation-reconciliation-context.mjs";
@@ -378,4 +380,54 @@ test("fixed isolated verification rejects incomplete or changed evidence and alw
     return valid;
   } });
   assert.equal(changed.error?.code, "ISOLATED_VERIFICATION_INPUT_CHANGED");
+});
+
+test("fixed isolated verification records real scoped dispatcher and Journal evidence", { ...platform, timeout: 180_000 }, async t => {
+  const f = await fixture(t);
+  const git = (...args) => execFileSync("git.exe", args, { cwd: f.context.root, encoding: "utf8", windowsHide: true }).trim();
+  git("init");
+  git("config", "user.name", "Nexa CI");
+  git("config", "user.email", "nexa-ci@example.invalid");
+  git("config", "core.autocrlf", "false");
+  for (const file of FIXED_ISOLATED_SOURCE_PATHS) {
+    const target = path.join(f.context.root, file);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, await readFile(new URL("../../" + file, import.meta.url)));
+  }
+  git("add", "--", ...FIXED_ISOLATED_SOURCE_PATHS);
+  git("commit", "-m", "test: fixed verification fixture");
+  const head = git("rev-parse", "HEAD");
+  const context = { ...f.context, current_head: head, base_head: head, branch: git("branch", "--show-current") };
+  // Exercise only the scope selector in this CI process. No grant files or
+  // protected host state are created, opened, or changed by the fixture.
+  const previous = process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT;
+  const programFiles = process.env.ProgramW6432 ?? process.env.ProgramFiles;
+  assert.ok(programFiles);
+  process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT = path.join(programFiles, "WriterWorkbench-PiMaintenance-v3", "grants");
+  t.after(() => {
+    if (previous === undefined) delete process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT;
+    else process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT = previous;
+  });
+  const resultPath = path.join(f.root, "fixed-verification.last.json");
+  const run = createDevTestRunner({
+    workspaceContextResolver: async () => context,
+    lockPath: path.join(f.root, "fixed-verification.lock"),
+    resultPath,
+    journal: { begin: f.journal.begin, complete: f.journal.complete, fail: f.journal.fail, markDegraded: f.journal.markDegraded },
+  });
+  await assert.rejects(run({ suite: "all", workspace_id: context.workspace_id }), { code: "ISOLATED_VERIFICATION_REQUIRED" });
+  const result = await run({ suite: FIXED_ISOLATED_SUITE, workspace_id: context.workspace_id });
+  assert.equal(result.passed, true, JSON.stringify(result));
+  assert.equal(result.head, head);
+  assert.equal(result.post_snapshot_verified, true);
+  assert.equal(result.verification_manifest.gate_result, "passed");
+  assert.deepEqual(result.verification_manifest.tests_selected, [FIXED_ISOLATED_SUITE]);
+  assert.equal(result.verification_manifest.isolation_evidence.execution_mode, "fixed_node");
+  assert.equal(result.verification_manifest.isolation_evidence.post_snapshot_verified, true);
+  assert.match(result.operation_id, /^dev_operation_[a-f0-9]{32}$/u);
+  const persisted = JSON.parse(await readFile(resultPath, "utf8"));
+  assert.deepEqual(persisted.verification_manifest, result.verification_manifest);
+  assert.equal(persisted.verification_manifest_sha256, result.verification_manifest_sha256);
+  assert.equal((await f.journal.status()).health, "healthy");
+  assert.equal(git("status", "--porcelain"), "");
 });
