@@ -1,6 +1,6 @@
 # Isolated verification continuation
 
-Refs #106 and #128. This candidate is a **test-only** continuation of the fixed AppContainer route, not an authorization or deployment change.
+Refs #106 and #128. This candidate continues the fixed AppContainer route with hosted verification and narrowly scoped Windows runner compatibility fixes, not an authorization or deployment change.
 
 ## Execution boundary
 
@@ -13,8 +13,8 @@ The stacked PR job uses read-only repository permissions and does not persist ch
 ## Completion gates
 
 1. Preserve and finish #128's current CI without restarting it for this follow-up.
-2. Inspect the complete postseal logs on both platforms. Classify fixture/runner limitations and product failures separately; retain all tests and their existing timeouts.
-3. Extend the isolated candidate verification to the required affected/full suites after the postseal result; do not promote a focused receipt to full evidence.
+2. Inspect the complete postseal logs on both platforms. Classify fixture/runner limitations and product failures separately; retain every original test and safety assertion; test-fixture watchdogs may be adjusted independently of production defaults.
+3. Run the original complete `all` gate on the exact combined candidate on a disposable Ubuntu runner, alongside both platform postseal jobs. A fixed isolated development receipt independently recaptures both snapshot boundaries without memory/parent authority reuse. Do not promote a focused receipt to full evidence.
 4. For a future production integration, require a separate trusted verifier of exact candidate identity, required suites, successful platform runs and original gate result. Bind evidence to a commit, never to an uncommitted workspace by assumption. No CI result alone authorizes local integration, push, maintenance, or deployment.
 5. Test live permanent authorization using an independently approved isolated workspace and release candidate. Keep R10 and operator policy unchanged unless explicitly authorized through the existing host mechanism.
 
