@@ -111,14 +111,47 @@ jobs:
           $env:Path = (Join-Path $Root 'tools') + ';' + $env:Path
           $session = (Get-Process -Id $PID).SessionId
           $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-          $result = [ordered]@{ session_id=$session; administrator=$admin; node_version=$null; test_exit=$null; error=$null }
+          $result = [ordered]@{ session_id=$session; administrator=$admin; node_version=$null; test_exit=$null; station_probe=$null; error=$null }
           try {
             if ($session -ne 0 -or $admin) { throw 'Expected limited Session 0' }
             $result.node_version = (& $node --version)
             if ($LASTEXITCODE -ne 0) { throw 'Host Node version probe failed' }
+            # Query-only compatibility probe; never change an existing window
+            # station/desktop, its security descriptor, or the current station.
+            Add-Type -TypeDefinition @"
+          using System;
+          using System.Text;
+          using System.Runtime.InteropServices;
+          public static class StationProbe {
+            [DllImport("user32.dll", SetLastError=true)] static extern IntPtr GetProcessWindowStation();
+            [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+            static extern IntPtr CreateWindowStation(string name, uint flags, uint access, IntPtr security);
+            [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+            static extern bool GetUserObjectInformation(IntPtr handle, int index, StringBuilder value, uint bytes, out uint required);
+            [DllImport("user32.dll", SetLastError=true)] static extern bool CloseWindowStation(IntPtr handle);
+            static string Name(IntPtr handle) {
+              var value = new StringBuilder(512); uint required;
+              if (!GetUserObjectInformation(handle, 2, value, 1024, out required)) return "query-error:" + Marshal.GetLastWin32Error();
+              return value.ToString();
+            }
+            public static string Probe(bool named) {
+              IntPtr current = GetProcessWindowStation();
+              string existing = Name(current);
+              IntPtr candidate = CreateWindowStation(named ? "NexaProbe" + Guid.NewGuid().ToString("N") : null, 0, 0x0002, IntPtr.Zero);
+              int error = Marshal.GetLastWin32Error();
+              if (candidate == IntPtr.Zero) return "current=" + existing + "; creation_error=" + error;
+              try { return "current=" + existing + "; candidate=" + Name(candidate) + "; distinct=" + (!String.Equals(existing, Name(candidate), StringComparison.OrdinalIgnoreCase)); }
+              finally { CloseWindowStation(candidate); }
+            }
+          }
+          "@
+            $result.station_probe = [ordered]@{ unnamed=[StationProbe]::Probe($false); named=[StationProbe]::Probe($true) }
             $pattern = 'fixed hermetic suite executes its real five-file closure'
-            & $node --test --test-name-pattern $pattern $test *> (Join-Path $run 'test.log')
-            $result.test_exit = $LASTEXITCODE
+            # Start-Process retains native stderr separately from PowerShell 5.1
+            # error records, so a failing test still yields a complete result.
+            $arguments = '--test --test-name-pattern "' + $pattern + '" "' + $test + '"'
+            $process = Start-Process -FilePath $node -ArgumentList $arguments -RedirectStandardOutput (Join-Path $run 'test.log') -RedirectStandardError (Join-Path $run 'test-stderr.log') -Wait -PassThru -NoNewWindow
+            $result.test_exit = $process.ExitCode
           } catch {
             $result.error = $_.Exception.Message
           } finally {
@@ -184,6 +217,8 @@ jobs:
             $observed | ConvertTo-Json -Depth 4
             $log = Join-Path $run 'test.log'
             if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log }
+            $errLog = Join-Path $run 'test-stderr.log'
+            if (Test-Path -LiteralPath $errLog) { Get-Content -LiteralPath $errLog }
             if ($observed.error -or $observed.session_id -ne 0 -or $observed.administrator -or $null -eq $observed.test_exit) { throw 'Session 0 probe not completed' }
             if ($baseline -ne 0 -or $observed.test_exit -ne 0) { throw "Observed test failure: baseline=$baseline; limited_session0=$($observed.test_exit)" }
           } finally {
