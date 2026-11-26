@@ -1250,6 +1250,7 @@ assert.deepEqual(developerTestSchema.properties.suite.enum, [
   "mcp",
   "mcp_core",
   "mcp_pi_postseal",
+  "mcp_hermetic_core",
   "mcp_infrastructure",
   "mcp_reliability",
   "mcp_tunnel",

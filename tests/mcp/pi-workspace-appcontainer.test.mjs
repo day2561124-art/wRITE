@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { createServer } from "node:net";
 import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
@@ -8,6 +9,8 @@ import path from "node:path";
 import test from "node:test";
 import { createDevOperationJournalService } from "../../server/src/mcp-development-journal-tools.mjs";
 import { createPowerShellMaintenanceTool } from "../../server/src/mcp-powershell-maintenance-tools.mjs";
+import { createDevTestRunner } from "../../server/src/mcp-development-test-tools.mjs";
+import { SCOPED_HERMETIC_SUITE, SCOPED_HERMETIC_SOURCES, runScopedHermeticVerification } from "../../server/src/mcp-scoped-verification.mjs";
 import { fingerprintMcpMutationRequest } from "../../server/src/mcp-operation-reconciliation-context.mjs";
 import { adaptAuthorizedPiRequest } from "../../server/src/pi-execution-policy.mjs";
 import { createPiProductionExecutionController } from "../../server/src/pi-production-execution-controller.mjs";
@@ -270,3 +273,89 @@ for (const loseFirstShellResponse of [false, true]) {
     assert.equal((await f.journal.status()).health, "healthy");
   });
 }
+
+test("Scoped verification selects only the fixed hermetic suite and requires verified receipt and cleanup", async () => {
+  const context = { ...identities, root: path.resolve("fixture"), workspace_type: "isolated_worktree",
+    workstream_state: "active", lifecycle_state: "active", healthy: true, mutation_allowed: true };
+  const manifest = { input_manifest_sha256: "a".repeat(64), input_file_count: SCOPED_HERMETIC_SOURCES.length, toolchain: "node" };
+  const receipt = { ...manifest, isolation_mode: "appcontainer", workspace_writes: false,
+    execution_ok: true, ok: true, exit_code: 0, timed_out: false, job_terminated: true };
+  let prepared = 0;
+  let cleaned = 0;
+  const run = (overrides = {}, cleanupFails = false, input = { suite: SCOPED_HERMETIC_SUITE, context }) =>
+    runScopedHermeticVerification(input, { prepare: async options => {
+      prepared += 1;
+      assert.equal(options.context, context);
+      assert.equal(options.cwd, context.root);
+      assert.equal(options.command, "& node.exe tests/tools/mcp-hermetic-core.test.mjs\nexit $LASTEXITCODE");
+      assert.equal(options.timeoutMs, 60_000);
+      assert.equal(options.toolchain, "node");
+      assert.deepEqual(options.sandbox_paths, SCOPED_HERMETIC_SOURCES);
+      assert.deepEqual(options.sandbox_directories, []);
+      assert.deepEqual(options.output_paths, []);
+      return { manifest, run: async () => ({ ...receipt, ...overrides }),
+        cleanup: async () => { cleaned += 1; if (cleanupFails) throw new Error("cleanup fixture failure"); } };
+    } });
+  await assert.rejects(run({}, false, { suite: "mcp_pi_postseal", context }), { code: "ISOLATED_VERIFICATION_REQUIRED" });
+  await assert.rejects(run({}, false, { suite: SCOPED_HERMETIC_SUITE, context: { ...context, workspace_type: "shared" } }),
+    { code: "ISOLATED_WORKSPACE_REQUIRED" });
+  assert.equal(prepared, 0);
+  assert.equal((await run()).passed, true);
+  for (const change of [{ job_terminated: false }, { workspace_writes: true }, { isolation_mode: "host" },
+    { input_manifest_sha256: "b".repeat(64) }, { input_file_count: 1 }, { execution_ok: false },
+    { exit_code: 1, ok: false }, { timed_out: true }]) {
+    assert.equal((await run(change)).passed, false);
+  }
+  const failedCleanup = await run({}, true);
+  assert.equal(failedCleanup.passed, false);
+  assert.equal(failedCleanup.cleanup_pending, true);
+  assert.equal(prepared, cleaned);
+});
+
+test("Scoped dev_run_tests executes the actual hermetic suite in AppContainer and binds workspace evidence",
+  { ...platform, timeout: 180_000 }, async t => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "nexa-scoped-verification-test-"));
+    t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
+    const context = { ...identities, root: path.join(root, "workspace"), workspace_type: "isolated_worktree",
+      workstream_state: "active", lifecycle_state: "active", healthy: true, mutation_allowed: true };
+    await mkdir(context.root);
+    for (const name of SCOPED_HERMETIC_SOURCES) {
+      const target = path.join(context.root, name);
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, await readFile(new URL("../../" + name, import.meta.url)));
+    }
+    const git = args => execFileSync("git.exe", args, { cwd: context.root, encoding: "utf8", windowsHide: true });
+    git(["init", "-q"]);
+    git(["add", "--", ...SCOPED_HERMETIC_SOURCES]);
+    git(["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "Hermetic fixture"]);
+    context.current_head = context.base_head = git(["rev-parse", "HEAD"]).trim();
+    context.branch = git(["branch", "--show-current"]).trim();
+    const journal = createDevOperationJournalService({ storageRoot: path.join(root, "journal") });
+    const run = createDevTestRunner({ lockPath: path.join(root, "run.lock"),
+      workspaceContextResolver: async () => context,
+      journal: { begin: journal.begin, complete: journal.complete, fail: journal.fail, markDegraded: journal.markDegraded } });
+    const grants = process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT;
+    const programFiles = process.env.ProgramW6432 ?? process.env.ProgramFiles;
+    assert.ok(programFiles);
+    process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT = path.join(programFiles, "WriterWorkbench-PiMaintenance-v3", "grants");
+    try {
+      await assert.rejects(run({ suite: "mcp_pi_postseal", workspace_id: context.workspace_id }), { code: "ISOLATED_VERIFICATION_REQUIRED" });
+      const result = await run({ suite: SCOPED_HERMETIC_SUITE, workspace_id: context.workspace_id });
+      assert.equal(result.passed, true, JSON.stringify(result));
+      assert.equal(result.execution_ok, true);
+      assert.equal(result.isolation_mode, "appcontainer");
+      assert.equal(result.workspace_writes, false);
+      assert.equal(result.cleanup_pending, false);
+      assert.equal(result.job_terminated, true);
+      assert.equal(result.input_file_count, SCOPED_HERMETIC_SOURCES.length);
+      assert.match(result.input_manifest_sha256, /^[a-f0-9]{64}$/u);
+      assert.equal(result.verification_manifest.gate_result, "passed");
+      assert.deepEqual(result.verification_manifest.tests_selected, [SCOPED_HERMETIC_SUITE]);
+      assert.equal(result.head, context.current_head);
+      assert.equal(git(["status", "--porcelain"]), "");
+      assert.equal((await journal.status()).health, "healthy");
+    } finally {
+      if (grants === undefined) delete process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT;
+      else process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT = grants;
+    }
+  });
