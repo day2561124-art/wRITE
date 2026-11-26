@@ -319,3 +319,60 @@ test("fixed hermetic suite executes its real five-file closure in Windows AppCon
   assert.notEqual(failure.exit_code, 0);
   assert.equal(failure.workspace_writes, false);
 });
+
+test("fixed isolated verification rejects incomplete or changed evidence and always cleans staging", async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "nexa-fixed-receipt-test-"));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
+  const context = { root, workspace_type: "isolated_worktree", workstream_state: "active",
+    lifecycle_state: "active", healthy: true, mutation_allowed: true };
+  const entries = [];
+  const hash = value => createHash("sha256").update(value).digest("hex");
+  for (const file of FIXED_ISOLATED_SOURCE_PATHS) {
+    const bytes = Buffer.from("// isolated receipt fixture: " + file + "\n");
+    const target = path.join(root, file);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, bytes);
+    entries.push({ path: file, sha256: hash(bytes), bytes: bytes.length });
+  }
+  const manifest = { input_manifest_sha256: hash(JSON.stringify(entries)),
+    input_file_count: entries.length };
+  const valid = { ...manifest, isolation_mode: "appcontainer", workspace_writes: false,
+    job_terminated: true, artifacts: [], toolchain: "node", execution_ok: true,
+    ok: true, exit_code: 0, timed_out: false, duration_ms: 1, stdout: "", stderr: "" };
+  const execute = async ({ staged = manifest, receipt = valid, run, cleanupError } = {}) => {
+    const calls = { run: 0, cleanup: 0 };
+    let value, error;
+    try {
+      value = await runFixedIsolatedVerification({ suite: FIXED_ISOLATED_SUITE, context,
+        prepare: async () => ({
+          manifest: staged,
+          run: async () => { calls.run++; return run ? run() : receipt; },
+          cleanup: async () => { calls.cleanup++; if (cleanupError) throw cleanupError; },
+        }) });
+    } catch (caught) { error = caught; }
+    assert.equal(calls.cleanup, 1);
+    return { value, error, calls };
+  };
+  const good = await execute();
+  assert.equal(good.error, undefined);
+  assert.equal(good.value.passed, true);
+  const mismatch = await execute({ staged: { ...manifest, input_manifest_sha256: "0".repeat(64) } });
+  assert.equal(mismatch.calls.run, 0);
+  assert.equal(mismatch.error?.code, "ISOLATED_VERIFICATION_INPUT_CHANGED");
+  for (const patch of [{ job_terminated: false }, { workspace_writes: true },
+    { input_file_count: 4 }, { input_manifest_sha256: "0".repeat(64) },
+    { isolation_mode: "host" }, { artifacts: [{ path: "unexpected.txt" }] },
+    { toolchain: "unknown" }]) {
+    const bad = await execute({ receipt: { ...valid, ...patch } });
+    assert.equal(bad.error?.code, "INVALID_ISOLATED_VERIFICATION_RECEIPT");
+  }
+  const failed = await execute({ receipt: { ...valid, ok: false, exit_code: 1 } });
+  assert.equal(failed.value.passed, false);
+  const cleanup = await execute({ cleanupError: new Error("fixture cleanup failed") });
+  assert.equal(cleanup.error?.message, "fixture cleanup failed");
+  const changed = await execute({ run: async () => {
+    await writeFile(path.join(root, FIXED_ISOLATED_SOURCE_PATHS[0]), "// changed after staging\n");
+    return valid;
+  } });
+  assert.equal(changed.error?.code, "ISOLATED_VERIFICATION_INPUT_CHANGED");
+});
