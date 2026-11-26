@@ -30,6 +30,7 @@ import { TRPG_LAUNCH_RESOLUTION, TRPG_LAUNCH_RESOLUTION_TOOL, TRPG_LAUNCH_OUTCOM
 import { restartResolutionKind, restartResolutionTool, restartParentId, restartChildId, validateRestartProof, validateRestartResolution } from "./mcp-trpg-gateway-restart-resolution.mjs";
 import { TRPG_RESUME_KIND, TRPG_RESUME_TOOL, TRPG_RESUME_RESULT, trpgResumeProofs, validateTrpgResumeResolution, verifyTrpgResumeEvidence } from "./mcp-trpg-supervisor-resume-resolution.mjs";
 import { isPowerShellPreDispatchFailure } from "./mcp-powershell-predispatch-failure.mjs";
+import { SCOPED_TEST_REJECTION_KIND, SCOPED_TEST_REJECTION_TOOL, validateScopedTestRejectionResolution, inspectReviewedScopedTestSource } from "./mcp-scoped-test-rejection-recovery.mjs";
 import { isJournalIsolationFailure, journalIncident, journalIsolationError, journalIsolationOverlaps,
   journalOperationScope } from "./mcp-development-journal-isolation.mjs";
 import { projectPaths, projectRoot } from "./project-paths.mjs";
@@ -1115,7 +1116,9 @@ export function createDevOperationJournalService({
     if(head.stdout.trim()!=="570563664d351017d87dd0f13961ed5f7d34e4ab")fail();
   }
 
-  const validateResolution=(events,input)=>input?.resolution_kind===TRPG_RESUME_KIND
+  const validateResolution=(events,input)=>input?.resolution_kind===SCOPED_TEST_REJECTION_KIND
+    ?validateScopedTestRejectionResolution(events,input)
+    :input?.resolution_kind===TRPG_RESUME_KIND
     ?validateTrpgResumeResolution(events,input)
     :input?.resolution_kind===TRPG_LAUNCH_RESOLUTION
     ?validateTrpgLaunchResolution(events,input)
@@ -1161,10 +1164,10 @@ export function createDevOperationJournalService({
       const workerRefresh=proof.resolution_kind==="completed_powershell_observation"&&proof.operation_id===REVIEWED_PI_WORKER_REFRESH.operation_id;
       if (archived && (event !== archived.receipt || admission !== archived.admission))
         throw new Error("INVALID_TERMINAL_RESOLUTION");
-      if((["completed_git_commit", WORKSTREAM_STALE_RESOLUTION, WORKSTREAM_COMMITTED_RESOLUTION, WORKSTREAM_METADATA_LIMIT_RESOLUTION, ISOLATION_RESOLUTION, POWERSHELL_EFFECT_RESOLUTION, INTEGRATION_PREFLIGHT_RESOLUTION, TRPG_LAUNCH_RESOLUTION, TRPG_RESUME_KIND].includes(proof.resolution_kind) || proof.resolution_kind==="completed_powershell_observation"&&[REVIEWED_INTERRUPTED_LAUNCHER.operation_id,REVIEWED_PI_WORKER_REFRESH.operation_id].includes(proof.operation_id)) && (
+      if(([SCOPED_TEST_REJECTION_KIND, "completed_git_commit", WORKSTREAM_STALE_RESOLUTION, WORKSTREAM_COMMITTED_RESOLUTION, WORKSTREAM_METADATA_LIMIT_RESOLUTION, ISOLATION_RESOLUTION, POWERSHELL_EFFECT_RESOLUTION, INTEGRATION_PREFLIGHT_RESOLUTION, TRPG_LAUNCH_RESOLUTION, TRPG_RESUME_KIND].includes(proof.resolution_kind) || proof.resolution_kind==="completed_powershell_observation"&&[REVIEWED_INTERRUPTED_LAUNCHER.operation_id,REVIEWED_PI_WORKER_REFRESH.operation_id].includes(proof.operation_id)) && (
         admission?.reconciliation_key !== "resolution:" + started.operation_id
         || admission?.request_fingerprint_sha256 !== sha256Text(canonicalJson(proof))
-        || admission?.tool_name !== (proof.resolution_kind === TRPG_RESUME_KIND ? TRPG_RESUME_TOOL : proof.resolution_kind === TRPG_LAUNCH_RESOLUTION ? TRPG_LAUNCH_RESOLUTION_TOOL : proof.resolution_kind === "completed_powershell_observation" ? "pi.journal.resolve_completed_powershell" : proof.resolution_kind === INTEGRATION_PREFLIGHT_RESOLUTION ? "pi.journal.resolve_integration_preflight" : proof.resolution_kind === ISOLATION_RESOLUTION ? ISOLATION_RESOLUTION_TOOL : proof.resolution_kind === POWERSHELL_EFFECT_RESOLUTION ? "pi.journal.resolve_powershell_effect" : proof.resolution_kind === WORKSTREAM_COMMITTED_RESOLUTION
+        || admission?.tool_name !== (proof.resolution_kind === SCOPED_TEST_REJECTION_KIND ? SCOPED_TEST_REJECTION_TOOL : proof.resolution_kind === TRPG_RESUME_KIND ? TRPG_RESUME_TOOL : proof.resolution_kind === TRPG_LAUNCH_RESOLUTION ? TRPG_LAUNCH_RESOLUTION_TOOL : proof.resolution_kind === "completed_powershell_observation" ? "pi.journal.resolve_completed_powershell" : proof.resolution_kind === INTEGRATION_PREFLIGHT_RESOLUTION ? "pi.journal.resolve_integration_preflight" : proof.resolution_kind === ISOLATION_RESOLUTION ? ISOLATION_RESOLUTION_TOOL : proof.resolution_kind === POWERSHELL_EFFECT_RESOLUTION ? "pi.journal.resolve_powershell_effect" : proof.resolution_kind === WORKSTREAM_COMMITTED_RESOLUTION
           ? "pi.journal.resolve_workstream_committed" : proof.resolution_kind === WORKSTREAM_METADATA_LIMIT_RESOLUTION ? "pi.journal.resolve_workstream_metadata_limit" : proof.resolution_kind === WORKSTREAM_STALE_RESOLUTION
           ? "pi.journal.resolve_workstream_stale" : "pi.journal.resolve_completed_git_commit")
         || event.tool_name !== admission.tool_name || admission.sequence <= terminal.sequence || event.sequence <= admission.sequence
@@ -2174,6 +2177,7 @@ export function createDevOperationJournalService({
 
   async function resolveTerminalMutation(input={}, resolutionKind=null, {dryRun=false,isolationLease=null}={}) {
     const isolation=resolutionKind===ISOLATION_RESOLUTION;
+    const scopedTestRejection=resolutionKind===SCOPED_TEST_REJECTION_KIND;
     const completedChild=resolutionKind==="completed_child_create";
     const completedPowershell=resolutionKind==="completed_powershell_observation";
     const completedGit=resolutionKind==="completed_git_commit";
@@ -2184,8 +2188,8 @@ export function createDevOperationJournalService({
     const trpgResume=resolutionKind===TRPG_RESUME_KIND;
     const integrationPreflight=resolutionKind===INTEGRATION_PREFLIGHT_RESOLUTION;
     const interruptedLauncher=completedPowershell&&input.operation_id===REVIEWED_INTERRUPTED_LAUNCHER.operation_id;
-    const evidenceBound=completedGit||workstreamStale||workstreamCommitted||powershellEffect||integrationPreflight||interruptedLauncher;
-    const resolutionFields=trpgResume?["resolution_kind","supervisor_log_sha256"]:isolation?["resolution_kind","original_request","observation","observation_sha256","authority_receipt"]:completedChild?["resolution_kind","expected_child_terminal_hash","observed_sha256"]
+    const evidenceBound=scopedTestRejection||completedGit||workstreamStale||workstreamCommitted||powershellEffect||integrationPreflight||interruptedLauncher;
+    const resolutionFields=scopedTestRejection?["resolution_kind"]:trpgResume?["resolution_kind","supervisor_log_sha256"]:isolation?["resolution_kind","original_request","observation","observation_sha256","authority_receipt"]:completedChild?["resolution_kind","expected_child_terminal_hash","observed_sha256"]
       :completedPowershell?["resolution_kind","expected_child_terminal_hash","expected_command_sha256","observed_exit_code"]
         :powershellEffect?["resolution_kind","parent_operation_id","parent_terminal_hash","child_operation_id","child_terminal_hash",
           "pi_claim_event_hash","test_started_event_hash","test_terminal_event_hash","profile_id"]
@@ -2228,17 +2232,18 @@ export function createDevOperationJournalService({
     if(!trpgResume&&(terminal.diagnostic.hostname!==os.hostname()||isProcessRunning(terminal.diagnostic.owner_pid)))
       throw new Error("RESOLUTION_OWNER_STILL_ACTIVE");
     const checkRecoveryEvidence=async snapshot=>{
-      if(!integrationPreflight&&!interruptedLauncher)return;
+      if(!integrationPreflight&&!interruptedLauncher&&!scopedTestRejection)return;
       validateResolution(snapshot.events,input);
       if(started.diagnostic.hostname!==os.hostname()||terminal.diagnostic.hostname!==os.hostname()
         ||isProcessRunning(started.diagnostic.owner_pid)||isProcessRunning(terminal.diagnostic.owner_pid)
         ||[...snapshot.active_operations,...snapshot.dangling_operations].some(id=>{
           const e=snapshot.events.find(e=>e.operation_id===id&&e.stage==="operation_started");
           return e?.operation_type!=="pi_terminal_resolution"||e.parent_operation_id!==started.operation_id
-            ||e.tool_name!==(interruptedLauncher?"pi.journal.resolve_completed_powershell":"pi.journal.resolve_integration_preflight")||e.result?.resolution_record!==canonicalJson(input)
+            ||e.tool_name!==(scopedTestRejection?SCOPED_TEST_REJECTION_TOOL:interruptedLauncher?"pi.journal.resolve_completed_powershell":"pi.journal.resolve_integration_preflight")||e.result?.resolution_record!==canonicalJson(input)
             ||e.diagnostic.hostname!==os.hostname()||e.diagnostic.owner_pid!==process.pid&&isProcessRunning(e.diagnostic.owner_pid);
         }))throw new Error("RESOLUTION_OWNER_STILL_ACTIVE");
-      if(interruptedLauncher)await inspectInterruptedLauncherEvidence(snapshot.events,input);
+      if(scopedTestRejection)await inspectReviewedScopedTestSource();
+      else if(interruptedLauncher)await inspectInterruptedLauncherEvidence(snapshot.events,input);
       else await inspectIntegrationPreflightEvidence(input);
     };
     const inspectShell=()=>inspectPowershellTarget(verification.events,input);
@@ -2256,7 +2261,7 @@ export function createDevOperationJournalService({
       if(started.diagnostic.hostname!==os.hostname()||isProcessRunning(started.diagnostic.owner_pid)
         ||unrelatedPending)
         throw new Error("RESOLUTION_OWNER_STILL_ACTIVE");
-      if(integrationPreflight||interruptedLauncher)await checkRecoveryEvidence(verification);
+      if(integrationPreflight||interruptedLauncher||scopedTestRejection)await checkRecoveryEvidence(verification);
       else if(powershellEffect) await inspectShell();
       else if(completedGit) await inspectCompletedGitCommit(started,terminal,input);
       else if(workstreamCommitted) await inspectWorkstreamCommittedResolution(resolutionEvidenceRoot,started,terminal,input,verification.events);
@@ -2274,6 +2279,7 @@ export function createDevOperationJournalService({
       if(canonicalJson(actual)!==canonicalJson(childDone.targets[0].after))throw new Error("RESOLUTION_PHYSICAL_STATE_CHANGED");
     }
     if(dryRun)return {verified:true,operation_id:started.operation_id,
+      ...(scopedTestRejection?{observed_effect:"scoped_test_rejected_before_execution"}:{}),
       ...(trpgResume?TRPG_RESUME_RESULT:powershellEffect?{observed_effect:"detached_all_gate_completed",shell_exit_code_observed:false}
         :(workstreamStale||workstreamCommitted)?{transaction_id:input.transaction_id}:{observed_commit:input.observed_commit})};
     const key="resolution:"+started.operation_id;
@@ -2282,13 +2288,13 @@ export function createDevOperationJournalService({
     let admission=verification.events.find(e=>e.reconciliation_key===key&&e.stage==="operation_started");
     if(!admission)try {
       admission=await append({operation_id:operationIdGenerator(),stage:"operation_started",
-        operation_type:"pi_terminal_resolution",tool_name:trpgResume?TRPG_RESUME_TOOL:integrationPreflight?"pi.journal.resolve_integration_preflight":isolation?ISOLATION_RESOLUTION_TOOL:powershellEffect?"pi.journal.resolve_powershell_effect":completedChild?"pi.journal.resolve_completed_child_create"
+        operation_type:"pi_terminal_resolution",tool_name:scopedTestRejection?SCOPED_TEST_REJECTION_TOOL:trpgResume?TRPG_RESUME_TOOL:integrationPreflight?"pi.journal.resolve_integration_preflight":isolation?ISOLATION_RESOLUTION_TOOL:powershellEffect?"pi.journal.resolve_powershell_effect":completedChild?"pi.journal.resolve_completed_child_create"
           :completedPowershell?"pi.journal.resolve_completed_powershell"
             :completedGit?"pi.journal.resolve_completed_git_commit"
               :workstreamCommitted?"pi.journal.resolve_workstream_committed"
               :workstreamMetadata?"pi.journal.resolve_workstream_metadata_limit":workstreamStale?"pi.journal.resolve_workstream_stale":"pi.journal.resolve_no_child_create",
         workspace_id:started.workspace_id,workstream_id:started.workstream_id,parent_operation_id:started.operation_id,
-        reconciliation_key:key,request_fingerprint_sha256:fingerprint,result:{resolution_record:canonicalJson(input)}}, {beforeAppend:trpgResume?checkTrpgResume:(integrationPreflight||interruptedLauncher)?checkRecoveryEvidence:powershellEffect?checkShell:checkIsolation});
+        reconciliation_key:key,request_fingerprint_sha256:fingerprint,result:{resolution_record:canonicalJson(input)}}, {beforeAppend:trpgResume?checkTrpgResume:(integrationPreflight||interruptedLauncher||scopedTestRejection)?checkRecoveryEvidence:powershellEffect?checkShell:checkIsolation});
       if(isolation)await isolationResolutionPublicationHook?.("after_admission");
       if(powershellEffect)await powershellResolutionPublicationHook?.("after_admission");
     }catch(error){if(error.code!=="RECONCILIATION_EXISTING_OPERATION")throw error;
@@ -2300,14 +2306,14 @@ export function createDevOperationJournalService({
     validateResolution(verification.events,input);
     await checkIsolation(verification);
     if(completedGit)await inspectCompletedGitCommit(started,terminal,input);
-    if(workstreamStale || workstreamCommitted || powershellEffect || integrationPreflight || interruptedLauncher) {
+    if(workstreamStale || workstreamCommitted || powershellEffect || integrationPreflight || interruptedLauncher || scopedTestRejection) {
       if(isProcessRunning(started.diagnostic.owner_pid) || isProcessRunning(terminal.diagnostic.owner_pid)
         || [...verification.active_operations,...verification.dangling_operations].some(id => {
           const event=verification.events.find(e=>e.operation_id===id&&e.stage==="operation_started");
           return event?.operation_type!=="pi_terminal_resolution" || event.parent_operation_id!==started.operation_id
             || event.result?.resolution_record!==canonicalJson(input);
         })) throw new Error("RESOLUTION_OWNER_STILL_ACTIVE");
-      if(integrationPreflight||interruptedLauncher)await checkRecoveryEvidence(verification);
+      if(integrationPreflight||interruptedLauncher||scopedTestRejection)await checkRecoveryEvidence(verification);
       else if(powershellEffect) await inspectShell();
       else if(workstreamCommitted) await inspectWorkstreamCommittedResolution(resolutionEvidenceRoot,started,terminal,input,verification.events);
       else await (workstreamMetadata?inspectWorkstreamMetadataLimitResolution:inspectWorkstreamStaleResolution)(resolutionEvidenceRoot,started,terminal,input);
@@ -2318,7 +2324,7 @@ export function createDevOperationJournalService({
         ...(trpgResume?TRPG_RESUME_RESULT:{}),
         ...(isolation&&input.observation.classification==='completed'?input.observation.witness.binding:{}),
         ...(powershellEffect?{observed_effect:"detached_all_gate_completed",shell_exit_code_observed:false}:{})},
-      ...(trpgResume?{beforeAppend:checkTrpgResume}:(integrationPreflight||interruptedLauncher)?{beforeAppend:checkRecoveryEvidence}:isolation?{beforeAppend:checkIsolation}:powershellEffect?{beforeAppend:checkShell}:{}),
+      ...(trpgResume?{beforeAppend:checkTrpgResume}:(integrationPreflight||interruptedLauncher||scopedTestRejection)?{beforeAppend:checkRecoveryEvidence}:isolation?{beforeAppend:checkIsolation}:powershellEffect?{beforeAppend:checkShell}:{}),
       ...(completedGit?{links:[{relation:"committed_by",commit:input.observed_commit}]}:{})});}
     catch(error){verification=await verify();event=resolvedTerminals(verification.events).get(started.operation_id);if(!event)throw error;}
     if(isolation)await isolationResolutionPublicationHook?.("after_completed");
@@ -2326,6 +2332,8 @@ export function createDevOperationJournalService({
     await verify();return {reconciled:false,event};
   }
 
+  const resolveScopedTestRejectionMutation=input=>resolveTerminalMutation(input,SCOPED_TEST_REJECTION_KIND);
+  const inspectScopedTestRejectionMutation=input=>resolveTerminalMutation(input,SCOPED_TEST_REJECTION_KIND,{dryRun:true});
   const resolveIntegrationPreflightMutation=input=>resolveTerminalMutation(input,INTEGRATION_PREFLIGHT_RESOLUTION);
   const inspectIntegrationPreflightMutation=input=>resolveTerminalMutation(input,INTEGRATION_PREFLIGHT_RESOLUTION,{dryRun:true});
   const resolveNoChildMutation=input=>resolveTerminalMutation(input);
@@ -2924,6 +2932,8 @@ function verifiedMcpTestResult(events,started,terminal) {
     complete,
     fail,
     recover,
+    resolveScopedTestRejectionMutation,
+    inspectScopedTestRejectionMutation,
     resolveIntegrationPreflightMutation,
     inspectIntegrationPreflightMutation,
     resolveNoChildMutation,
