@@ -159,3 +159,63 @@ test("operator review digest and overlapping policy protections are fail closed"
   assert.notEqual(replacement.policy_id, issued.policy_id);
   assert.equal((await f.adapt(source("replacement"))).standing_authorization.policy_id, replacement.policy_id);
 });
+
+test("explicit nonexpiring policy survives time and restart, but never revocation or scope changes", async t => {
+  const f = await fixture(t);
+  const permanent = { ...plan(), expires_at_ms: null };
+  const preview = await f.publisher.preview(permanent);
+  assert.equal(preview.plan.expires_at_ms, null);
+  await assert.rejects(f.publisher.issue(plan(), preview.plan_sha256),
+    { code: "STANDING_POLICY_APPROVAL_MISMATCH" });
+  const issued = await f.publisher.issue(permanent, preview.plan_sha256);
+  const before = await f.adapt(source("before"));
+  await f.controller().submit(before, { authentication });
+  f.setTime(100 + 365 * 86400000);
+  const worker = f.controller();
+  const pending = await worker.discover();
+  assert.equal(pending.length, 1);
+  assert.equal((await worker.execute(pending[0].intent)).state.status, "COMPLETED");
+  const after = await f.adapt(source("after-year"));
+  assert.equal(after.standing_authorization.policy_id, issued.policy_id);
+  assert.equal(after.task_authorization_id, undefined);
+  assert.equal((await f.publisher.list())[0].expired, false);
+  await assert.rejects(f.approve({ ...plan(), expires_at_ms: 100 + 366 * 86400000 }),
+    { code: "STANDING_POLICY_SCOPE_ALREADY_APPROVED" });
+  await assert.rejects(f.adapt(source("outside-permanent", unrelated)), { code: "PERMISSION_DENIED" });
+  await assert.rejects(f.adapt(source("wrong-principal"), { ...authentication, principal: "other" }),
+    { code: "PERMISSION_DENIED" });
+  f.contexts.set(first.workspace_id, { ...first, healthy: false });
+  // Ingress rejects an unhealthy workspace before policy binding; the reader
+  // independently refuses an already-bound intent at the dispatch boundary.
+  await assert.rejects(f.adapt(source("unhealthy")), { code: "WORKSPACE_IDENTITY_MISMATCH" });
+  await assert.rejects(f.reader().authorize(after), { code: "PERMISSION_DENIED" });
+  f.contexts.set(first.workspace_id, first);
+  await f.controller().submit(after, { authentication });
+  await f.publisher.revoke(issued.policy_id);
+  assert.equal((await f.controller().execute(after)).state.last_error.code, "PERMISSION_DENIED");
+  await assert.rejects(f.adapt(source("after-revoke-permanent")), { code: "PERMISSION_DENIED" });
+  assert.equal((await f.publisher.list())[0].revoked, true);
+  assert.equal(f.calls.length, 1);
+  assert.equal((await f.journal.status()).chain_verified, true);
+});
+
+test("permanence requires explicit null; malformed expiry and overlapping finite policies fail closed", async t => {
+  const f = await fixture(t);
+  const { expires_at_ms, ...omitted } = plan();
+  for (const candidate of [omitted, { ...plan(), expires_at_ms: "never" },
+    { ...plan(), expires_at_ms: false }, { ...plan(), expires_at_ms: 0 },
+    { ...plan(), expires_at_ms: 100 + 31 * 86400000 }]) {
+    await assert.rejects(f.publisher.preview(candidate), { code: "INVALID_STANDING_POLICY_PLAN" });
+  }
+  const finite = await f.approve();
+  await assert.rejects(f.approve({ ...plan(), expires_at_ms: null }), { code: "STANDING_POLICY_SCOPE_ALREADY_APPROVED" });
+  f.setTime(1000);
+  assert.equal((await f.publisher.list()).find(p => p.policy_id === finite.policy_id).expired, true);
+  const permanent = await f.approve({ ...plan(), expires_at_ms: null });
+  assert.equal((await f.adapt(source("replacement-after-expiry"))).standing_authorization.policy_id, permanent.policy_id);
+  f.setTime(999);
+  // Clock rollback must not make the newer permanent record usable before issuance.
+  await assert.rejects(f.reader().authorize({ ...(await f.adapt(source("old-record"))),
+    standing_authorization: { policy_id: permanent.policy_id, policy_sha256: permanent.policy_sha256, principal } }),
+    { code: "PERMISSION_DENIED" });
+});

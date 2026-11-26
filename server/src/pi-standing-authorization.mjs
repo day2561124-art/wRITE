@@ -11,6 +11,12 @@ const workstreamPattern = /^dev_workstream_[0-9]{8}-[0-9]{6}_[a-f0-9]{12}$/u;
 const maxBytes = 64 * 1024;
 const maxPolicies = 128;
 const maxDuration = 30 * 86400000;
+// Explicit null is an operator-reviewed, revocable policy without a time limit.
+// Omitted or malformed expiry is still invalid; existing finite records are unchanged.
+const validExpiry = (expiry, issuedAt) => expiry === null || (Number.isSafeInteger(expiry)
+  && expiry > issuedAt && expiry - issuedAt <= maxDuration);
+const timeValid = (record, now) => Number.isSafeInteger(now) && now >= record.issued_at_ms
+  && (record.plan.expires_at_ms === null || now < record.plan.expires_at_ms);
 // Runtime allowlist is deliberately independent of the review inventory.
 // A change to the review-only classification cannot grant new authority.
 const ordinaryCapabilities = new Set([
@@ -39,15 +45,14 @@ function validPlan(plan) {
     && plan.capabilities.every(capability => typeof capability === "string"
       && ordinaryCapabilities.has(capability)
       && reviewEngineeringCapability(capability) === "standing_scope_candidate")
-    && Number.isSafeInteger(plan.expires_at_ms);
+    && (plan.expires_at_ms === null || Number.isSafeInteger(plan.expires_at_ms));
 }
 function validRecord(record) {
   if (!exact(record, ["kind", "policy_id", "issued_at_ms", "plan", "plan_sha256"])
     || record.kind !== "operator_approved_engineering_v1"
     || typeof record.policy_id !== "string" || !idPattern.test(record.policy_id)
     || !Number.isSafeInteger(record.issued_at_ms) || record.issued_at_ms < 0
-    || !validPlan(record.plan) || record.plan.expires_at_ms <= record.issued_at_ms
-    || record.plan.expires_at_ms - record.issued_at_ms > maxDuration
+    || !validPlan(record.plan) || !validExpiry(record.plan.expires_at_ms, record.issued_at_ms)
     || record.plan_sha256 !== hashExecutionInput(record.plan)) return false;
   return true;
 }
@@ -117,7 +122,7 @@ export function createPiStandingAuthorizationReader({ root, resolveWorkspace, cl
     if (!proof || intent.bootstrap || intent.task_authorization_id !== undefined
       || record.policy_id !== proof.policy_id || hashExecutionInput(record) !== proof.policy_sha256
       || record.plan.principal !== proof.principal || intent.context?.project_id !== record.plan.project_id
-      || !Number.isSafeInteger(now) || now < record.issued_at_ms || now >= record.plan.expires_at_ms
+      || !timeValid(record, now)
       || !Array.isArray(intent.requested_actions) || intent.requested_actions.length === 0
       || intent.requested_actions.some(action => !record.plan.capabilities.includes(action.capability)
         || action.on_failure !== undefined)) fail();
@@ -126,7 +131,7 @@ export function createPiStandingAuthorizationReader({ root, resolveWorkspace, cl
     if (!scope || await revoked(dir, record.policy_id)) fail();
     const actual = await resolveWorkspace({ workspace_id: scope.workspace_id }, { mutation: true });
     if (!matchingContext(actual, scope) || await revoked(dir, record.policy_id)
-      || clock() >= record.plan.expires_at_ms) fail();
+      || !timeValid(record, clock())) fail();
   }
   async function authorize(intent) {
     try {
@@ -152,8 +157,8 @@ export function createPiStandingAuthorizationReader({ root, resolveWorkspace, cl
         const id = name.slice(0, -".approved.json".length);
         const record = await readRecord(dir, id);
         const now = clock();
-        if (record.plan.principal !== authenticatedPrincipal || now < record.issued_at_ms
-          || now >= record.plan.expires_at_ms || await revoked(dir, id)
+        if (record.plan.principal !== authenticatedPrincipal || !timeValid(record, now)
+          || await revoked(dir, id)
           || !record.plan.scopes.some(scope => scope.workspace_id === intent.context.workspace_id
             && scope.workstream_id === intent.context.workstream_id)) continue;
         matches.push(record);
@@ -180,7 +185,7 @@ export function createPiStandingPolicyPublisher({ root, resolveWorkspace, clock 
     const plan = JSON.parse(JSON.stringify(input));
     const now = clock();
     if (!validPlan(plan) || !Number.isSafeInteger(now) || now < 0
-      || plan.expires_at_ms <= now || plan.expires_at_ms - now > maxDuration) fail("INVALID_STANDING_POLICY_PLAN");
+      || !validExpiry(plan.expires_at_ms, now)) fail("INVALID_STANDING_POLICY_PLAN");
     for (const scope of plan.scopes) {
       if (!matchingContext(await resolveWorkspace({ workspace_id: scope.workspace_id }, { mutation: true }), scope))
         fail("STANDING_WORKSPACE_UNAVAILABLE");
@@ -202,7 +207,8 @@ export function createPiStandingPolicyPublisher({ root, resolveWorkspace, clock 
       for (const name of files) {
         const id = name.slice(0, -".approved.json".length);
         const record = await readRecord(dir, id);
-        if (record.plan.principal === plan.principal && clock() < record.plan.expires_at_ms
+        if (record.plan.principal === plan.principal
+          && (record.plan.expires_at_ms === null || clock() < record.plan.expires_at_ms)
           && !await revoked(dir, id) && record.plan.scopes.some(scope => plan.scopes.some(item =>
             scopeKey(scope) === scopeKey(item)))) fail("STANDING_POLICY_SCOPE_ALREADY_APPROVED");
       }
@@ -236,7 +242,7 @@ export function createPiStandingPolicyPublisher({ root, resolveWorkspace, clock 
       const id = name.slice(0, -".approved.json".length);
       const record = await readRecord(dir, id);
       records.push({ ...record, policy_sha256: hashExecutionInput(record),
-        revoked: await revoked(dir, id), expired: clock() >= record.plan.expires_at_ms });
+        revoked: await revoked(dir, id), expired: record.plan.expires_at_ms !== null && clock() >= record.plan.expires_at_ms });
     }
     return records;
   }
