@@ -77,6 +77,45 @@ internal static class PowerShellAppContainer {
     [DllImport("kernel32.dll")] private static extern bool TerminateProcess(IntPtr handle, uint exitCode);
     [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
 
+    // Diagnostic-only candidate: create a fresh desktop in the existing
+    // noninteractive station. Never change that station or any existing desktop.
+    [DllImport("user32.dll")] private static extern IntPtr GetProcessWindowStation();
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool GetUserObjectInformation(IntPtr handle, int index, StringBuilder value, uint bytes, out uint required);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateDesktop(string name, IntPtr device, IntPtr mode, uint flags, uint access, ref SecurityAttributes attributes);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool CloseDesktop(IntPtr desktop);
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool ConvertStringSecurityDescriptorToSecurityDescriptor(string sddl, uint revision, out IntPtr descriptor, out uint size);
+    [DllImport("kernel32.dll")] private static extern IntPtr LocalFree(IntPtr handle);
+
+    private static IntPtr CreateDiagnosticDesktop(SecurityIdentifier package, out string desktopPath) {
+        IntPtr station = GetProcessWindowStation();
+        Require(station != IntPtr.Zero);
+        var stationName = new StringBuilder(512);
+        uint required;
+        Require(GetUserObjectInformation(station, 2, stationName, 1024, out required));
+        string stationText = stationName.ToString();
+        if (!stationText.StartsWith("Service-", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Diagnostic desktop requires a service window station");
+        string name = "NexaPrivate" + Guid.NewGuid().ToString("N");
+        string owner;
+        using (var identity = WindowsIdentity.GetCurrent()) { owner = identity.User.Value; }
+        // Only the new desktop gets a low mandatory label and a package-specific
+        // ACE. Parent owner/System retain control; no generic AppContainer group,
+        // hooks, global station ACL/label change, or existing desktop access.
+        string sddl = "D:P(A;;GA;;;SY)(A;;GA;;;" + owner + ")(A;;0x00020087;;;" + package.Value + ")S:(ML;;NW;;;LW)";
+        IntPtr descriptor;
+        Require(ConvertStringSecurityDescriptorToSecurityDescriptor(sddl, 1, out descriptor, out required));
+        try {
+            var attributes = new SecurityAttributes { Size = Marshal.SizeOf(typeof(SecurityAttributes)), Descriptor = descriptor, Inherit = 0 };
+            IntPtr desktop = CreateDesktop(name, IntPtr.Zero, IntPtr.Zero, 0, 0x000F01FF, ref attributes);
+            Require(desktop != IntPtr.Zero);
+            desktopPath = stationText + "\\" + name;
+            return desktop;
+        } finally { LocalFree(descriptor); }
+    }
+
     private static void Require(bool ok) { if (!ok) throw new Win32Exception(Marshal.GetLastWin32Error()); }
     private static void Close(ref IntPtr handle) { if (handle != IntPtr.Zero) { CloseHandle(handle); handle = IntPtr.Zero; } }
     private static void AllowDirectory(string target, SecurityIdentifier sid, FileSystemRights rights) {
@@ -159,10 +198,14 @@ internal static class PowerShellAppContainer {
         IntPtr job = IntPtr.Zero, token = IntPtr.Zero, stdoutRead = IntPtr.Zero, stdoutWrite = IntPtr.Zero;
         IntPtr stderrRead = IntPtr.Zero, stderrWrite = IntPtr.Zero, stdinRead = IntPtr.Zero, stdinWrite = IntPtr.Zero;
         ProcessInfo child = new ProcessInfo();
+        IntPtr diagnosticDesktop = IntPtr.Zero;
+        string diagnosticDesktopPath = null;
         bool initialized = false;
         try {
             Marshal.ThrowExceptionForHR(CreateAppContainerProfile(name, name, "Nexa engineering shell", IntPtr.Zero, 0, out sid));
             var package = new SecurityIdentifier(sid);
+            if (fixedHermeticCore && Process.GetCurrentProcess().SessionId == 0)
+                diagnosticDesktop = CreateDiagnosticDesktop(package, out diagnosticDesktopPath);
             AllowDirectory(root, package, FileSystemRights.Modify);
             bool hasTools = Directory.Exists(tools);
             if (hasTools) AllowDirectory(tools, package, FileSystemRights.ReadAndExecute);
@@ -194,7 +237,7 @@ internal static class PowerShellAppContainer {
             Require(job != IntPtr.Zero);
             var limits = new JobExtendedLimits { Basic = new JobBasicLimits { Flags = JobLimits, ActiveProcesses = 32 }, JobMemory = new UIntPtr(768U * 1024 * 1024) };
             Require(SetInformationJobObject(job, 9, ref limits, Marshal.SizeOf(typeof(JobExtendedLimits))));
-            var startup = new StartupInfoEx { Info = new StartupInfo { Size = Marshal.SizeOf(typeof(StartupInfoEx)), Flags = UseStdHandles,
+            var startup = new StartupInfoEx { Info = new StartupInfo { Size = Marshal.SizeOf(typeof(StartupInfoEx)), Flags = UseStdHandles, Desktop = diagnosticDesktopPath,
                 StdIn = stdinRead, StdOut = stdoutWrite, StdErr = stderrWrite }, Attributes = attrs };
             string scratch = Path.Combine(root, "temp");
             env = Marshal.StringToHGlobalUni("COMSPEC=" + Path.Combine(system, "cmd.exe") + "\0LOCALAPPDATA=" + scratch
@@ -262,6 +305,8 @@ internal static class PowerShellAppContainer {
         } finally {
             if (child.Process != IntPtr.Zero) TerminateProcess(child.Process, 1);
             Close(ref job); Close(ref child.Thread); Close(ref child.Process); Close(ref token);
+            if (diagnosticDesktop != IntPtr.Zero && !CloseDesktop(diagnosticDesktop))
+                Console.Error.WriteLine("Diagnostic desktop cleanup failed");
             Close(ref stdinRead); Close(ref stdinWrite); Close(ref stdoutRead); Close(ref stdoutWrite); Close(ref stderrRead); Close(ref stderrWrite);
             if (initialized) DeleteProcThreadAttributeList(attrs);
             if (attrs != IntPtr.Zero) Marshal.FreeHGlobal(attrs);
