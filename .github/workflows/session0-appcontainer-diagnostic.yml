@@ -282,20 +282,7 @@ jobs:
                 if ($observed -and $observed.test_exit -eq 0) {
                   $lines = @(Get-Content -LiteralPath $leaseLog)
                   $acquired = @($lines | Where-Object { $_ -match '^acquired=[0-9a-f]{32}; package=S-1-15-2-' })
-                  $closed = @($lines | Where-Object { $_ -match '^closed=[0-9a-f]{32}; released=True; cleaned=True
-                  throw 'Independent station fixture cleanup not verified'
-                }
-              }
-            } finally {
-              try {
-                if ($batchPolicyChanged) { Set-FixtureBatchRight $originalBatch 'fixture-batch-restore' }
-              } finally {
-                if ($createdUser) { Remove-LocalUser -Name $account }
-              }
-            }
-            if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
-          }
- })
+                  $closed = @($lines | Where-Object { $_ -match '^closed=[0-9a-f]{32}; released=True; cleaned=True$' })
                   $ids = @($acquired | ForEach-Object { ($_ -split '[=;]')[1] })
                   $packages = @($acquired | ForEach-Object { ($_ -split 'package=')[1] })
                   $closedIds = @($closed | ForEach-Object { ($_ -split '[=;]')[1] })
