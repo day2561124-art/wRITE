@@ -7,6 +7,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: session0-diag-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   session0:
     runs-on: windows-latest
@@ -42,6 +46,11 @@ jobs:
           $observed = $null
           try {
             $null = New-Item -ItemType Directory -Path $root
+            # Never run the SYSTEM fixture from a location writable by the
+            # standard test user or guest. Remove inherited root permissions
+            # before writing any executable; only the run subtree is writable.
+            icacls $root /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)(F)' '*S-1-5-32-544:(OI)(CI)(F)' | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Fixture root protection failed' }
             $source = Join-Path $root 'source'
             $tools = Join-Path $root 'tools'
             $run = Join-Path $root 'run'
