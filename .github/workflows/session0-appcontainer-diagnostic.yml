@@ -3,7 +3,7 @@ name: Session 0 AppContainer diagnosis
 # Disposable hosted runner only. Not a production deployment or grant test.
 on:
   pull_request:
-    branches: [nexa/unified-engineering-ingress, nexa/session0-appcontainer-diagnostic]
+    branches: [nexa/unified-engineering-ingress]
 permissions:
   contents: read
 
@@ -34,6 +34,7 @@ jobs:
           $actual = (git rev-parse HEAD).Trim()
           if ($LASTEXITCODE -ne 0 -or $actual -cne $env:EXPECTED_HEAD) { throw 'Candidate mismatch' }
           Write-Output "Candidate HEAD: $actual"
+          Write-Output 'PER_RUN_LEASE_FIXTURE_V1; diagnostic comparison only; no production deployment'
           $suffix = [guid]::NewGuid().ToString('N').Substring(0,12)
           $root = Join-Path $env:SystemDrive "NexaDiag-$suffix"
           $account = "NexaDiag$suffix"
