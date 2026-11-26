@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { access, lstat, mkdir, readFile, rm } from "node:fs/promises";
+import { access, lstat, mkdir, readFile, realpath, rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { commitFileTransaction } from "./file-transactions.mjs";
@@ -480,6 +480,19 @@ function normalizeGitMetadataPath(root, value, label) {
   return path.resolve(root, raw);
 }
 
+// Git may report a long-name or differently cased Windows path. Compare
+// existing physical directories without accepting a symbolic-link worktree.
+async function canonicalWorktreeDirectory(value) {
+  try {
+    const info = await lstat(value);
+    if (!info.isDirectory() || info.isSymbolicLink()) return null;
+    return await realpath(value);
+  } catch (error) {
+    if (error.code === "ENOENT" || error.code === "ENOTDIR") return null;
+    throw error;
+  }
+}
+
 async function ensureSafeWorktreeRoot(root = worktreeRoot) {
   const parent = path.dirname(root);
   const parentInfo = await lstat(parent);
@@ -607,7 +620,17 @@ export function createDevWorkstreamRegistryService({
       if (error.code !== "ENOENT") throw error;
     }
     const entries = await listGitWorktrees();
-    const mapping = entries.find((entry) => path.resolve(entry.path) === path.resolve(absolutePath)) ?? null;
+    const canonicalPath = pathExists ? await canonicalWorktreeDirectory(absolutePath) : null;
+    const matches = [];
+    for (const entry of entries) {
+      // Preserve stale lexical mappings for removal/recovery diagnostics.
+      if (path.resolve(entry.path) === path.resolve(absolutePath)
+          || (canonicalPath !== null && await canonicalWorktreeDirectory(entry.path) === canonicalPath)) {
+        matches.push(entry);
+      }
+    }
+    if (matches.length > 1) throw new Error("Ambiguous Git worktree mapping; execution is refused.");
+    const mapping = matches[0] ?? null;
     let dirty = null;
     let staged = [];
     let conflicted = [];
@@ -1014,7 +1037,8 @@ export function createDevWorkstreamRegistryService({
       }
       const resolvedRoot = path.resolve(String(topLevel.stdout).trim());
       const currentHead = String(head.stdout).trim().toLowerCase();
-      if (resolvedRoot !== path.resolve(repositoryRoot)) throw new Error("Shared workspace Git top-level does not match the canonical repository root.");
+      const canonicalRoot = await canonicalWorktreeDirectory(repositoryRoot);
+      if (canonicalRoot === null || await canonicalWorktreeDirectory(resolvedRoot) !== canonicalRoot) throw new Error("Shared workspace Git top-level does not match the canonical repository root.");
       if (!gitSha1Pattern.test(currentHead)) throw new Error("Shared workspace HEAD is invalid.");
       return {
         workspace_id: DEV_WORKSTREAM_WORKSPACE_ID,
@@ -1057,7 +1081,8 @@ export function createDevWorkstreamRegistryService({
     const resolvedRoot = path.resolve(String(topLevel.stdout).trim());
     const currentHead = String(head.stdout).trim().toLowerCase();
     const branchName = String(branch.stdout).trim() || null;
-    if (resolvedRoot !== path.resolve(root)) throw new Error("Workspace Git top-level does not match the registered worktree root.");
+    const canonicalRoot = await canonicalWorktreeDirectory(root);
+    if (canonicalRoot === null || await canonicalWorktreeDirectory(resolvedRoot) !== canonicalRoot) throw new Error("Workspace Git top-level does not match the registered worktree root.");
     if (!gitSha1Pattern.test(currentHead)) throw new Error("Workspace HEAD is invalid.");
     if (branchName !== record.workspace.branch_name) throw new Error("Workspace branch no longer matches the registry mapping.");
     return {
