@@ -9,7 +9,9 @@ import { projectRoot } from '../../server/src/project-paths.mjs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
-const root = await mkdtemp(path.join(os.tmpdir(), 'checkpoint-readiness-contention-'));
+// Match the managed project's canonical path contract even when the hosted
+// Windows TEMP directory is presented using a short-name alias.
+const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'checkpoint-readiness-contention-')));
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 let holder;
 try {

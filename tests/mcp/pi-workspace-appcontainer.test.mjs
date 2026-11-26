@@ -63,8 +63,17 @@ async function fixture(t, { allowRepair = false, loseFirstShellResponse = false 
         const result = await journal.executeReconciled({ reconciliation_key: params._meta.reconciliation_key,
           request_fingerprint_sha256: fingerprintMcpMutationRequest(params.name, params.arguments), tool_name: params.name,
           resolve_workspace_scope: async () => identities }, async () => {
-          const payload = await tool(params.arguments);
-          return { content: [{ type: "text", text: JSON.stringify(payload) }] };
+          try {
+            const payload = await tool(params.arguments);
+            return { content: [{ type: "text", text: JSON.stringify(payload) }] };
+          } catch (error) {
+            // Only fixture paths and commands are used here. Keep the original
+            // error and reconciliation behavior, but expose the pre-dispatch
+            // failure to hosted CI before the controller records its outcome.
+            t.diagnostic(JSON.stringify({ stage: "appcontainer-fixture-dispatch",
+              code: error?.code ?? null, message: error?.message ?? String(error) }));
+            throw error;
+          }
         });
         if (loseFirstShellResponse && dispatches === 1) {
           throw Object.assign(new Error("Fixture lost the native build response"), { code: "TRANSPORT_ERROR" });
@@ -79,7 +88,7 @@ async function fixture(t, { allowRepair = false, loseFirstShellResponse = false 
   return { root, context, journal, controller, intent, dispatches: () => dispatches };
 }
 
-test("Pi runs sandboxed PowerShell with exact staged input, denied host and loopback access, and a durable output", platform, async t => {
+test("Pi runs sandboxed PowerShell with exact staged input, denied host and loopback access, and a durable output", { ...platform, timeout: 120_000 }, async t => {
   const f = await fixture(t);
   const protectedPath = path.join(f.root, "host-only.txt");
   const source = path.join(f.context.root, "source.txt");
@@ -98,12 +107,14 @@ test("Pi runs sandboxed PowerShell with exact staged input, denied host and loop
     `try { [IO.File]::ReadAllText($outside) | Out-Null; throw 'unexpected host read' } catch [UnauthorizedAccessException] {}`,
     `try { [IO.File]::WriteAllText($outside, 'unexpected'); throw 'unexpected host write' } catch [UnauthorizedAccessException] {}`,
     `$fixture = [Net.Sockets.TcpClient]::new()`,
-    `try { $fixture.Connect('127.0.0.1', ${service.address().port}); throw 'unexpected loopback' } catch [Net.Sockets.SocketException] {} finally { $fixture.Dispose() }`,
+    // A denied TCP connection can be silently dropped instead of immediately refused.
+    // Bound the probe independently of the sandbox watchdog; any successful connection still fails.
+    `try { $pending = $fixture.BeginConnect('127.0.0.1', ${service.address().port}, $null, $null); if ($pending.AsyncWaitHandle.WaitOne(5000)) { $fixture.EndConnect($pending); throw 'unexpected loopback' }; if ($fixture.Connected) { throw 'unexpected loopback' } } catch [Net.Sockets.SocketException] {} finally { $fixture.Dispose() }`,
     `$copied = [IO.File]::ReadAllText([IO.Path]::GetFullPath('source.txt'))`,
     `[IO.File]::WriteAllText([IO.Path]::GetFullPath('source.txt'), $copied + '-edited')`,
     "Write-Output 'isolated-fixture-ok'",
   ].join("\n");
-  const intent = await f.intent("native-appcontainer-read-write", command, { sandbox_paths: ["source.txt"], output_paths: ["source.txt"] });
+  const intent = await f.intent("native-appcontainer-read-write", command, { sandbox_paths: ["source.txt"], output_paths: ["source.txt"], timeoutMs: 60_000 });
   assert.equal(intent.requested_actions[0].capability, shellCapability);
   const completed = await f.controller.execute(intent);
   assert.equal(completed.state.status, "COMPLETED", JSON.stringify(completed.state.last_error) + JSON.stringify(completed.receipts));
@@ -120,17 +131,18 @@ test("Pi runs sandboxed PowerShell with exact staged input, denied host and loop
   assert.equal((await f.journal.status()).health, "healthy");
 });
 
-test("AppContainer timeout terminates a Windows child and records a safe workspace failure", platform, async t => {
+test("AppContainer timeout terminates a Windows child and records a safe workspace failure", { ...platform, timeout: 120_000 }, async t => {
   const f = await fixture(t);
   const command = [
-    `$program = [Diagnostics.ProcessStartInfo]::new([IO.Path]::Combine($PSHOME, 'powershell.exe'), '-NoProfile -NonInteractive -Command Start-Sleep -Seconds 30')`,
+    `$program = [Diagnostics.ProcessStartInfo]::new([IO.Path]::Combine($PSHOME, 'powershell.exe'), '-NoProfile -NonInteractive -Command [Threading.Thread]::Sleep(90000)')`,
     "$program.UseShellExecute = $false",
     "$program.CreateNoWindow = $true",
     "$child = [Diagnostics.Process]::Start($program)",
-    "Write-Output ('sandbox-child=' + $child.Id)",
-    "Start-Sleep -Seconds 30",
+    "[Console]::WriteLine('sandbox-child=' + $child.Id)",
+    "[Console]::Out.Flush()",
+    "[Threading.Thread]::Sleep(90000)",
   ].join("\n");
-  const intent = await f.intent("native-appcontainer-timeout", command, { timeoutMs: 2500 });
+  const intent = await f.intent("native-appcontainer-timeout", command, { timeoutMs: 45_000 });
   const stopped = await f.controller.execute(intent);
   assert.equal(stopped.state.status, "DECISION_REQUIRED");
   const observed = JSON.parse(stopped.command.receipt.evidence.content[0].text);
@@ -169,7 +181,7 @@ test("AppContainer composes a real Windows build and preserves the native test e
   await assert.rejects(readFile(path.join(f.context.root, "code", "probe.exe")), { code: "ENOENT" });
 });
 
-test("AppContainer installs a workspace package offline and runs a Node test in one process", platform, async t => {
+test("AppContainer installs a workspace package offline and runs a Node test in one process", { ...platform, timeout: 120_000 }, async t => {
   const f = await fixture(t);
   await mkdir(path.join(f.context.root, "fixture"));
   await writeFile(path.join(f.context.root, "package.json"), JSON.stringify({ name: "nexa-fixture-root", version: "1.0.0",
@@ -192,7 +204,7 @@ test("AppContainer installs a workspace package offline and runs a Node test in 
     "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }",
     runTest,
   ].join("\n");
-  const intent = await f.intent("native-appcontainer-npm", command, { toolchain: "node", timeoutMs: 30_000,
+  const intent = await f.intent("native-appcontainer-npm", command, { toolchain: "node", timeoutMs: 60_000,
     sandbox_paths: ["package.json", "fixture/package.json", "fixture/index.js", "offline.test.cjs"] });
   const result = await f.controller.execute(intent);
   assert.equal(result.state.status, "COMPLETED", JSON.stringify(result.command));
