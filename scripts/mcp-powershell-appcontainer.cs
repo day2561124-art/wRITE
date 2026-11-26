@@ -209,6 +209,7 @@ internal static class PowerShellAppContainer {
                 + "[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); "
                 // AppContainer may lack normal module discovery. Load only the OS-owned module, never staged source.
                 + "Microsoft.PowerShell.Core\\Import-Module -Name ([IO.Path]::Combine($PSHOME, 'Modules\\Microsoft.PowerShell.Management\\Microsoft.PowerShell.Management.psd1')) -ErrorAction Stop; "
+                + "Microsoft.PowerShell.Core\\Import-Module -Name ([IO.Path]::Combine($PSHOME, 'Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1')) -ErrorAction Stop; "
                 + "Microsoft.PowerShell.Management\\New-PSDrive -Name Nexa -PSProvider FileSystem -Root $env:NEXA_SANDBOX_WORK -Scope Global | Out-Null; "
                 + "Microsoft.PowerShell.Management\\Set-Location -LiteralPath (Microsoft.PowerShell.Management\\Join-Path 'Nexa:\\' $env:NEXA_SANDBOX_CWD); "
                 + "$global:LASTEXITCODE = 0; & ([scriptblock]::Create([IO.File]::ReadAllText($env:NEXA_SANDBOX_SCRIPT))); "
