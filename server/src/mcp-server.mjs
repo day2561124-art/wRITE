@@ -2156,7 +2156,7 @@ const toolDefinitions = [
   },
   {
     name: "dev_pi_execute_intent",
-    description: "Default engineering ingress. Routine work accepts intent_id, goal, registered isolated workspace_id and explicit requested_actions. When task grants are mandatory, a request without task_authorization_id can use an existing operator-approved host binding; missing or invalid bindings are denied. host_approved_engineering explicitly selects the same mechanism. standing_engineering uses a separately published operator-approved finite standing policy, explicit actions, and authenticated principal; absent, ambiguous, expired or revoked policy is denied. Commands require their existing explicit authorization and never use automatic binding. Pi derives mechanical contract fields for autonomous_engineering. Legacy autonomous PowerShell, authorized_engineering, and full ExecutionIntent inputs remain subject to server policy. reconcile_only needs the exact operation identity and context. Duplicate intents return durable state.",
+    description: "Default engineering ingress. Routine work accepts intent_id, goal, registered isolated workspace_id and explicit requested_actions. When task grants are mandatory, ordinary autonomous_engineering explicit actions without task_authorization_id select the independently approved standing policy for the authenticated principal and exact registered scope; only absence of any matching policy history permits a separate operator-approved host binding. Denial, expiry, revocation or invalid policy never triggers fallback. Legacy host_approved_engineering and standing_engineering remain explicit compatibility routes. Commands require their existing explicit authorization and never use automatic binding. Pi derives mechanical contract fields for autonomous_engineering. Legacy autonomous PowerShell, authorized_engineering, and full ExecutionIntent inputs remain subject to server policy. reconcile_only needs the exact operation identity and context. Duplicate intents return durable state.",
     risk: "high-risk-write",
     annotations: { readOnlyHint: false },
     inputSchema: baseSchema({ intent_json: { type: "string", minLength: 1, maxLength: 524288 } }, ["intent_json"]),
@@ -2170,6 +2170,7 @@ const toolDefinitions = [
         authentication, resolveWorkspace: resolveDevWorkspaceExecutionContext,
         approvalSource: piEngineeringApprovalSource,
         standingApprovalSource: piStandingAuthorizationReader.bind,
+        automaticStandingApprovalSource: piStandingAuthorizationReader.bindIfApplicable,
         requireTaskAuthorization: process.env.NEXA_PI_REQUIRE_TASK_AUTHORIZATION === "1",
       });
       return jsonContent(await piProductionController.submit(intent, { authentication }));
@@ -6143,7 +6144,7 @@ async function dispatch(message) {
         },
       },
       serverInfo,
-      instructions: "Use tools/list and tools/call. Bounded development file and Git reads can run directly against their authorized workspace. Engineering routing is governed by dev_pi_execution_status. When pi_default is active, submit GPT-authored work through dev_pi_execute_intent with the operator-issued task_authorization_id when required, or explicit requested_actions using an existing operator-approved host binding. For independently approved ordinary isolated workspaces, standing_engineering can use an explicit action list without a task grant ID; the host derives and revalidates the pinned policy. A missing or invalid authorization does not permit execution. GPT decides, Pi schedules and records, MCP executes. Other direct engineering tools use diagnostic/emergency fallback metadata and mutations require a reconciliation_key. Consult persisted operation evidence after a Pi failure. High-risk writes retain their explicit confirmation guards." + (trpgGMBridge?.instruction ? " TRPG GM: " + trpgGMBridge.instruction : ""),
+      instructions: "Use tools/list and tools/call. Bounded development file and Git reads can run directly against their authorized workspace. Engineering routing is governed by dev_pi_execution_status. When pi_default is active, submit GPT-authored work through dev_pi_execute_intent using autonomous_engineering and explicit requested_actions for ordinary isolated work. The host selects and revalidates an existing standing policy, or an independent host binding only if no matching policy history exists. Use an operator-issued task_authorization_id for explicitly authorized operations when required; legacy explicit ingress names remain compatible. A missing or invalid authorization does not permit execution. GPT decides, Pi schedules and records, MCP executes. Other direct engineering tools use diagnostic/emergency fallback metadata and mutations require a reconciliation_key. Consult persisted operation evidence after a Pi failure. High-risk writes retain their explicit confirmation guards." + (trpgGMBridge?.instruction ? " TRPG GM: " + trpgGMBridge.instruction : ""),
     });
   }
 
