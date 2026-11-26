@@ -105,9 +105,13 @@ async function stageNodeToolchain(target) {
 }
 
 export async function prepareAppContainerPowerShell({ context, cwd, command, timeoutMs,
-  sandbox_paths = [], sandbox_directories = [], output_paths = [], toolchain }) {
+  sandbox_paths = [], sandbox_directories = [], output_paths = [], toolchain, fixedHermeticCore = false }) {
   if (process.platform !== "win32" || process.arch !== "x64") throw new Error("WINDOWS_APPCONTAINER_UNAVAILABLE");
   if (toolchain !== undefined && toolchain !== "node") throw new Error("INVALID_SANDBOX_TOOLCHAIN");
+  // Internal fixed verification only: no caller-selected executable or arguments.
+  if (fixedHermeticCore && (toolchain !== "node" || cwd !== context.root || output_paths.length !== 0 || sandbox_directories.length !== 0)) {
+    throw new Error("INVALID_FIXED_APPCONTAINER_PLAN");
+  }
   const sources = await selectedSources(context.root, sandbox_paths, sandbox_directories);
   const outputs = selectedPaths(context.root, output_paths, 8);
   if (Buffer.byteLength(JSON.stringify(outputs.map(output => output.name))) > 4096) throw new Error("SANDBOX_OUTPUT_PATH_LIMIT");
@@ -167,7 +171,7 @@ export async function prepareAppContainerPowerShell({ context, cwd, command, tim
     throw error;
   }
   const manifest = { input_manifest_sha256: hash(JSON.stringify(inputManifest)), input_file_count: inputManifest.length,
-    ...(toolchain ? { toolchain } : {}) };
+    ...(toolchain ? { toolchain } : {}), ...(fixedHermeticCore ? { execution_mode: "fixed_node" } : {}) };
   const run = async () => {
     const start = Date.now();
     const base = { elevated: false, command_sha256: commandHash, cwd, timeout_ms: timeoutMs,
@@ -175,7 +179,9 @@ export async function prepareAppContainerPowerShell({ context, cwd, command, tim
       stdout_truncated: false, stderr_truncated: false, isolation_mode: "appcontainer", workspace_writes: false, ...manifest };
     let facts;
     try {
-      const { stdout, stderr } = await exec(runner, [stage, relativeCwd, String(timeoutMs)],
+      const runnerArgs = [stage, relativeCwd, String(timeoutMs)];
+      if (fixedHermeticCore) runnerArgs.push("fixed-hermetic-core");
+      const { stdout, stderr } = await exec(runner, runnerArgs,
         { cwd: root, env, windowsHide: true, timeout: timeoutMs + 15_000, maxBuffer: 65_536 });
       if (stderr) throw new Error("APPCONTAINER_CLEANUP_UNVERIFIED");
       facts = JSON.parse(stdout);
