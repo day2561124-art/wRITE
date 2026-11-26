@@ -336,6 +336,59 @@ test("fixed hermetic suite executes its real five-file closure in Windows AppCon
   assert.equal(failure.workspace_writes, false);
 });
 
+test("fixed hermetic suite denies host files, toolchain writes and host loopback in Windows AppContainer", { ...platform, timeout: 180_000 }, async t => {
+  const f = await fixture(t);
+  const outside = path.join(f.root, "host-only.txt");
+  await writeFile(outside, "host-fixture");
+  const protectedEnv = "NEXA_FIXED_ISOLATION_TEST_HOST_ONLY";
+  process.env[protectedEnv] = "host-fixture";
+  t.after(() => { delete process.env[protectedEnv]; });
+  let connected = false;
+  const listener = createServer(socket => { connected = true; socket.destroy(); });
+  listener.listen(0, "127.0.0.1");
+  await once(listener, "listening");
+  t.after(() => new Promise(resolve => listener.close(resolve)));
+  for (const file of FIXED_ISOLATED_SOURCE_PATHS) {
+    const target = path.join(f.context.root, file);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, await readFile(new URL("../../" + file, import.meta.url)));
+  }
+  const entry = path.join(f.context.root, FIXED_ISOLATED_SOURCE_PATHS[0]);
+  // Only synthetic fixture inputs are used. Exercise the real fixed Node
+  // route; successful access to any protected resource makes the test fail.
+  const probe = [
+    'import assert from "node:assert/strict";',
+    'import { readFile, writeFile } from "node:fs/promises";',
+    'import { createConnection } from "node:net";',
+    'import path from "node:path";',
+    `const host = ${JSON.stringify(outside)};`,
+    `assert.equal(process.env[${JSON.stringify(protectedEnv)}], undefined);`,
+    'const denied = error => ["EACCES", "EPERM", "ENOENT"].includes(error?.code);',
+    'await assert.rejects(readFile(host, "utf8"), denied);',
+    'await assert.rejects(writeFile(host, "unexpected"), denied);',
+    'await assert.rejects(writeFile(path.join(path.dirname(process.execPath), "fixture-forbidden.txt"), "unexpected", { flag: "wx" }), denied);',
+    // Windows can redirect TEMP to an uncreated package-specific directory.
+    // Use the explicit staged workspace for the positive write control instead.
+    'const guestFile = path.join(process.env.NEXA_SANDBOX_WORK, "guest-only.txt");',
+    'await writeFile(guestFile, "allowed", { flag: "wx" });',
+    'assert.equal(await readFile(guestFile, "utf8"), "allowed");',
+    `await new Promise((resolve, reject) => { const socket = createConnection({ host: "127.0.0.1", port: ${listener.address().port} }); socket.once("connect", () => { socket.destroy(); reject(new Error("host loopback allowed")); }); socket.once("error", resolve); socket.setTimeout(5000, () => { socket.destroy(); resolve(); }); });`,
+    'console.log("FIXED_ISOLATION_NEGATIVE_PROBE_PASS");',
+  ].join("\n");
+  await writeFile(entry, probe);
+  const result = await runFixedIsolatedVerification({ suite: FIXED_ISOLATED_SUITE, context: f.context });
+  assert.equal(result.passed, true, JSON.stringify(result));
+  assert.match(result.stdout, /FIXED_ISOLATION_NEGATIVE_PROBE_PASS/u);
+  assert.equal(result.exit_code, 0);
+  assert.equal(result.input_file_count, 5);
+  assert.equal(result.workspace_writes, false);
+  assert.equal(result.cleanup_pending, false);
+  assert.equal(result.job_terminated, true);
+  assert.equal(connected, false);
+  assert.equal(await readFile(outside, "utf8"), "host-fixture");
+  assert.equal(await readFile(entry, "utf8"), probe);
+});
+
 test("fixed isolated verification rejects incomplete or changed evidence and always cleans staging", async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), "nexa-fixed-receipt-test-"));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));

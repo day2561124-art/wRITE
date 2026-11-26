@@ -2,6 +2,7 @@ using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Principal;
@@ -77,6 +78,51 @@ internal static class PowerShellAppContainer {
     [DllImport("kernel32.dll")] private static extern bool TerminateProcess(IntPtr handle, uint exitCode);
     [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
 
+    // CI experiment only. The production branch has no lease client.
+    private sealed class DiagnosticLease : IDisposable {
+        private NamedPipeClientStream pipe;
+        internal string Id { get; private set; }
+        private byte[] ReadExact(int count) {
+            byte[] data = new byte[count];
+            var deadline = Stopwatch.StartNew();
+            int offset = 0;
+            while (offset < count) {
+                var pending = pipe.BeginRead(data, offset, count-offset, null, null);
+                int remaining = 5000-(int)deadline.ElapsedMilliseconds;
+                if (remaining<=0 || !pending.AsyncWaitHandle.WaitOne(remaining))
+                    throw new TimeoutException("Diagnostic lease response timeout");
+                int size = pipe.EndRead(pending);
+                if (size==0) throw new EndOfStreamException("Diagnostic lease ended");
+                offset += size;
+            }
+            return data;
+        }
+        internal DiagnosticLease() {
+            try {
+                pipe = new NamedPipeClientStream(".", "NexaDiagStationLeaseV1",
+                    PipeAccessRights.ReadWrite | PipeAccessRights.ReadPermissions | PipeAccessRights.Synchronize,
+                    PipeOptions.Asynchronous, TokenImpersonationLevel.Identification, HandleInheritability.None);
+                pipe.Connect(5000);
+                var owner = pipe.GetAccessControl().GetOwner(typeof(SecurityIdentifier));
+                if (!owner.Equals(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null)))
+                    throw new InvalidOperationException("Unexpected diagnostic provider identity");
+                pipe.WriteByte(65); pipe.Flush();
+                Id=Encoding.ASCII.GetString(ReadExact(32));
+                Guid parsed;
+                if (!Guid.TryParseExact(Id,"N",out parsed) || parsed.ToString("N")!=Id)
+                    throw new InvalidOperationException("Malformed diagnostic lease ID");
+            } catch {
+                Dispose();
+                throw;
+            }
+        }
+        internal void Release() {
+            pipe.WriteByte(82); pipe.Flush();
+            if (ReadExact(1)[0]!=75) throw new InvalidOperationException("Diagnostic lease cleanup unacknowledged");
+        }
+        public void Dispose() { if(pipe!=null) { pipe.Dispose(); pipe=null; } }
+    }
+
     private static void Require(bool ok) { if (!ok) throw new Win32Exception(Marshal.GetLastWin32Error()); }
     private static void Close(ref IntPtr handle) { if (handle != IntPtr.Zero) { CloseHandle(handle); handle = IntPtr.Zero; } }
     private static void AllowDirectory(string target, SecurityIdentifier sid, FileSystemRights rights) {
@@ -148,6 +194,9 @@ internal static class PowerShellAppContainer {
         string tools = Path.Combine(Directory.GetParent(root).FullName, "tools");
         string cwd = Path.GetFullPath(Path.Combine(work, args[1]));
         if (!cwd.Equals(work, StringComparison.OrdinalIgnoreCase) && !cwd.StartsWith(work + "\\", StringComparison.OrdinalIgnoreCase)) return 64;
+        // DIAGNOSTIC ONLY: pair the exact package with the independent CI
+        // provisioner. This is not a production profile or deployment contract.
+        bool fixtureStation = fixedHermeticCore && Process.GetCurrentProcess().SessionId == 0;
         string name = "NexaPiShell" + Guid.NewGuid().ToString("N");
         string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
         string system = Path.Combine(windows, "System32");
@@ -160,7 +209,15 @@ internal static class PowerShellAppContainer {
         IntPtr stderrRead = IntPtr.Zero, stderrWrite = IntPtr.Zero, stdinRead = IntPtr.Zero, stdinWrite = IntPtr.Zero;
         ProcessInfo child = new ProcessInfo();
         bool initialized = false;
+        DiagnosticLease lease = null;
+        bool profileDeleted = false;
+        bool leaseCleanupVerified = false;
+        string completedResult = null;
         try {
+            if (fixtureStation) {
+                lease = new DiagnosticLease();
+                name = "NexaLease" + lease.Id;
+            }
             Marshal.ThrowExceptionForHR(CreateAppContainerProfile(name, name, "Nexa engineering shell", IntPtr.Zero, 0, out sid));
             var package = new SecurityIdentifier(sid);
             AllowDirectory(root, package, FileSystemRights.Modify);
@@ -195,6 +252,7 @@ internal static class PowerShellAppContainer {
             var limits = new JobExtendedLimits { Basic = new JobBasicLimits { Flags = JobLimits, ActiveProcesses = 32 }, JobMemory = new UIntPtr(768U * 1024 * 1024) };
             Require(SetInformationJobObject(job, 9, ref limits, Marshal.SizeOf(typeof(JobExtendedLimits))));
             var startup = new StartupInfoEx { Info = new StartupInfo { Size = Marshal.SizeOf(typeof(StartupInfoEx)), Flags = UseStdHandles,
+                Desktop = fixtureStation ? "NexaLeaseStation" + lease.Id + @"\NexaLeaseDesktop" : null,
                 StdIn = stdinRead, StdOut = stdoutWrite, StdErr = stderrWrite }, Attributes = attrs };
             string scratch = Path.Combine(root, "temp");
             env = Marshal.StringToHGlobalUni("COMSPEC=" + Path.Combine(system, "cmd.exe") + "\0LOCALAPPDATA=" + scratch
@@ -252,10 +310,9 @@ internal static class PowerShellAppContainer {
             }
             if (!stdout.Reader.Join(5000) || !stderr.Reader.Join(5000) || stdout.Failed || stderr.Failed) return 3;
             if (reason == "completed" && !WithinStageBudget(root)) reason = "stage_limit";
-            Console.WriteLine("{\"state\":\"" + reason + "\",\"exit_code\":" + (reason == "completed" ? code.ToString() : "null")
+            completedResult = "{\"state\":\"" + reason + "\",\"exit_code\":" + (reason == "completed" ? code.ToString() : "null")
                 + ",\"stdout_b64\":\"" + Convert.ToBase64String(stdout.Bytes.ToArray()) + "\",\"stderr_b64\":\"" + Convert.ToBase64String(stderr.Bytes.ToArray())
-                + "\",\"stdout_truncated\":" + (stdout.Truncated ? "true" : "false") + ",\"stderr_truncated\":" + (stderr.Truncated ? "true" : "false") + "}");
-            return 0;
+                + "\",\"stdout_truncated\":" + (stdout.Truncated ? "true" : "false") + ",\"stderr_truncated\":" + (stderr.Truncated ? "true" : "false") + "}";
         } catch (Exception error) {
             Console.Error.WriteLine(error.Message);
             return 2;
@@ -270,8 +327,25 @@ internal static class PowerShellAppContainer {
             if (handles != IntPtr.Zero) Marshal.FreeHGlobal(handles);
             if (sid != IntPtr.Zero) {
                 FreeSid(sid);
-                if (DeleteAppContainerProfile(name) != 0) Console.Error.WriteLine("AppContainer profile cleanup failed");
+                profileDeleted = DeleteAppContainerProfile(name) == 0;
+                if (!profileDeleted) Console.Error.WriteLine("AppContainer profile cleanup failed");
+            }
+            if (lease != null) {
+                try {
+                    if (profileDeleted) {
+                        lease.Release();
+                        leaseCleanupVerified = true;
+                    }
+                }
+                catch (Exception error) { Console.Error.WriteLine("Diagnostic lease cleanup failed: " + error.Message); }
+                finally { lease.Dispose(); }
             }
         }
+        // Never publish a successful result before profile deletion and the
+        // provider cleanup acknowledgement have both been observed.
+        if (fixtureStation && !leaseCleanupVerified) return 3;
+        if (completedResult == null) return 3;
+        Console.WriteLine(completedResult);
+        return 0;
     }
 }
