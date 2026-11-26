@@ -367,8 +367,11 @@ test("fixed hermetic suite denies host files, toolchain writes and host loopback
     'await assert.rejects(readFile(host, "utf8"), denied);',
     'await assert.rejects(writeFile(host, "unexpected"), denied);',
     'await assert.rejects(writeFile(path.join(path.dirname(process.execPath), "fixture-forbidden.txt"), "unexpected", { flag: "wx" }), denied);',
-    'await writeFile(path.join(process.env.TEMP, "guest-only.txt"), "allowed", { flag: "wx" });',
-    'assert.equal(await readFile(path.join(process.env.TEMP, "guest-only.txt"), "utf8"), "allowed");',
+    // Windows can redirect TEMP to an uncreated package-specific directory.
+    // Use the explicit staged workspace for the positive write control instead.
+    'const guestFile = path.join(process.env.NEXA_SANDBOX_WORK, "guest-only.txt");',
+    'await writeFile(guestFile, "allowed", { flag: "wx" });',
+    'assert.equal(await readFile(guestFile, "utf8"), "allowed");',
     `await new Promise((resolve, reject) => { const socket = createConnection({ host: "127.0.0.1", port: ${listener.address().port} }); socket.once("connect", () => { socket.destroy(); reject(new Error("host loopback allowed")); }); socket.once("error", resolve); socket.setTimeout(5000, () => { socket.destroy(); resolve(); }); });`,
     'console.log("FIXED_ISOLATION_NEGATIVE_PROBE_PASS");',
   ].join("\n");
