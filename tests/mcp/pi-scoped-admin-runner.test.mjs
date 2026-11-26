@@ -17,12 +17,16 @@ const register = fileURLToPath(new URL("../../scripts/register-mcp-powershell-ad
 const goal = "查證工程服務與授權\n保留原有工作區";
 const context = { workspace_id: `dev_workspace_${"a".repeat(24)}`,
   workstream_id: `dev_workstream_20261121-010000_${"b".repeat(12)}` };
-const desktop = { skip: process.platform !== "win32", timeout: 45_000 };
+// Hosted Windows cold starts can exceed the old 10-second fixture watchdog.
+// These budgets apply only to the test harness, not the production runner.
+const fixturePowerShellTimeoutMs = 30_000;
+const desktop = { skip: process.platform !== "win32", timeout: 240_000 };
 
 function windowsPowerShell(args) {
   const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", ...args],
-    { encoding: "utf8", windowsHide: true, timeout: 10_000 });
-  assert.equal(result.status, 0, result.stderr || result.error?.message);
+    { encoding: "utf8", windowsHide: true, timeout: fixturePowerShellTimeoutMs });
+  assert.equal(result.status, 0, JSON.stringify({ status: result.status, signal: result.signal,
+    error: result.error?.message, stderr: result.stderr, stdout: result.stdout }));
   return result.stdout.trim();
 }
 
@@ -149,13 +153,13 @@ test("scoped scheduled runner reads protected grants and ignores the legacy comm
       journalApi: { begin: journal.begin, fail: journal.fail, degrade: journal.markDegraded, complete: async () => process.exit(73) },
       executor: args => runPowerShellViaAdminTask({ ...args, stateRoot: root, spawnSyncImpl: (_name, argv) => argv[0] === "/Query" ? { status: 0 }
         : spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-          "-File", ${JSON.stringify(runner)}, "-ConfigPath", ${JSON.stringify(configPath)}], { timeout: 10000 }) }),
+          "-File", ${JSON.stringify(runner)}, "-ConfigPath", ${JSON.stringify(configPath)}], { timeout: ${fixturePowerShellTimeoutMs} }) }),
     });
     await journal.executeReconciled({ tool_name: "powershell_admin_run", reconciliation_key: ${JSON.stringify(recoveryKey)},
       request_fingerprint_sha256: "2".repeat(64), resolve_workspace_scope: async () => context }, () => maintenance({
         workspace_id: context.workspace_id, command: ${JSON.stringify(input.command)}, service_authorization: ${JSON.stringify(authorization)}
       }));
-  `], { timeout: 35_000, encoding: "utf8", windowsHide: true });
+  `], { timeout: 60_000, encoding: "utf8", windowsHide: true });
   assert.equal(interrupted.status, 73, interrupted.stderr || interrupted.error?.message);
   const cold = createDevOperationJournalService({ storageRoot, scopedAdminEffectInspector: event => inspectScopedAdminRecovery(event, { stateRoot: root }) });
   const interruptedOperation = await cold.getOperation({ reconciliation_key: recoveryKey, request_fingerprint_sha256: "2".repeat(64) });
