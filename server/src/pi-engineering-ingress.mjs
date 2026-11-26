@@ -50,7 +50,7 @@ export async function adaptHostAuthorizedEngineeringRequest(source, {
 // identity. Explicit host requests and mandatory-grant automatic binding
 // both require an already approved grant.
 export async function adaptPiEngineeringIngress(source, {
-  authentication, resolveWorkspace, approvalSource, standingApprovalSource,
+  authentication, resolveWorkspace, approvalSource, standingApprovalSource, automaticStandingApprovalSource,
   requireTaskAuthorization = false,
 } = {}) {
   // Evidence is host-derived. Neither a full raw intent nor an ordinary
@@ -88,11 +88,23 @@ export async function adaptPiEngineeringIngress(source, {
     return adaptAuthorizedPiRequest(source, { resolveWorkspace });
   }
   if (authentication?.ok !== true || authentication.local !== false
-    || typeof authentication.principal !== "string" || !authentication.principal.trim()
-    || typeof approvalSource !== "function") denied();
+    || typeof authentication.principal !== "string" || !authentication.principal.trim()) denied();
   hashExecutionInput(source);
   if (Object.hasOwn(source, "task_authorization_id")) denied();
   const request = JSON.parse(JSON.stringify(source));
   request.request_kind = "autonomous_engineering";
-  return approvalSource(request, { authenticatedPrincipal: authentication.principal });
+  const identity = { authenticatedPrincipal: authentication.principal };
+  // An implicit ordinary request may select a pre-existing standing policy.
+  // Only the trusted reader's explicit null (no matching policy history)
+  // permits independent legacy binding. Never catch a denial and retry.
+  if (automaticHostBinding && typeof automaticStandingApprovalSource === "function") {
+    const intent = await adaptAuthorizedPiRequest(request, { resolveWorkspace });
+    const bound = await automaticStandingApprovalSource(intent, identity);
+    if (bound !== null) {
+      if (!bound?.standing_authorization) denied();
+      return createExecutionIntent(bound);
+    }
+  }
+  if (typeof approvalSource !== "function") denied();
+  return approvalSource(request, identity);
 }
