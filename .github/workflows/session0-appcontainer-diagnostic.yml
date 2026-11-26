@@ -1,0 +1,134 @@
+name: Session 0 AppContainer diagnosis
+
+# Disposable hosted runner only. Not a production deployment or grant test.
+on:
+  pull_request:
+    branches: [nexa/unified-engineering-ingress]
+permissions:
+  contents: read
+
+jobs:
+  session0:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          package-manager-cache: false
+      - name: Compare existing fixed test in runner and limited Password task
+        shell: pwsh
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -cne $env:EXPECTED_HEAD) { throw 'Candidate mismatch' }
+          Write-Output "Candidate HEAD: $actual"
+          $suffix = [guid]::NewGuid().ToString('N').Substring(0,12)
+          $root = Join-Path $env:SystemDrive "NexaDiag-$suffix"
+          $account = "NexaDiag$suffix"
+          $task = "NexaSession0Diag-$suffix"
+          $createdUser = $false
+          $createdTask = $false
+          $observed = $null
+          try {
+            $null = New-Item -ItemType Directory -Path $root
+            $source = Join-Path $root 'source'
+            $tools = Join-Path $root 'tools'
+            $run = Join-Path $root 'run'
+            $null = New-Item -ItemType Directory -Path $source,$tools,$run
+            $archive = Join-Path $root 'source.zip'
+            git archive --format=zip --output=$archive $actual
+            if ($LASTEXITCODE -ne 0) { throw 'Fixture archive failed' }
+            Expand-Archive -LiteralPath $archive -DestinationPath $source
+            $nodeDir = Split-Path (Get-Command node.exe -ErrorAction Stop).Source
+            robocopy $nodeDir $tools /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+            if ($LASTEXITCODE -ge 8) { throw 'Fixture toolchain copy failed' }
+            $node = Join-Path $tools 'node.exe'
+            $npm = Join-Path $tools 'node_modules\npm\bin\npm-cli.js'
+            $env:Path = "$tools;$env:Path"
+            & $node $npm ci --prefix $source --no-audit --no-fund
+            if ($LASTEXITCODE -ne 0) { throw 'Fixture dependency install failed' }
+            $pattern = 'fixed hermetic suite executes its real five-file closure'
+            $test = Join-Path $source 'tests\mcp\pi-workspace-appcontainer.test.mjs'
+            $runnerSession = (Get-Process -Id $PID).SessionId
+            $runnerAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+            Write-Output "BASELINE_SESSION=$runnerSession; BASELINE_ADMIN=$runnerAdmin; NODE=$(& $node --version)"
+            & $node --test --test-name-pattern $pattern $test
+            $baseline = $LASTEXITCODE
+            Write-Output "BASELINE_TEST_EXIT=$baseline"
+
+            # Fresh local standard user, only on this ephemeral CI VM.
+            # The random credential is never printed, persisted as an artifact or passed to the test.
+            $password = 'Nexa!9a-' + [guid]::NewGuid().ToString('N')
+            $secure = ConvertTo-SecureString -String $password -AsPlainText -Force
+            $user = New-LocalUser -Name $account -Password $secure -Description 'Disposable Nexa Session 0 diagnostic'
+            $createdUser = $true
+            $sid = $user.SID.Value
+            icacls $root /grant:r "*${sid}:(OI)(CI)(RX)" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Fixture read ACL failed' }
+            icacls $run /grant:r "*${sid}:(OI)(CI)(M)" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Fixture run ACL failed' }
+            $script = Join-Path $root 'probe.ps1'
+            @'
+          param([Parameter(Mandatory=$true)][string]$Root)
+          $ErrorActionPreference = 'Stop'
+          $run = Join-Path $Root 'run'
+          $node = Join-Path $Root 'tools\node.exe'
+          $test = Join-Path $Root 'source\tests\mcp\pi-workspace-appcontainer.test.mjs'
+          $env:TEMP = $run
+          $env:TMP = $run
+          $env:Path = (Join-Path $Root 'tools') + ';' + $env:Path
+          $session = (Get-Process -Id $PID).SessionId
+          $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+          $result = [ordered]@{ session_id=$session; administrator=$admin; node_version=$null; test_exit=$null; error=$null }
+          try {
+            if ($session -ne 0 -or $admin) { throw 'Expected limited Session 0' }
+            $result.node_version = (& $node --version)
+            if ($LASTEXITCODE -ne 0) { throw 'Host Node version probe failed' }
+            $pattern = 'fixed hermetic suite executes its real five-file closure'
+            & $node --test --test-name-pattern $pattern $test *> (Join-Path $run 'test.log')
+            $result.test_exit = $LASTEXITCODE
+          } catch {
+            $result.error = $_.Exception.Message
+          } finally {
+            $tmp = Join-Path $run 'result.tmp'
+            $result | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $tmp -Encoding UTF8
+            Move-Item -LiteralPath $tmp -Destination (Join-Path $run 'result.json')
+          }
+          '@ | Set-Content -LiteralPath $script -Encoding UTF8
+            $exe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+            $args = '-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "' + $script + '" -Root "' + $root + '"'
+            $action = New-ScheduledTaskAction -Execute $exe -Argument $args -WorkingDirectory $source
+            $null = Register-ScheduledTask -TaskName $task -Action $action -User "$env:COMPUTERNAME\$account" -Password $password -RunLevel Limited
+            $createdTask = $true
+            $password = $null
+            $secure.Dispose()
+            $principal = (Get-ScheduledTask -TaskName $task).Principal
+            if ([string]$principal.LogonType -ne 'Password' -or [string]$principal.RunLevel -ne 'Limited') { throw 'Task principal mismatch' }
+            Start-ScheduledTask -TaskName $task
+            $deadline = [datetime]::UtcNow.AddMinutes(5)
+            $resultPath = Join-Path $run 'result.json'
+            while (!(Test-Path -LiteralPath $resultPath)) {
+              if ([datetime]::UtcNow -gt $deadline) { throw 'Session 0 probe timed out' }
+              Start-Sleep -Seconds 2
+            }
+            $observed = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+            $observed | ConvertTo-Json -Depth 4
+            $log = Join-Path $run 'test.log'
+            if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log }
+            if ($observed.error -or $observed.session_id -ne 0 -or $observed.administrator -or $null -eq $observed.test_exit) { throw 'Session 0 probe not completed' }
+            if ($baseline -ne 0 -or $observed.test_exit -ne 0) { throw "Observed test failure: baseline=$baseline; limited_session0=$($observed.test_exit)" }
+          } finally {
+            if ($createdTask) {
+              Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
+              Unregister-ScheduledTask -TaskName $task -Confirm:$false
+            }
+            if ($createdUser) { Remove-LocalUser -Name $account }
+            if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
+          }
