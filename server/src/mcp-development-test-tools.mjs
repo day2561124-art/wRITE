@@ -781,7 +781,7 @@ export function createDevTestRunner({
           changed_artifact_count: workspaceSnapshot.changed_artifact_count,
           verification_manifest_sha256: verificationManifestSha256,
           verification_manifest_gate_result: verificationManifest?.gate_result ?? "failed",
-          ...(scoped ? { isolation_mode: "appcontainer", input_manifest_sha256: result.input_manifest_sha256 ?? null,
+          ...(scoped ? { verification_route: "fixed_appcontainer", isolation_mode: result.isolation_mode ?? null, input_manifest_sha256: result.input_manifest_sha256 ?? null,
             input_file_count: result.input_file_count ?? null, job_terminated: result.job_terminated === true,
             cleanup_pending: result.cleanup_pending ?? null, workspace_writes: false } : {}),
           ...snapshotJournalTelemetry(workspaceSnapshot),
