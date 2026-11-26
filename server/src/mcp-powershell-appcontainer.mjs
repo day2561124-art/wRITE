@@ -112,11 +112,16 @@ export async function prepareAppContainerPowerShell({ context, cwd, command, tim
   if (fixedHermeticCore && (toolchain !== "node" || cwd !== context.root || output_paths.length !== 0 || sandbox_directories.length !== 0)) {
     throw new Error("INVALID_FIXED_APPCONTAINER_PLAN");
   }
-  const sources = await selectedSources(context.root, sandbox_paths, sandbox_directories);
-  const outputs = selectedPaths(context.root, output_paths, 8);
+  // The maintenance entrypoint resolves cwd with realpath. Use the same
+  // filesystem identity for the trusted workspace root (Windows temp paths
+  // can contain short-name aliases). Keep all relative-path policy checks.
+  const workspaceRoot = await realpath(context.root);
+  const canonicalCwd = await realpath(cwd);
+  const sources = await selectedSources(workspaceRoot, sandbox_paths, sandbox_directories);
+  const outputs = selectedPaths(workspaceRoot, output_paths, 8);
   if (Buffer.byteLength(JSON.stringify(outputs.map(output => output.name))) > 4096) throw new Error("SANDBOX_OUTPUT_PATH_LIMIT");
-  const relativeCwd = path.relative(context.root, cwd) || ".";
-  if (relativeCwd !== ".") relativePath(context.root, relativeCwd);
+  const relativeCwd = path.relative(workspaceRoot, canonicalCwd) || ".";
+  if (relativeCwd !== ".") relativePath(workspaceRoot, relativeCwd);
   const root = await mkdtemp(path.join(os.tmpdir(), "nexa-pi-shell-"));
   const stage = path.join(root, "stage");
   const work = path.join(stage, "work");
@@ -142,7 +147,7 @@ export async function prepareAppContainerPowerShell({ context, cwd, command, tim
     await mkdir(path.join(stage, "temp"));
     let total = 0;
     for (const source of sources) {
-      const bytes = await checkedFile(source.target, context.root, fileBytes);
+      const bytes = await checkedFile(source.target, workspaceRoot, fileBytes);
       total += bytes.length;
       if (total > 8 * 1024 * 1024) throw new Error("SANDBOX_SOURCE_LIMIT");
       const target = relativePath(work, source.name).target;
@@ -157,7 +162,7 @@ export async function prepareAppContainerPowerShell({ context, cwd, command, tim
       // exact original bytes even when it wasn't copied into the guest.
       const key = entry.name.toLowerCase();
       if (!before.has(key)) {
-        try { before.set(key, hash(await checkedFile(entry.target, context.root, fileBytes))); }
+        try { before.set(key, hash(await checkedFile(entry.target, workspaceRoot, fileBytes))); }
         catch (error) { if (error.code !== "ENOENT") throw error; }
       }
     }
