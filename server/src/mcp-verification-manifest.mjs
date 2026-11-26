@@ -135,7 +135,7 @@ const workspaceSnapshotPattern = /^[a-f0-9]{64}$/u;
 // A development receipt is bound to an immutable working-tree snapshot, not
 // an exact candidate commit. Never substitute HEAD for a validated tree.
 export function buildDevelopmentVerificationManifest({
-  workspaceSnapshot, workspaceContext, suiteResult, operationId, completedAt,
+  workspaceSnapshot, workspaceContext, suiteResult, operationId, completedAt, verificationRoute,
 } = {}) {
   const snapshotId = workspaceSnapshot?.workspace_snapshot_id;
   if (typeof snapshotId !== "string" || !workspaceSnapshotPattern.test(snapshotId)) {
@@ -166,8 +166,31 @@ export function buildDevelopmentVerificationManifest({
     duration_ms: Number.isFinite(suiteResult.duration_ms) && suiteResult.duration_ms >= 0
       ? suiteResult.duration_ms : null,
   };
+  // Only the server-selected isolated route requires this additional evidence.
+  // Never infer sandbox success from the process exit code alone.
+  if (verificationRoute !== undefined && verificationRoute !== "fixed_appcontainer") {
+    throw new Error("Unknown development verification route.");
+  }
+  const isolated = verificationRoute === "fixed_appcontainer";
+  const isolationEvidence = isolated ? {
+    route: verificationRoute,
+    isolation_mode: suiteResult.isolation_mode === "appcontainer" ? "appcontainer" : null,
+    execution_mode: suiteResult.execution_mode === "fixed_node" ? "fixed_node" : null,
+    input_manifest_sha256: workspaceSnapshotPattern.test(suiteResult.input_manifest_sha256 ?? "")
+      ? suiteResult.input_manifest_sha256 : null,
+    input_file_count: Number.isSafeInteger(suiteResult.input_file_count) ? suiteResult.input_file_count : null,
+    job_terminated: suiteResult.job_terminated === true,
+    cleanup_pending: suiteResult.cleanup_pending === false ? false : null,
+    workspace_writes: suiteResult.workspace_writes === false ? false : null,
+    post_snapshot_verified: suiteResult.post_snapshot_verified === true,
+  } : null;
+  const isolationPassed = !isolated || (result.suite === "mcp_hermetic_core"
+    && isolationEvidence.isolation_mode === "appcontainer" && isolationEvidence.execution_mode === "fixed_node"
+    && isolationEvidence.input_manifest_sha256 !== null && isolationEvidence.input_file_count === 5
+    && isolationEvidence.job_terminated && isolationEvidence.cleanup_pending === false
+    && isolationEvidence.workspace_writes === false && isolationEvidence.post_snapshot_verified);
   const passed = result.execution_ok && result.passed && !result.timed_out
-    && result.exit_code === 0;
+    && result.exit_code === 0 && isolationPassed;
   const timestamp = typeof completedAt === "string" && Number.isFinite(Date.parse(completedAt))
     ? completedAt : null;
   return Object.freeze({
@@ -190,6 +213,7 @@ export function buildDevelopmentVerificationManifest({
     tests_skipped: [],
     skip_reason: null,
     suite_results: [result],
+    ...(isolated ? { isolation_evidence: Object.freeze(isolationEvidence) } : {}),
     passed,
     failed: !passed,
     timed_out: result.timed_out,
