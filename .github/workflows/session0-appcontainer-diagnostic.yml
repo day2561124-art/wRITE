@@ -26,6 +26,7 @@ jobs:
           EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
           $actual = (git rev-parse HEAD).Trim()
           if ($LASTEXITCODE -ne 0 -or $actual -cne $env:EXPECTED_HEAD) { throw 'Candidate mismatch' }
           Write-Output "Candidate HEAD: $actual"
