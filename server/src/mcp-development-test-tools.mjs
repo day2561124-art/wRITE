@@ -312,9 +312,8 @@ async function persistLastRunResult(resultPath, result) {
     verification_manifest: result.verification_manifest ?? null,
     verification_manifest_sha256: result.verification_manifest_sha256 ?? null,
     ...snapshotJournalTelemetry({ diagnostics: result.snapshot_diagnostics }),
-    ...(result.isolation_mode === "appcontainer" ? { isolation_mode: result.isolation_mode,
-      input_manifest_sha256: result.input_manifest_sha256, input_file_count: result.input_file_count,
-      job_terminated: result.job_terminated, cleanup_pending: result.cleanup_pending, workspace_writes: result.workspace_writes } : {}),
+    ...(result.verification_manifest?.isolation_evidence ? { ...result.verification_manifest.isolation_evidence,
+      verification_route: result.verification_manifest.isolation_evidence.route } : {}),
     stdout_truncated: result.stdout_truncated === true,
     stderr_truncated: result.stderr_truncated === true,
     stdout_tail: tailText(result.stdout),
@@ -728,12 +727,18 @@ export function createDevTestRunner({
         suiteResult: result,
         operationId: journalOperation.operation_id,
         completedAt: new Date().toISOString(),
+        ...(scoped ? { verificationRoute: "fixed_appcontainer" } : {}),
       });
       verificationManifestSha256 = createHash("sha256")
         .update(JSON.stringify(verificationManifest), "utf8").digest("hex");
     };
     try {
       refreshVerificationManifest();
+      if (scoped && result.passed === true && verificationManifest.gate_result !== "passed") {
+        result = { ...result, execution_ok: false, passed: false,
+          stderr: [result.stderr, "ISOLATED_VERIFICATION_EVIDENCE_INCOMPLETE"].filter(Boolean).join("\n") };
+        refreshVerificationManifest();
+      }
     } catch (error) {
       result = {
         ...result,
@@ -783,11 +788,8 @@ export function createDevTestRunner({
           changed_artifact_count: workspaceSnapshot.changed_artifact_count,
           verification_manifest_sha256: verificationManifestSha256,
           verification_manifest_gate_result: verificationManifest?.gate_result ?? "failed",
-          ...(scoped ? { verification_route: "fixed_appcontainer", isolation_mode: result.isolation_mode ?? null, input_manifest_sha256: result.input_manifest_sha256 ?? null,
-            input_file_count: result.input_file_count ?? null, job_terminated: result.job_terminated === true,
-            cleanup_pending: result.cleanup_pending ?? null,
-            workspace_writes: result.workspace_writes === false ? false : null,
-            post_snapshot_verified: result.post_snapshot_verified === true } : {}),
+          ...(scoped ? { ...verificationManifest?.isolation_evidence,
+            verification_route: "fixed_appcontainer" } : {}),
           ...snapshotJournalTelemetry(workspaceSnapshot),
         },
       });
