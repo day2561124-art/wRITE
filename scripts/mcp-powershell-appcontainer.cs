@@ -194,10 +194,9 @@ internal static class PowerShellAppContainer {
         string tools = Path.Combine(Directory.GetParent(root).FullName, "tools");
         string cwd = Path.GetFullPath(Path.Combine(work, args[1]));
         if (!cwd.Equals(work, StringComparison.OrdinalIgnoreCase) && !cwd.StartsWith(work + "\\", StringComparison.OrdinalIgnoreCase)) return 64;
-        // The fixed verification route is the only Session 0 route enabled by this change.
-        bool session0 = Process.GetCurrentProcess().SessionId == 0;
-        if (session0 && !fixedHermeticCore) return 64;
-        bool requiresStationLease = session0 && fixedHermeticCore;
+        // This change only adds a lease to the fixed verification route.
+        // Keep the pre-existing shell route and its isolation controls unchanged.
+        bool requiresStationLease = fixedHermeticCore && Process.GetCurrentProcess().SessionId == 0;
         string name = "NexaPiShell" + Guid.NewGuid().ToString("N");
         string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
         string system = Path.Combine(windows, "System32");
