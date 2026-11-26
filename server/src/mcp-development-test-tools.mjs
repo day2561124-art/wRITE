@@ -706,12 +706,14 @@ export function createDevTestRunner({
       };
     }
 
-    if (scoped && result.passed === true) {
+    if (scoped) {
+      result = { ...result, post_snapshot_verified: false };
       try {
         const after = await computeWorkspaceSnapshot(context);
         if (after.workspace_snapshot_id !== workspaceSnapshot.workspace_snapshot_id || after.head !== workspaceSnapshot.head) {
           throw new Error("ISOLATED_VERIFICATION_SNAPSHOT_CHANGED");
         }
+        result = { ...result, post_snapshot_verified: true };
       } catch (error) {
         result = { ...result, execution_ok: false, passed: false,
           stderr: [result.stderr, redactTestOutput(error.message)].filter(Boolean).join("\n") };
@@ -783,7 +785,9 @@ export function createDevTestRunner({
           verification_manifest_gate_result: verificationManifest?.gate_result ?? "failed",
           ...(scoped ? { verification_route: "fixed_appcontainer", isolation_mode: result.isolation_mode ?? null, input_manifest_sha256: result.input_manifest_sha256 ?? null,
             input_file_count: result.input_file_count ?? null, job_terminated: result.job_terminated === true,
-            cleanup_pending: result.cleanup_pending ?? null, workspace_writes: false } : {}),
+            cleanup_pending: result.cleanup_pending ?? null,
+            workspace_writes: result.workspace_writes === false ? false : null,
+            post_snapshot_verified: result.post_snapshot_verified === true } : {}),
           ...snapshotJournalTelemetry(workspaceSnapshot),
         },
       });
