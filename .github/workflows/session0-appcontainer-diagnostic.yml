@@ -151,7 +151,7 @@ jobs:
           $env:Path = (Join-Path $Root 'tools') + ';' + $env:Path
           $session = (Get-Process -Id $PID).SessionId
           $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-          $result = [ordered]@{ session_id=$session; administrator=$admin; node_version=$null; test_exit=$null; station_probe=$null; error=$null }
+          $result = [ordered]@{ session_id=$session; administrator=$admin; node_version=$null; test_exit=$null; station_probe=$null; interrupted_lease=$null; error=$null }
           try {
             if ($session -ne 0 -or $admin) { throw 'Expected limited Session 0' }
             $result.node_version = (& $node --version)
@@ -186,6 +186,33 @@ jobs:
           }
           "@
             $result.station_probe = [ordered]@{ unnamed=[StationProbe]::Probe($false); named=[StationProbe]::Probe($true) }
+            # Acquire a lease from the standard account, then disconnect before
+            # creating an AppContainer profile or launching a guest. The provider
+            # must clean its resources and accept the following real test runs.
+            $pipeRights = [IO.Pipes.PipeAccessRights]'ReadWrite, ReadPermissions, Synchronize'
+            $connection = New-Object IO.Pipes.NamedPipeClientStream('.', 'NexaDiagStationLeaseV1', $pipeRights, [IO.Pipes.PipeOptions]::Asynchronous, [Security.Principal.TokenImpersonationLevel]::Identification, [IO.HandleInheritability]::None)
+            try {
+              $connection.Connect(5000)
+              $owner = $connection.GetAccessControl().GetOwner([Security.Principal.SecurityIdentifier])
+              if ($owner.Value -ne 'S-1-5-18') { throw 'Unexpected interruption probe provider' }
+              $connection.WriteByte(65)
+              $connection.Flush()
+              $buffer = New-Object byte[] 32
+              $offset = 0
+              $readClock = [Diagnostics.Stopwatch]::StartNew()
+              while ($offset -lt $buffer.Length) {
+                $pending = $connection.BeginRead($buffer, $offset, $buffer.Length - $offset, $null, $null)
+                $remaining = 5000 - [int]$readClock.ElapsedMilliseconds
+                if ($remaining -le 0 -or !$pending.AsyncWaitHandle.WaitOne($remaining)) { throw 'Interrupted lease acquisition timeout' }
+                $size = $connection.EndRead($pending)
+                if ($size -eq 0) { throw 'Interrupted lease closed before acquisition' }
+                $offset += $size
+              }
+              $result.interrupted_lease = [Text.Encoding]::ASCII.GetString($buffer)
+              if ($result.interrupted_lease -cnotmatch '^[0-9a-f]{32}$') { throw 'Malformed interrupted lease' }
+            } finally {
+              $connection.Dispose()
+            }
             $pattern = 'fixed hermetic suite (executes|denies)'
             # Start-Process retains native stderr separately from PowerShell 5.1
             # error records, so a failing test still yields a complete result.
@@ -286,11 +313,15 @@ jobs:
                   $ids = @($acquired | ForEach-Object { ($_ -split '[=;]')[1] })
                   $packages = @($acquired | ForEach-Object { ($_ -split 'package=')[1] })
                   $closedIds = @($closed | ForEach-Object { ($_ -split '[=;]')[1] })
-                  if ($ids.Count -ne 3 -or @($ids | Sort-Object -Unique).Count -ne 3 -or @($packages | Sort-Object -Unique).Count -ne 3 -or
-                      $closedIds.Count -ne 3 -or (Compare-Object ($ids | Sort-Object) ($closedIds | Sort-Object))) {
-                    throw 'Expected three distinct single-use leases with verified normal cleanup'
+                  $interrupted = @($lines | Where-Object { $_ -ceq "closed=$($observed.interrupted_lease); released=False; cleaned=True" })
+                  $normalIds = @($ids | Where-Object { $_ -cne $observed.interrupted_lease })
+                  if ($ids.Count -ne 4 -or @($ids | Sort-Object -Unique).Count -ne 4 -or @($packages | Sort-Object -Unique).Count -ne 4 -or
+                      $interrupted.Count -ne 1 -or $normalIds.Count -ne 3 -or $closedIds.Count -ne 3 -or
+                      (Compare-Object ($normalIds | Sort-Object) ($closedIds | Sort-Object))) {
+                    throw 'Expected four distinct leases: one interrupted and three normally released'
                   }
                   Write-Output 'PER_RUN_LEASE_IDENTITY_AND_CLEANUP_PASS'
+                  Write-Output 'INTERRUPTED_LEASE_RECOVERY_PASS'
                 }
                 if (!(Test-Path -LiteralPath $stopped) -or (Get-Content -LiteralPath $stopped -Raw).Trim() -ne 'exit=0') {
                   throw 'Independent station fixture cleanup not verified'
