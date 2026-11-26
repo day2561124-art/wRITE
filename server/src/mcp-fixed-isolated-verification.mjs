@@ -38,6 +38,7 @@ export function fixedIsolatedVerificationPlan(suite, context) {
     sandbox_directories: [],
     output_paths: [],
     toolchain: "node",
+    fixedHermeticCore: true,
   };
 }
 
@@ -82,7 +83,8 @@ export async function runFixedIsolatedVerification({ suite, context, prepare = p
     observed.input_file_count === FIXED_ISOLATED_SOURCE_PATHS.length &&
     observed.input_manifest_sha256 === expectedManifest &&
     observed.toolchain === "node" &&
-    observed.artifacts?.length === 0;
+    observed.execution_mode === "fixed_node" &&
+    Array.isArray(observed.artifacts) && observed.artifacts.length === 0;
   if (!valid) reject("INVALID_ISOLATED_VERIFICATION_RECEIPT");
   if (await observeInputManifest(context.root) !== expectedManifest) reject("ISOLATED_VERIFICATION_INPUT_CHANGED");
   const execution_ok = observed.execution_ok === true;
@@ -98,6 +100,7 @@ export async function runFixedIsolatedVerification({ suite, context, prepare = p
     stdout_truncated: observed.stdout_truncated === true,
     stderr_truncated: observed.stderr_truncated === true,
     isolation_mode: "appcontainer",
+    execution_mode: "fixed_node",
     workspace_writes: false,
     input_manifest_sha256: observed.input_manifest_sha256,
     input_file_count: observed.input_file_count,
