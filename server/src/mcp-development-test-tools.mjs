@@ -21,10 +21,13 @@ import {
   markDevJournalDegraded,
 } from "./mcp-development-journal-tools.mjs";
 
+import { SCOPED_HERMETIC_SUITE, SCOPED_HERMETIC_ENTRYPOINT, SCOPED_HERMETIC_TIMEOUT_MS, runScopedHermeticVerification } from "./mcp-scoped-verification.mjs";
+
 export const DEV_TEST_SUITES = Object.freeze([
   "mcp",
   "mcp_core",
   "mcp_pi_postseal",
+  SCOPED_HERMETIC_SUITE,
   "mcp_infrastructure",
   "mcp_reliability",
   "mcp_tunnel",
@@ -44,6 +47,7 @@ const productionSuiteDefinitions = Object.freeze({
     timeoutMs: 2_400_000,
   }),
   mcp_pi_postseal: Object.freeze({executable:process.execPath,argv:Object.freeze(["tests/tools/mcp-pi-postseal.test.mjs"]),timeoutMs:600_000}),
+  [SCOPED_HERMETIC_SUITE]: Object.freeze({ executable: process.execPath, argv: Object.freeze([SCOPED_HERMETIC_ENTRYPOINT]), timeoutMs: SCOPED_HERMETIC_TIMEOUT_MS }),
   mcp_core: Object.freeze({
     executable: process.execPath,
     argv: Object.freeze(["tests/tools/mcp-core.test.mjs"]),
@@ -567,7 +571,8 @@ export function createDevTestRunner({
 } = {}) {
   return async function runTests(input = {}) {
     const { usesScopedAdminDispatcherRoot } = await import("./mcp-powershell-maintenance-tools.mjs");
-    if (usesScopedAdminDispatcherRoot()) {
+    const scopedDispatcher = usesScopedAdminDispatcherRoot();
+    if (scopedDispatcher && input.suite !== SCOPED_HERMETIC_SUITE) {
       throw Object.assign(new Error("Use workspace.powershell_isolated to test under the scoped dispatcher."),
         { code: "ISOLATED_VERIFICATION_REQUIRED" });
     }
@@ -637,7 +642,9 @@ export function createDevTestRunner({
 
     let dependencyBridgeCleanup = async () => {};
     try {
-      dependencyBridgeCleanup = await prepareWorkspaceDependencyBridge(context, dependencyRoot);
+      // The scoped fixed suite stages only its audited source files and Node toolchain.
+      // Never create a dependency bridge or execute host-side test code on this route.
+      if (!scopedDispatcher) dependencyBridgeCleanup = await prepareWorkspaceDependencyBridge(context, dependencyRoot);
     } catch (error) {
       try {
         await journal.fail(journalOperation.operation_id, {
@@ -670,7 +677,9 @@ export function createDevTestRunner({
 
     let result;
     try {
-      result = await runDefinition(
+      result = scopedDispatcher
+        ? await runScopedHermeticVerification({ suite, context })
+        : await runDefinition(
         suite,
         definition,
         outputMaxCharacters,
@@ -697,6 +706,20 @@ export function createDevTestRunner({
           redactTestOutput(`Could not clean workspace dependency bridge: ${error.message}`),
         ].filter(Boolean).join("\n"),
       };
+    }
+
+    // A sandbox receipt concerns copied inputs, so fail closed if the workspace
+    // changed while the evidence was being prepared or executed.
+    if (scopedDispatcher && result.passed === true) {
+      try {
+        const after = await computeWorkspaceSnapshot(context);
+        if (after.workspace_snapshot_id !== workspaceSnapshot.workspace_snapshot_id || after.head !== workspaceSnapshot.head) {
+          throw new Error("Workspace changed during scoped verification.");
+        }
+      } catch (error) {
+        result = { ...result, execution_ok: false, passed: false, failure_code: "SCOPED_VERIFICATION_SNAPSHOT_CHANGED",
+          stderr: [result.stderr, redactTestOutput(error.message)].filter(Boolean).join("\n") };
+      }
     }
 
     let verificationManifest = null;
@@ -763,6 +786,12 @@ export function createDevTestRunner({
           changed_artifact_count: workspaceSnapshot.changed_artifact_count,
           verification_manifest_sha256: verificationManifestSha256,
           verification_manifest_gate_result: verificationManifest?.gate_result ?? "failed",
+          ...(scopedDispatcher ? { isolation_mode: result.isolation_mode ?? null,
+            workspace_writes: result.workspace_writes ?? null,
+            input_manifest_sha256: result.input_manifest_sha256 ?? null,
+            input_file_count: result.input_file_count ?? null,
+            job_terminated: result.job_terminated === true,
+            cleanup_pending: result.cleanup_pending ?? null } : {}),
           ...snapshotJournalTelemetry(workspaceSnapshot),
         },
       });
