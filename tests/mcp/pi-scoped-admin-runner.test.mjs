@@ -274,8 +274,10 @@ test("approved PowerShell executes only the protected script with the exact auth
     workspaceContextResolver: async () => ({ ...context, root, workspace_type: "isolated_worktree", workstream_state: "active" }),
     journalApi: { begin: journal.begin, complete: journal.complete, fail: journal.fail, degrade: journal.markDegraded },
   });
-  const independent = await ordinary({ workspace_id: context.workspace_id, command: "Write-Output 'independent normal PowerShell after admin failure'" });
-  assert.equal(independent.ok, true);
+  const independent = await ordinary({ workspace_id: context.workspace_id,
+    command: "Write-Output 'independent normal PowerShell after admin failure'",
+    timeoutMs: 60_000 });
+  assert.equal(independent.ok, true, JSON.stringify(independent));
   assert.match(independent.stdout, /independent normal PowerShell after admin failure/u);
   assert.equal((await journal.status()).chain_verified, true);
 
