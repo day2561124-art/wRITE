@@ -280,6 +280,7 @@ test("fixed isolated verification rejects host suites and invalid workspace cont
   assert.deepEqual(plan.sandbox_directories, []);
   assert.deepEqual(plan.output_paths, []);
   assert.equal(plan.toolchain, "node");
+  assert.equal(plan.fixedHermeticCore, true);
   assert.equal(plan.timeoutMs, 120_000);
   for (const suite of ["mcp_pi_postseal", "affected", "all", "mcp; whoami"]) {
     await assert.rejects(runFixedIsolatedVerification({ suite, context,
@@ -306,6 +307,7 @@ test("fixed hermetic suite executes its real five-file closure in Windows AppCon
   assert.equal(result.passed, true, JSON.stringify(result));
   assert.equal(result.exit_code, 0);
   assert.equal(result.input_file_count, 5);
+  assert.equal(result.execution_mode, "fixed_node");
   assert.equal(result.workspace_writes, false);
   assert.equal(result.cleanup_pending, false);
   assert.match(result.input_manifest_sha256, /^[a-f0-9]{64}$/u);
@@ -336,7 +338,7 @@ test("fixed isolated verification rejects incomplete or changed evidence and alw
   }
   const manifest = { input_manifest_sha256: hash(JSON.stringify(entries)),
     input_file_count: entries.length };
-  const valid = { ...manifest, isolation_mode: "appcontainer", workspace_writes: false,
+  const valid = { ...manifest, isolation_mode: "appcontainer", execution_mode: "fixed_node", workspace_writes: false,
     job_terminated: true, artifacts: [], toolchain: "node", execution_ok: true,
     ok: true, exit_code: 0, timed_out: false, duration_ms: 1, stdout: "", stderr: "" };
   const execute = async ({ staged = manifest, receipt = valid, run, cleanupError } = {}) => {
@@ -361,7 +363,8 @@ test("fixed isolated verification rejects incomplete or changed evidence and alw
   assert.equal(mismatch.error?.code, "ISOLATED_VERIFICATION_INPUT_CHANGED");
   for (const patch of [{ job_terminated: false }, { workspace_writes: true },
     { input_file_count: 4 }, { input_manifest_sha256: "0".repeat(64) },
-    { isolation_mode: "host" }, { artifacts: [{ path: "unexpected.txt" }] },
+    { isolation_mode: "host" }, { execution_mode: "powershell" }, { artifacts: { length: 0 } },
+    { artifacts: [{ path: "unexpected.txt" }] },
     { toolchain: "unknown" }]) {
     const bad = await execute({ receipt: { ...valid, ...patch } });
     assert.equal(bad.error?.code, "INVALID_ISOLATED_VERIFICATION_RECEIPT");
