@@ -6,6 +6,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { FIXED_ISOLATED_SUITE, FIXED_ISOLATED_SOURCE_PATHS, fixedIsolatedVerificationPlan, runFixedIsolatedVerification } from "../../server/src/mcp-fixed-isolated-verification.mjs";
 import { createDevOperationJournalService } from "../../server/src/mcp-development-journal-tools.mjs";
 import { createPowerShellMaintenanceTool } from "../../server/src/mcp-powershell-maintenance-tools.mjs";
 import { fingerprintMcpMutationRequest } from "../../server/src/mcp-operation-reconciliation-context.mjs";
@@ -270,3 +271,51 @@ for (const loseFirstShellResponse of [false, true]) {
     assert.equal((await f.journal.status()).health, "healthy");
   });
 }
+
+test("fixed isolated verification rejects host suites and invalid workspace contexts before staging", async () => {
+  const context = { root: path.resolve("."), workspace_type: "isolated_worktree",
+    workstream_state: "active", lifecycle_state: "active", healthy: true, mutation_allowed: true };
+  const plan = fixedIsolatedVerificationPlan(FIXED_ISOLATED_SUITE, context);
+  assert.deepEqual(plan.sandbox_paths, FIXED_ISOLATED_SOURCE_PATHS);
+  assert.deepEqual(plan.sandbox_directories, []);
+  assert.deepEqual(plan.output_paths, []);
+  assert.equal(plan.toolchain, "node");
+  assert.equal(plan.timeoutMs, 120_000);
+  for (const suite of ["mcp_pi_postseal", "affected", "all", "mcp; whoami"]) {
+    await assert.rejects(runFixedIsolatedVerification({ suite, context,
+      prepare: () => assert.fail("must not stage a rejected suite") }), { code: "ISOLATED_VERIFICATION_REQUIRED" });
+  }
+  for (const invalid of [{ workspace_type: "shared" }, { healthy: false },
+    { lifecycle_state: "closed" }, { workstream_state: "closed" }, { mutation_allowed: false }]) {
+    await assert.rejects(runFixedIsolatedVerification({ suite: FIXED_ISOLATED_SUITE, context: { ...context, ...invalid },
+      prepare: () => assert.fail("must not stage a rejected workspace") }), { code: "ISOLATED_WORKSPACE_REQUIRED" });
+  }
+});
+
+test("fixed hermetic suite executes its real five-file closure in Windows AppContainer", { ...platform, timeout: 180_000 }, async t => {
+  const f = await fixture(t);
+  const original = new Map();
+  for (const file of FIXED_ISOLATED_SOURCE_PATHS) {
+    const target = path.join(f.context.root, file);
+    const bytes = await readFile(new URL("../../" + file, import.meta.url));
+    original.set(file, bytes);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, bytes);
+  }
+  const result = await runFixedIsolatedVerification({ suite: FIXED_ISOLATED_SUITE, context: f.context });
+  assert.equal(result.passed, true, JSON.stringify(result));
+  assert.equal(result.exit_code, 0);
+  assert.equal(result.input_file_count, 5);
+  assert.equal(result.workspace_writes, false);
+  assert.equal(result.cleanup_pending, false);
+  assert.match(result.input_manifest_sha256, /^[a-f0-9]{64}$/u);
+  for (const [file, bytes] of original) assert.deepEqual(await readFile(path.join(f.context.root, file)), bytes);
+
+  // The fixed entrypoint must propagate a real test failure without host writes.
+  const entry = path.join(f.context.root, FIXED_ISOLATED_SOURCE_PATHS[0]);
+  await writeFile(entry, 'import "node:test"; throw new Error("intentional fixed-suite failure");\n');
+  const failure = await runFixedIsolatedVerification({ suite: FIXED_ISOLATED_SUITE, context: f.context });
+  assert.equal(failure.passed, false, JSON.stringify(failure));
+  assert.notEqual(failure.exit_code, 0);
+  assert.equal(failure.workspace_writes, false);
+});
