@@ -67,7 +67,7 @@ jobs:
             $env:Path = "$tools;$env:Path"
             & $node $npm ci --prefix $source --no-audit --no-fund
             if ($LASTEXITCODE -ne 0) { throw 'Fixture dependency install failed' }
-            $pattern = 'fixed hermetic suite executes its real five-file closure'
+            $pattern = 'fixed hermetic suite (executes|denies)'
             $test = Join-Path $source 'tests\mcp\pi-workspace-appcontainer.test.mjs'
             $runnerSession = (Get-Process -Id $PID).SessionId
             $runnerAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -185,7 +185,7 @@ jobs:
           }
           "@
             $result.station_probe = [ordered]@{ unnamed=[StationProbe]::Probe($false); named=[StationProbe]::Probe($true) }
-            $pattern = 'fixed hermetic suite executes its real five-file closure'
+            $pattern = 'fixed hermetic suite (executes|denies)'
             # Start-Process retains native stderr separately from PowerShell 5.1
             # error records, so a failing test still yields a complete result.
             $arguments = '--test --test-name-pattern "' + $pattern + '" "' + $test + '"'
