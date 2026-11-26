@@ -287,3 +287,53 @@ test('interrupted launcher exception requires the exact reviewed immutable recei
  for(const change of [{exit_code:1},{execution_ok:false},{timed_out:false},{command_sha256:'b'.repeat(64)}])assert.equal(accept(start,{...done,result:{...done.result,...change}},input),false);
  assert.equal(accept({event_hash:'b'.repeat(64)},done,input),false);assert.equal(accept(start,{...done,event_hash:'b'.repeat(64)},input),false);
 });
+
+
+// Synthetic projection fragments exercise the exact-evidence validator.
+// The production Journal still independently verifies every event hash.
+import { SCOPED_TEST_REJECTION_KIND, REVIEWED_SCOPED_TEST_REJECTION as reviewedTest, validateScopedTestRejectionResolution } from '../../server/src/mcp-scoped-test-rejection-recovery.mjs';
+test('reviewed scoped-test rejection accepts only the exact failed pre-dispatch receipt',()=>{
+ const p=reviewedTest;
+ const workspace_id='dev_workspace_c970190a8f244318a63a83c1',workstream_id='dev_workstream_20261123-123114_fec665e66a94';
+ const key='pi-authorized-b3a9e7ca08df78bb50272dc44274c4ef110a994a61c02faaf74ef2620d7c6835';
+ const common={workspace_id,workstream_id,operation_id:p.operation_id,operation_type:'mcp_mutation',tool_name:'dev_run_tests',
+  request_fingerprint_sha256:p.fingerprint,reconciliation_key:key,targets:[],parent_operation_id:null,diagnostic:{hostname:'fixture',owner_pid:123}};
+ const started={...common,sequence:66333,event_hash:p.start_hash,stage:'operation_started'};
+ const terminal={...common,sequence:66334,event_hash:p.terminal_hash,stage:'operation_failed',result:{outcome:'ambiguous_effect',reconciliation_required:true}};
+ const projection={workspace_id,workstream_id,operation_type:'pi_execution_projection',stage:'operation_completed'};
+ const action={capability:'verification.focused',step_id:'focused-test',idempotency_key:key,input:{suite:'mcp_pi_postseal'}};
+ const claim={...projection,sequence:66332,event_hash:p.claim_hash,execution_projection:{revision:7,projection_hash:'fixture-projection',
+  state:{operation_id:'fixture-operation'},command:{type:'tool_call_started'},intent:{requested_actions:[action]},
+  runtime:{owner:{hostname:'fixture',pid:123},active_call:{mutation:true,step_id:'focused-test',idempotency_key:key,input_hash:'fixture-input'}}}};
+ const receipt={...projection,sequence:66336,event_hash:p.receipt_hash,execution_projection:{revision:8,previous_projection_hash:'fixture-projection',
+  state:{operation_id:'fixture-operation',status:'DECISION_REQUIRED',completed_steps:[]},runtime:{owner:null,active_call:null},
+  command:{type:'decision_requested',code:'TOOL_REPORTED_FAILURE',receipt:{step_id:'focused-test',input_hash:'fixture-input',original_response_available:true,
+   evidence:{isError:true,_meta:{operation_id:p.operation_id,reconciliation_key:key},content:[{type:'text',text:p.error}]}}}}};
+ const events=[claim,started,terminal,receipt],input={resolution_kind:SCOPED_TEST_REJECTION_KIND,operation_id:p.operation_id,
+  expected_terminal_hash:p.terminal_hash,request_fingerprint_sha256:p.fingerprint,decision_owner:'GPT',decision_id:'gpt-fixture',reason:'Exact rejected test receipt'};
+ assert.equal(validateScopedTestRejectionResolution(events,input).terminal,terminal);
+ const invalid=[
+  e=>e.pop(),
+  e=>e[0].execution_projection.intent.requested_actions[0].input.suite='all',
+  e=>e[1].event_hash='0'.repeat(64),
+  e=>e[2].result.outcome='intended_effect_observed',
+  e=>e[3].execution_projection.command.receipt.evidence.content[0].text='some other error',
+  e=>e[3].execution_projection.command.receipt.evidence.isError=false,
+  e=>e[3].execution_projection.state.completed_steps.push('focused-test'),
+  e=>e[3].execution_projection.runtime.owner={pid:123},
+  e=>e.push({parent_operation_id:p.operation_id,stage:'operation_started',operation_type:'test_evidence'}),
+  e=>e.push({...e[2]}),
+ ];
+ for(const mutate of invalid){const copy=structuredClone(events);mutate(copy);assert.throws(()=>validateScopedTestRejectionResolution(copy,input),/UNSAFE_SCOPED_TEST_REJECTION_RESOLUTION/);}
+ for(const change of [{operation_id:'different-operation'},{decision_owner:'Pi'},{force:true},{expected_terminal_hash:'0'.repeat(64)}])
+  assert.throws(()=>validateScopedTestRejectionResolution(events,{...input,...change}),/UNSAFE_SCOPED_TEST_REJECTION_RESOLUTION/);
+});
+test('reviewed test rejection never resolves an unrelated or empty Journal',async()=>{
+ const root=await mkdtemp(path.join(os.tmpdir(),'scoped-test-rejection-empty-'));
+ const j=createDevOperationJournalService({storageRoot:root});const p=reviewedTest;
+ const input={resolution_kind:SCOPED_TEST_REJECTION_KIND,operation_id:p.operation_id,expected_terminal_hash:p.terminal_hash,
+  request_fingerprint_sha256:p.fingerprint,decision_owner:'GPT',decision_id:'gpt-empty-fixture',reason:'No matching evidence'};
+ await assert.rejects(j.inspectScopedTestRejectionMutation(input),/UNSAFE_SCOPED_TEST_REJECTION_RESOLUTION/);
+ await assert.rejects(j.resolveScopedTestRejectionMutation(input),/UNSAFE_SCOPED_TEST_REJECTION_RESOLUTION/);
+ assert.equal((await j.status()).latest_sequence,0);
+});
