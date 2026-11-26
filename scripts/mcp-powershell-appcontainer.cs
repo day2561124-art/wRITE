@@ -211,6 +211,8 @@ internal static class PowerShellAppContainer {
         bool initialized = false;
         DiagnosticLease lease = null;
         bool profileDeleted = false;
+        bool leaseCleanupVerified = false;
+        string completedResult = null;
         try {
             if (fixtureStation) {
                 lease = new DiagnosticLease();
@@ -308,10 +310,9 @@ internal static class PowerShellAppContainer {
             }
             if (!stdout.Reader.Join(5000) || !stderr.Reader.Join(5000) || stdout.Failed || stderr.Failed) return 3;
             if (reason == "completed" && !WithinStageBudget(root)) reason = "stage_limit";
-            Console.WriteLine("{\"state\":\"" + reason + "\",\"exit_code\":" + (reason == "completed" ? code.ToString() : "null")
+            completedResult = "{\"state\":\"" + reason + "\",\"exit_code\":" + (reason == "completed" ? code.ToString() : "null")
                 + ",\"stdout_b64\":\"" + Convert.ToBase64String(stdout.Bytes.ToArray()) + "\",\"stderr_b64\":\"" + Convert.ToBase64String(stderr.Bytes.ToArray())
-                + "\",\"stdout_truncated\":" + (stdout.Truncated ? "true" : "false") + ",\"stderr_truncated\":" + (stderr.Truncated ? "true" : "false") + "}");
-            return 0;
+                + "\",\"stdout_truncated\":" + (stdout.Truncated ? "true" : "false") + ",\"stderr_truncated\":" + (stderr.Truncated ? "true" : "false") + "}";
         } catch (Exception error) {
             Console.Error.WriteLine(error.Message);
             return 2;
@@ -330,10 +331,21 @@ internal static class PowerShellAppContainer {
                 if (!profileDeleted) Console.Error.WriteLine("AppContainer profile cleanup failed");
             }
             if (lease != null) {
-                try { if (profileDeleted) lease.Release(); }
+                try {
+                    if (profileDeleted) {
+                        lease.Release();
+                        leaseCleanupVerified = true;
+                    }
+                }
                 catch (Exception error) { Console.Error.WriteLine("Diagnostic lease cleanup failed: " + error.Message); }
                 finally { lease.Dispose(); }
             }
         }
+        // Never publish a successful result before profile deletion and the
+        // provider cleanup acknowledgement have both been observed.
+        if (fixtureStation && !leaseCleanupVerified) return 3;
+        if (completedResult == null) return 3;
+        Console.WriteLine(completedResult);
+        return 0;
     }
 }
