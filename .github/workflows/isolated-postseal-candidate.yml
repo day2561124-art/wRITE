@@ -52,3 +52,27 @@ jobs:
       - name: Diagnose Windows AppContainer after failed postseal
         if: ${{ !cancelled() && runner.os == 'Windows' && steps.postseal.outcome == 'failure' }}
         run: node --test tests/mcp/pi-workspace-appcontainer.test.mjs
+  full-candidate:
+    name: Exact combined candidate all
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify exact candidate identity
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$EXPECTED_HEAD"
+          printf 'Candidate HEAD: %s\n' "$actual"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: npm ci
+      - name: Execute original complete all gate
+        run: node tests/run-all.mjs
