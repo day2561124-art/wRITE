@@ -140,7 +140,9 @@ internal static class PowerShellAppContainer {
 
     public static int Main(string[] args) {
         uint timeout;
-        if (args.Length != 3 || !UInt32.TryParse(args[2], out timeout) || timeout < 1000 || timeout > 120000) return 64;
+        if ((args.Length != 3 && args.Length != 4) || !UInt32.TryParse(args[2], out timeout) || timeout < 1000 || timeout > 120000) return 64;
+        bool fixedHermeticCore = args.Length == 4;
+        if (fixedHermeticCore && (args[3] != "fixed-hermetic-core" || args[1] != ".")) return 64;
         string root = Path.GetFullPath(args[0]);
         string work = Path.Combine(root, "work");
         string tools = Path.Combine(Directory.GetParent(root).FullName, "tools");
@@ -150,7 +152,9 @@ internal static class PowerShellAppContainer {
         string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
         string system = Path.Combine(windows, "System32");
         string psHome = Path.Combine(system, @"WindowsPowerShell\v1.0");
-        string executable = Path.Combine(psHome, "powershell.exe");
+        string executable = fixedHermeticCore ? Path.Combine(tools, "node.exe") : Path.Combine(psHome, "powershell.exe");
+        string fixedEntrypoint = Path.Combine(work, @"tests\tools\mcp-hermetic-core.test.mjs");
+        if (fixedHermeticCore && (!File.Exists(executable) || !File.Exists(fixedEntrypoint))) return 64;
         IntPtr sid = IntPtr.Zero, attrs = IntPtr.Zero, security = IntPtr.Zero, env = IntPtr.Zero, handles = IntPtr.Zero;
         IntPtr job = IntPtr.Zero, token = IntPtr.Zero, stdoutRead = IntPtr.Zero, stdoutWrite = IntPtr.Zero;
         IntPtr stderrRead = IntPtr.Zero, stderrWrite = IntPtr.Zero, stdinRead = IntPtr.Zero, stdinWrite = IntPtr.Zero;
@@ -207,7 +211,11 @@ internal static class PowerShellAppContainer {
                 + "Set-Location -LiteralPath (Join-Path 'Nexa:\\' $env:NEXA_SANDBOX_CWD); "
                 + "$global:LASTEXITCODE = 0; & ([scriptblock]::Create([IO.File]::ReadAllText($env:NEXA_SANDBOX_SCRIPT))); "
                 + "$successful = $?; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; if (-not $successful) { exit 1 }; exit 0";
-            var command = new StringBuilder("\"" + executable + "\" -NoLogo -NoProfile -NonInteractive -EncodedCommand " + Convert.ToBase64String(Encoding.Unicode.GetBytes(loader)));
+            // The sole direct Node route has a server-fixed entrypoint and identical token/job controls.
+            // The legacy PowerShell route and its working-directory behavior are unchanged.
+            var command = new StringBuilder(fixedHermeticCore
+                ? "\"" + executable + "\" \"" + fixedEntrypoint + "\""
+                : "\"" + executable + "\" -NoLogo -NoProfile -NonInteractive -EncodedCommand " + Convert.ToBase64String(Encoding.Unicode.GetBytes(loader)));
             Require(CreateProcess(executable, command, IntPtr.Zero, IntPtr.Zero, true, Suspended | UnicodeEnvironment | ExtendedStartup | NoWindow, env, cwd, ref startup, out child));
             Require(AssignProcessToJobObject(job, child.Process));
             Require(OpenProcessToken(child.Process, 8, out token));
