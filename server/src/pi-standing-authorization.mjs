@@ -145,7 +145,7 @@ export function createPiStandingAuthorizationReader({ root, resolveWorkspace, cl
       await check(dir, record, intent);
     } catch { fail(); }
   }
-  async function bind(intent, { authenticatedPrincipal } = {}) {
+  async function selectPolicy(intent, { authenticatedPrincipal } = {}, allowAbsent = false) {
     try {
       if (!principalValid(authenticatedPrincipal) || intent.standing_authorization !== undefined
         || intent.task_authorization_id !== undefined || intent.bootstrap) fail();
@@ -153,18 +153,24 @@ export function createPiStandingAuthorizationReader({ root, resolveWorkspace, cl
       const files = (await readdir(dir)).filter(name => /^pi_standing_[a-f0-9]{32}\.approved\.json$/u.test(name));
       if (files.length > maxPolicies) fail();
       const matches = [];
+      let scopePreviouslyApproved = false;
       for (const name of files) {
         const id = name.slice(0, -".approved.json".length);
         const record = await readRecord(dir, id);
         const now = clock();
-        if (record.plan.principal !== authenticatedPrincipal || !timeValid(record, now)
-          || await revoked(dir, id)
+        if (record.plan.principal !== authenticatedPrincipal
           || !record.plan.scopes.some(scope => scope.workspace_id === intent.context.workspace_id
             && scope.workstream_id === intent.context.workstream_id)) continue;
+        scopePreviouslyApproved = true;
+        if (!timeValid(record, now) || await revoked(dir, id)) continue;
         matches.push(record);
       }
       // Ambiguous overlapping policies are an operator error, not a chance
       // to combine capability lists or choose a more permissive policy.
+      // Only verified absence of any matching historical policy permits the
+      // independent legacy binding route. Denial, expiry, revocation, corrupt
+      // storage and insufficient capabilities never trigger that fallback.
+      if (allowAbsent && !scopePreviouslyApproved) return null;
       if (matches.length !== 1) fail();
       const record = matches[0];
       const proof = { policy_id: record.policy_id, policy_sha256: hashExecutionInput(record), principal: authenticatedPrincipal };
@@ -173,7 +179,9 @@ export function createPiStandingAuthorizationReader({ root, resolveWorkspace, cl
       return bound;
     } catch { fail(); }
   }
-  return Object.freeze({ bind, authorize });
+  const bind = (intent, options) => selectPolicy(intent, options);
+  const bindIfApplicable = (intent, options) => selectPolicy(intent, options, true);
+  return Object.freeze({ bind, bindIfApplicable, authorize });
 }
 
 // Operator-only composition. This is deliberately not an MCP tool or a
