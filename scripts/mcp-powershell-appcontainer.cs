@@ -89,23 +89,47 @@ internal static class PowerShellAppContainer {
             while (offset < count) {
                 var pending = pipe.BeginRead(data, offset, count-offset, null, null);
                 int remaining = 5000-(int)deadline.ElapsedMilliseconds;
-                if (remaining<=0 || !pending.AsyncWaitHandle.WaitOne(remaining))
-                    throw new TimeoutException("Station lease response timeout");
-                int size = pipe.EndRead(pending);
+                int size;
+                using (var wait = pending.AsyncWaitHandle) {
+                    if (remaining<=0 || !wait.WaitOne(remaining))
+                        throw new TimeoutException("Station lease response timeout");
+                    size = pipe.EndRead(pending);
+                }
                 if (size==0) throw new EndOfStreamException("Station lease ended");
                 offset += size;
             }
             return data;
+        }
+        // Starting this fixed, operator-registered resource-only task does not
+        // authorize engineering or permit caller-supplied elevated commands.
+        private static void RequestProviderStart() {
+            string exe = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), @"System32\schtasks.exe");
+            var info = new ProcessStartInfo(exe, @"/Run /TN \WriterWorkbench-NexaStationLeaseV1") {
+                UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
+            };
+            using (var request = Process.Start(info)) {
+                if (request == null) throw new InvalidOperationException("Station provider start unavailable");
+                request.BeginOutputReadLine(); request.BeginErrorReadLine();
+                if (!request.WaitForExit(3000)) {
+                    try { request.Kill(); } catch (InvalidOperationException) { }
+                    throw new TimeoutException("Station provider start deadline");
+                }
+                if (request.ExitCode != 0) throw new InvalidOperationException("Station provider start rejected");
+            }
         }
         internal StationLease() {
             try {
                 pipe = new NamedPipeClientStream(".", "NexaStationLeaseV1",
                     PipeAccessRights.ReadWrite | PipeAccessRights.ReadPermissions | PipeAccessRights.Synchronize,
                     PipeOptions.Asynchronous, TokenImpersonationLevel.Identification, HandleInheritability.None);
-                pipe.Connect(5000);
+                try { pipe.Connect(150); }
+                catch (TimeoutException) {
+                    RequestProviderStart();
+                    pipe.Connect(5000);
+                }
                 var owner = pipe.GetAccessControl().GetOwner(typeof(SecurityIdentifier));
                 if (!owner.Equals(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null)))
-                    throw new InvalidOperationException("Unexpected diagnostic provider identity");
+                    throw new InvalidOperationException("Unexpected station provider identity");
                 pipe.WriteByte(65); pipe.Flush();
                 Id=Encoding.ASCII.GetString(ReadExact(32));
                 Guid parsed;
@@ -121,6 +145,22 @@ internal static class PowerShellAppContainer {
             if (ReadExact(1)[0]!=75) throw new InvalidOperationException("Station lease cleanup unacknowledged");
         }
         public void Dispose() { if(pipe!=null) { pipe.Dispose(); pipe=null; } }
+    }
+
+    [DllImport("advapi32.dll", EntryPoint = "GetTokenInformation", SetLastError = true)]
+    private static extern bool GetTokenInformationBuffer(IntPtr token, int type, IntPtr value, int size, out int required);
+
+    private static void VerifyPackageIdentity(IntPtr token, SecurityIdentifier expected) {
+        int required;
+        GetTokenInformationBuffer(token, 31, IntPtr.Zero, 0, out required);
+        if (required < IntPtr.Size || required > 4096) throw new InvalidOperationException("AppContainer SID unavailable");
+        IntPtr buffer = Marshal.AllocHGlobal(required);
+        try {
+            Require(GetTokenInformationBuffer(token, 31, buffer, required, out required));
+            IntPtr actual = Marshal.ReadIntPtr(buffer);
+            if (actual == IntPtr.Zero || !expected.Equals(new SecurityIdentifier(actual)))
+                throw new InvalidOperationException("Unexpected AppContainer package identity");
+        } finally { Marshal.FreeHGlobal(buffer); }
     }
 
     private static void Require(bool ok) { if (!ok) throw new Win32Exception(Marshal.GetLastWin32Error()); }
@@ -283,6 +323,7 @@ internal static class PowerShellAppContainer {
             int isContainer, needed;
             Require(GetTokenInformation(token, 29, out isContainer, sizeof(int), out needed));
             if (isContainer != 1) throw new InvalidOperationException("Expected an AppContainer token");
+            VerifyPackageIdentity(token, package);
             Close(ref stdoutWrite); Close(ref stderrWrite); Close(ref stdinRead);
             var stdout = new Capture(stdoutRead); stdoutRead = IntPtr.Zero;
             var stderr = new Capture(stderrRead); stderrRead = IntPtr.Zero;
