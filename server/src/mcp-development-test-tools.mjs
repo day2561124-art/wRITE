@@ -10,6 +10,7 @@ import {
   terminateProcessTree,
 } from "./process-control.mjs";
 import { projectRoot } from "./project-paths.mjs";
+import { FIXED_ISOLATED_SUITE, runFixedIsolatedVerification } from "./mcp-fixed-isolated-verification.mjs";
 import { buildDevelopmentVerificationManifest } from "./mcp-verification-manifest.mjs";
 import { workspaceExecutionProvenance } from "./mcp-development-readonly-tools.mjs";
 import { resolveDevWorkspaceExecutionContext } from "./mcp-development-workstream-tools.mjs";
@@ -25,6 +26,7 @@ export const DEV_TEST_SUITES = Object.freeze([
   "mcp",
   "mcp_core",
   "mcp_pi_postseal",
+  "mcp_hermetic_core",
   "mcp_infrastructure",
   "mcp_reliability",
   "mcp_tunnel",
@@ -44,6 +46,7 @@ const productionSuiteDefinitions = Object.freeze({
     timeoutMs: 2_400_000,
   }),
   mcp_pi_postseal: Object.freeze({executable:process.execPath,argv:Object.freeze(["tests/tools/mcp-pi-postseal.test.mjs"]),timeoutMs:600_000}),
+  mcp_hermetic_core: Object.freeze({ executable: process.execPath, argv: Object.freeze(["tests/tools/mcp-hermetic-core.test.mjs"]), timeoutMs: 120_000 }),
   mcp_core: Object.freeze({
     executable: process.execPath,
     argv: Object.freeze(["tests/tools/mcp-core.test.mjs"]),
@@ -309,6 +312,9 @@ async function persistLastRunResult(resultPath, result) {
     verification_manifest: result.verification_manifest ?? null,
     verification_manifest_sha256: result.verification_manifest_sha256 ?? null,
     ...snapshotJournalTelemetry({ diagnostics: result.snapshot_diagnostics }),
+    ...(result.isolation_mode === "appcontainer" ? { isolation_mode: result.isolation_mode,
+      input_manifest_sha256: result.input_manifest_sha256, input_file_count: result.input_file_count,
+      job_terminated: result.job_terminated, cleanup_pending: result.cleanup_pending, workspace_writes: result.workspace_writes } : {}),
     stdout_truncated: result.stdout_truncated === true,
     stderr_truncated: result.stderr_truncated === true,
     stdout_tail: tailText(result.stdout),
@@ -567,7 +573,8 @@ export function createDevTestRunner({
 } = {}) {
   return async function runTests(input = {}) {
     const { usesScopedAdminDispatcherRoot } = await import("./mcp-powershell-maintenance-tools.mjs");
-    if (usesScopedAdminDispatcherRoot()) {
+    const scoped = usesScopedAdminDispatcherRoot();
+    if (scoped && input?.suite !== FIXED_ISOLATED_SUITE) {
       throw Object.assign(new Error("Use workspace.powershell_isolated to test under the scoped dispatcher."),
         { code: "ISOLATED_VERIFICATION_REQUIRED" });
     }
@@ -637,7 +644,7 @@ export function createDevTestRunner({
 
     let dependencyBridgeCleanup = async () => {};
     try {
-      dependencyBridgeCleanup = await prepareWorkspaceDependencyBridge(context, dependencyRoot);
+      if (!scoped) dependencyBridgeCleanup = await prepareWorkspaceDependencyBridge(context, dependencyRoot);
     } catch (error) {
       try {
         await journal.fail(journalOperation.operation_id, {
@@ -670,7 +677,7 @@ export function createDevTestRunner({
 
     let result;
     try {
-      result = await runDefinition(
+      result = scoped ? await runFixedIsolatedVerification({ suite, context }) : await runDefinition(
         suite,
         definition,
         outputMaxCharacters,
@@ -699,6 +706,17 @@ export function createDevTestRunner({
       };
     }
 
+    if (scoped && result.passed === true) {
+      try {
+        const after = await computeWorkspaceSnapshot(context);
+        if (after.workspace_snapshot_id !== workspaceSnapshot.workspace_snapshot_id || after.head !== workspaceSnapshot.head) {
+          throw new Error("ISOLATED_VERIFICATION_SNAPSHOT_CHANGED");
+        }
+      } catch (error) {
+        result = { ...result, execution_ok: false, passed: false,
+          stderr: [result.stderr, redactTestOutput(error.message)].filter(Boolean).join("\n") };
+      }
+    }
     let verificationManifest = null;
     let verificationManifestSha256 = null;
     const refreshVerificationManifest = () => {
@@ -763,6 +781,9 @@ export function createDevTestRunner({
           changed_artifact_count: workspaceSnapshot.changed_artifact_count,
           verification_manifest_sha256: verificationManifestSha256,
           verification_manifest_gate_result: verificationManifest?.gate_result ?? "failed",
+          ...(scoped ? { isolation_mode: "appcontainer", input_manifest_sha256: result.input_manifest_sha256 ?? null,
+            input_file_count: result.input_file_count ?? null, job_terminated: result.job_terminated === true,
+            cleanup_pending: result.cleanup_pending ?? null, workspace_writes: false } : {}),
           ...snapshotJournalTelemetry(workspaceSnapshot),
         },
       });
