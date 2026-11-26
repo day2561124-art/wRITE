@@ -34,6 +34,7 @@ jobs:
           $actual = (git rev-parse HEAD).Trim()
           if ($LASTEXITCODE -ne 0 -or $actual -cne $env:EXPECTED_HEAD) { throw 'Candidate mismatch' }
           Write-Output "Candidate HEAD: $actual"
+          Write-Output 'PER_RUN_LEASE_FIXTURE_V1; diagnostic comparison only; no production deployment'
           $suffix = [guid]::NewGuid().ToString('N').Substring(0,12)
           $root = Join-Path $env:SystemDrive "NexaDiag-$suffix"
           $account = "NexaDiag$suffix"
@@ -115,7 +116,7 @@ jobs:
             # writable run directory. It never launches the guest or accepts code.
             $provisioner = Join-Path $root 'station-fixture.exe'
             $csc = Join-Path $env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-            & $csc /nologo /target:exe /platform:x64 "/out:$provisioner" (Join-Path $source 'tests\fixtures\session0-private-station-provisioner.cs')
+            & $csc /nologo /target:exe /platform:x64 "/out:$provisioner" (Join-Path $source 'tests\fixtures\session0-station-lease-provider.cs')
             if ($LASTEXITCODE -ne 0) { throw 'Station fixture compilation failed' }
             $provisionArgs = '"' + $sid + '" "' + $root + '"'
             $provisionAction = New-ScheduledTaskAction -Execute $provisioner -Argument $provisionArgs -WorkingDirectory $root
@@ -276,6 +277,34 @@ jobs:
                 if (Test-Path -LiteralPath $stopped) { Get-Content -LiteralPath $stopped }
                 Stop-ScheduledTask -TaskName $provisionTask -ErrorAction SilentlyContinue
                 Unregister-ScheduledTask -TaskName $provisionTask -Confirm:$false
+                $leaseLog = Join-Path $root 'station-leases.log'
+                if (Test-Path -LiteralPath $leaseLog) { Get-Content -LiteralPath $leaseLog }
+                if ($observed -and $observed.test_exit -eq 0) {
+                  $lines = @(Get-Content -LiteralPath $leaseLog)
+                  $acquired = @($lines | Where-Object { $_ -match '^acquired=[0-9a-f]{32}; package=S-1-15-2-' })
+                  $closed = @($lines | Where-Object { $_ -match '^closed=[0-9a-f]{32}; released=True; cleaned=True
+                  throw 'Independent station fixture cleanup not verified'
+                }
+              }
+            } finally {
+              try {
+                if ($batchPolicyChanged) { Set-FixtureBatchRight $originalBatch 'fixture-batch-restore' }
+              } finally {
+                if ($createdUser) { Remove-LocalUser -Name $account }
+              }
+            }
+            if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
+          }
+ })
+                  $ids = @($acquired | ForEach-Object { ($_ -split '[=;]')[1] })
+                  $packages = @($acquired | ForEach-Object { ($_ -split 'package=')[1] })
+                  $closedIds = @($closed | ForEach-Object { ($_ -split '[=;]')[1] })
+                  if ($ids.Count -ne 3 -or @($ids | Sort-Object -Unique).Count -ne 3 -or @($packages | Sort-Object -Unique).Count -ne 3 -or
+                      $closedIds.Count -ne 3 -or (Compare-Object ($ids | Sort-Object) ($closedIds | Sort-Object))) {
+                    throw 'Expected three distinct single-use leases with verified normal cleanup'
+                  }
+                  Write-Output 'PER_RUN_LEASE_IDENTITY_AND_CLEANUP_PASS'
+                }
                 if (!(Test-Path -LiteralPath $stopped) -or (Get-Content -LiteralPath $stopped -Raw).Trim() -ne 'exit=0') {
                   throw 'Independent station fixture cleanup not verified'
                 }
