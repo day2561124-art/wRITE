@@ -61,6 +61,8 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
+          # The original all gate reconciles historical inventory baselines.
+          fetch-depth: 0
       - name: Verify exact candidate identity
         shell: bash
         env:
