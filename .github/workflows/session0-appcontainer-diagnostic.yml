@@ -118,15 +118,24 @@ jobs:
             $cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
             $arguments = '/d /c ""' + $wrapper + '""'
             $action = New-ScheduledTaskAction -Execute $cmd -Argument $arguments -WorkingDirectory $source
-            $null = Register-ScheduledTask -TaskName $task -Action $action -User "$env:COMPUTERNAME\$account" -Password $password -RunLevel Limited
+            # Only the disposable fixture task gets explicit scheduling settings.
+            # Do not modify batch-logon rights or any security policy.
+            $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+            $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1)
+            $null = Register-ScheduledTask -TaskName $task -Action $action -Trigger $trigger -Settings $settings -User "$env:COMPUTERNAME\$account" -Password $password -RunLevel Limited
             $createdTask = $true
             $password = $null
             $secure.Dispose()
             $principal = (Get-ScheduledTask -TaskName $task).Principal
             if ([string]$principal.LogonType -ne 'Password' -or [string]$principal.RunLevel -ne 'Limited') { throw 'Task principal mismatch' }
+            # Enable event history on this disposable CI VM, not on the production host.
+            wevtutil sl Microsoft-Windows-TaskScheduler/Operational /e:true
+            if ($LASTEXITCODE -ne 0) { throw 'Unable to enable disposable fixture task history' }
+            $registered = Get-ScheduledTask -TaskName $task
+            $registered.Settings | Select-Object Enabled,AllowDemandStart,DisallowStartIfOnBatteries,RunOnlyIfIdle,RunOnlyIfNetworkAvailable | Format-List
             $start = Get-Date
             $prior = (Get-ScheduledTaskInfo -TaskName $task).LastRunTime
-            Start-ScheduledTask -TaskName $task
+            Start-ScheduledTask -TaskName $task -ErrorAction Stop
             $deadline = [datetime]::UtcNow.AddMinutes(5)
             $resultPath = Join-Path $run 'result.json'
             while (!(Test-Path -LiteralPath $resultPath)) {
