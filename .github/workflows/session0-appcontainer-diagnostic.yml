@@ -36,6 +36,7 @@ jobs:
           $task = "NexaSession0Diag-$suffix"
           $createdUser = $false
           $createdTask = $false
+          $batchPolicyChanged = $false
           $observed = $null
           try {
             $null = New-Item -ItemType Directory -Path $root
@@ -71,6 +72,28 @@ jobs:
             $user = New-LocalUser -Name $account -Password $secure -Description 'Disposable Nexa Session 0 diagnostic'
             $createdUser = $true
             $sid = $user.SID.Value
+            # 0x80070569 on previous runs: the disposable account lacks batch logon.
+            # Grant that one logon type to this one temporary CI SID. Preserve all
+            # existing entries and restore the original list in finally. This is
+            # not a change to Nexa's production account or any AppContainer ACL.
+            $policy = Join-Path $root 'original-rights.inf'
+            secedit /export /cfg $policy /areas USER_RIGHTS /quiet
+            if ($LASTEXITCODE -ne 0) { throw 'Fixture rights export failed' }
+            $line = @(Get-Content -LiteralPath $policy | Where-Object { $_ -match '^SeBatchLogonRight\s*=' })
+            if ($line.Count -gt 1) { throw 'Ambiguous batch-logon policy' }
+            $originalBatch = if ($line.Count -eq 1) { ($line[0] -split '=',2)[1].Trim() } else { '' }
+            $entries = @($originalBatch -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+            $newBatch = (@($entries) + "*$sid") -join ','
+            function Set-FixtureBatchRight([string]$Value, [string]$Label) {
+              $inf = Join-Path $root "$Label.inf"
+              $db = Join-Path $root "$Label.sdb"
+              @('[Unicode]', 'Unicode=yes', '[Version]', 'signature="$CHICAGO$"', 'Revision=1', '[Privilege Rights]', "SeBatchLogonRight = $Value") |
+                Set-Content -LiteralPath $inf -Encoding Unicode
+              secedit /configure /db $db /cfg $inf /areas USER_RIGHTS /quiet
+              if ($LASTEXITCODE -ne 0) { throw "Fixture batch-logon $Label failed" }
+            }
+            $batchPolicyChanged = $true
+            Set-FixtureBatchRight $newBatch 'fixture-batch-grant'
             icacls $root /grant:r "*${sid}:(OI)(CI)(RX)" | Out-Null
             if ($LASTEXITCODE -ne 0) { throw 'Fixture read ACL failed' }
             icacls $run /grant:r "*${sid}:(OI)(CI)(M)" | Out-Null
@@ -119,7 +142,7 @@ jobs:
             $arguments = '/d /c ""' + $wrapper + '""'
             $action = New-ScheduledTaskAction -Execute $cmd -Argument $arguments -WorkingDirectory $source
             # Only the disposable fixture task gets explicit scheduling settings.
-            # Do not modify batch-logon rights or any security policy.
+            # No production policy changes; the temporary SID alone has batch logon.
             $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
             $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1)
             $null = Register-ScheduledTask -TaskName $task -Action $action -Trigger $trigger -Settings $settings -User "$env:COMPUTERNAME\$account" -Password $password -RunLevel Limited
@@ -168,6 +191,10 @@ jobs:
               Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
               Unregister-ScheduledTask -TaskName $task -Confirm:$false
             }
-            if ($createdUser) { Remove-LocalUser -Name $account }
+            try {
+              if ($batchPolicyChanged) { Set-FixtureBatchRight $originalBatch 'fixture-batch-restore' }
+            } finally {
+              if ($createdUser) { Remove-LocalUser -Name $account }
+            }
             if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
           }
