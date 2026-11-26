@@ -1,4 +1,7 @@
 import path from "node:path";
+import { createHash } from "node:crypto";
+import { lstat, readFile } from "node:fs/promises";
+import { assertExistingSafePath, decodeText } from "./mcp-development-readonly-tools.mjs";
 import { prepareAppContainerPowerShell } from "./mcp-powershell-appcontainer.mjs";
 
 // A fixed, explicitly named subset of the existing VA-9 hermetic tests.
@@ -38,13 +41,37 @@ export function fixedIsolatedVerificationPlan(suite, context) {
   };
 }
 
+// Reproduce the staging manifest from independently observed workspace bytes.
+// The sandbox receipt must bind the exact five sources, not merely a file count.
+const sha256 = value => createHash("sha256").update(value).digest("hex");
+async function observeInputManifest(root) {
+  const entries = [];
+  for (const file of FIXED_ISOLATED_SOURCE_PATHS) {
+    const target = path.join(root, file);
+    await assertExistingSafePath(target, "Fixed verification source", root);
+    const info = await lstat(target);
+    if (!info.isFile() || info.size > 256 * 1024) reject("INVALID_FIXED_VERIFICATION_SOURCE");
+    const bytes = await readFile(target);
+    if (bytes.length > 256 * 1024) reject("INVALID_FIXED_VERIFICATION_SOURCE");
+    decodeText(bytes, "Fixed verification source");
+    entries.push({ path: file, sha256: sha256(bytes), bytes: bytes.length });
+  }
+  return sha256(JSON.stringify(entries));
+}
+
 // This is a trusted server-side runner, not an additional authorization source.
 // The enclosing dev_run_tests handler continues to own Journal admission,
 // snapshot provenance and durable completion.
 export async function runFixedIsolatedVerification({ suite, context, prepare = prepareAppContainerPowerShell }) {
-  const prepared = await prepare(fixedIsolatedVerificationPlan(suite, context));
+  const plan = fixedIsolatedVerificationPlan(suite, context);
+  const expectedManifest = await observeInputManifest(context.root);
+  const prepared = await prepare(plan);
   let observed;
   try {
+    if (prepared.manifest?.input_manifest_sha256 !== expectedManifest ||
+        prepared.manifest?.input_file_count !== FIXED_ISOLATED_SOURCE_PATHS.length) {
+      reject("ISOLATED_VERIFICATION_INPUT_CHANGED");
+    }
     observed = await prepared.run();
   } finally {
     // A cleanup failure must never become a successful verification receipt.
@@ -53,10 +80,11 @@ export async function runFixedIsolatedVerification({ suite, context, prepare = p
   const valid = observed?.isolation_mode === "appcontainer" &&
     observed.workspace_writes === false && observed.job_terminated === true &&
     observed.input_file_count === FIXED_ISOLATED_SOURCE_PATHS.length &&
-    /^[a-f0-9]{64}$/u.test(observed.input_manifest_sha256 ?? "") &&
+    observed.input_manifest_sha256 === expectedManifest &&
     observed.toolchain === "node" &&
     observed.artifacts?.length === 0;
   if (!valid) reject("INVALID_ISOLATED_VERIFICATION_RECEIPT");
+  if (await observeInputManifest(context.root) !== expectedManifest) reject("ISOLATED_VERIFICATION_INPUT_CHANGED");
   const execution_ok = observed.execution_ok === true;
   const passed = execution_ok && observed.ok === true &&
     observed.exit_code === 0 && observed.timed_out === false;
