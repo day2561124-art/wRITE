@@ -36,6 +36,8 @@ jobs:
           $task = "NexaSession0Diag-$suffix"
           $createdUser = $false
           $createdTask = $false
+          $createdProvisioner = $false
+          $provisionTask = "$task-station"
           $batchPolicyChanged = $false
           $observed = $null
           try {
@@ -98,6 +100,34 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Fixture read ACL failed' }
             icacls $run /grant:r "*${sid}:(OI)(CI)(M)" | Out-Null
             if ($LASTEXITCODE -ne 0) { throw 'Fixture run ACL failed' }
+
+            # A bounded, CI-only SYSTEM process creates only new station/desktop
+            # objects. Its binary and control files are outside the user's
+            # writable run directory. It never launches the guest or accepts code.
+            $provisioner = Join-Path $root 'station-fixture.exe'
+            $csc = Join-Path $env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+            & $csc /nologo /target:exe /platform:x64 "/out:$provisioner" (Join-Path $source 'tests\fixtures\session0-private-station-provisioner.cs')
+            if ($LASTEXITCODE -ne 0) { throw 'Station fixture compilation failed' }
+            $provisionArgs = '"' + $sid + '" "' + $root + '"'
+            $provisionAction = New-ScheduledTaskAction -Execute $provisioner -Argument $provisionArgs -WorkingDirectory $root
+            $provisionPrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+            $provisionSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+            $null = Register-ScheduledTask -TaskName $provisionTask -Action $provisionAction -Principal $provisionPrincipal -Settings $provisionSettings
+            $createdProvisioner = $true
+            Start-ScheduledTask -TaskName $provisionTask
+            $stationDeadline = [datetime]::UtcNow.AddSeconds(75)
+            while (!(Test-Path -LiteralPath (Join-Path $root 'station-ready.txt'))) {
+              if (Test-Path -LiteralPath (Join-Path $root 'station-error.txt')) {
+                Get-Content -LiteralPath (Join-Path $root 'station-error.txt')
+                throw 'Independent station fixture failed'
+              }
+              if ([datetime]::UtcNow -gt $stationDeadline) {
+                Get-ScheduledTaskInfo -TaskName $provisionTask | Select-Object LastRunTime,LastTaskResult | Format-List
+                throw 'Independent station fixture not ready'
+              }
+              Start-Sleep -Seconds 1
+            }
+            Get-Content -LiteralPath (Join-Path $root 'station-ready.txt')
             $script = Join-Path $root 'probe.ps1'
             @'
           param([Parameter(Mandatory=$true)][string]$Root)
@@ -177,7 +207,7 @@ jobs:
             # Only the disposable fixture task gets explicit scheduling settings.
             # No production policy changes; the temporary SID alone has batch logon.
             $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
-            $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1)
+            $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(10)
             $null = Register-ScheduledTask -TaskName $task -Action $action -Trigger $trigger -Settings $settings -User "$env:COMPUTERNAME\$account" -Password $password -RunLevel Limited
             $createdTask = $true
             $password = $null
@@ -227,9 +257,26 @@ jobs:
               Unregister-ScheduledTask -TaskName $task -Confirm:$false
             }
             try {
-              if ($batchPolicyChanged) { Set-FixtureBatchRight $originalBatch 'fixture-batch-restore' }
+              if ($createdProvisioner) {
+                Set-Content -LiteralPath (Join-Path $root 'station-stop.txt') -Value 'stop' -Encoding ASCII
+                $stopDeadline = [datetime]::UtcNow.AddSeconds(15)
+                while (!(Test-Path -LiteralPath (Join-Path $root 'station-stopped.txt')) -and [datetime]::UtcNow -lt $stopDeadline) {
+                  Start-Sleep -Seconds 1
+                }
+                $stopped = Join-Path $root 'station-stopped.txt'
+                if (Test-Path -LiteralPath $stopped) { Get-Content -LiteralPath $stopped }
+                Stop-ScheduledTask -TaskName $provisionTask -ErrorAction SilentlyContinue
+                Unregister-ScheduledTask -TaskName $provisionTask -Confirm:$false
+                if (!(Test-Path -LiteralPath $stopped) -or (Get-Content -LiteralPath $stopped -Raw).Trim() -ne 'exit=0') {
+                  throw 'Independent station fixture cleanup not verified'
+                }
+              }
             } finally {
-              if ($createdUser) { Remove-LocalUser -Name $account }
+              try {
+                if ($batchPolicyChanged) { Set-FixtureBatchRight $originalBatch 'fixture-batch-restore' }
+              } finally {
+                if ($createdUser) { Remove-LocalUser -Name $account }
+              }
             }
             if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
           }
