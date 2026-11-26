@@ -63,8 +63,17 @@ async function fixture(t, { allowRepair = false, loseFirstShellResponse = false 
         const result = await journal.executeReconciled({ reconciliation_key: params._meta.reconciliation_key,
           request_fingerprint_sha256: fingerprintMcpMutationRequest(params.name, params.arguments), tool_name: params.name,
           resolve_workspace_scope: async () => identities }, async () => {
-          const payload = await tool(params.arguments);
-          return { content: [{ type: "text", text: JSON.stringify(payload) }] };
+          try {
+            const payload = await tool(params.arguments);
+            return { content: [{ type: "text", text: JSON.stringify(payload) }] };
+          } catch (error) {
+            // Only fixture paths and commands are used here. Keep the original
+            // error and reconciliation behavior, but expose the pre-dispatch
+            // failure to hosted CI before the controller records its outcome.
+            t.diagnostic(JSON.stringify({ stage: "appcontainer-fixture-dispatch",
+              code: error?.code ?? null, message: error?.message ?? String(error) }));
+            throw error;
+          }
         });
         if (loseFirstShellResponse && dispatches === 1) {
           throw Object.assign(new Error("Fixture lost the native build response"), { code: "TRANSPORT_ERROR" });
