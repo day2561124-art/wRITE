@@ -1,0 +1,313 @@
+name: Session 0 installed station lease acceptance
+
+# Disposable hosted runner only. Not a production deployment or grant test.
+on:
+  pull_request:
+    branches: [nexa/fixed-isolated-verification]
+permissions:
+  contents: read
+
+concurrency:
+  group: session0-installed-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  session0:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          package-manager-cache: false
+      - name: Exercise reviewed installer and native on-demand lease under limited Password task
+        shell: pwsh
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -cne $env:EXPECTED_HEAD) { throw 'Candidate mismatch' }
+          Write-Output "Candidate HEAD: $actual"
+          Write-Output 'INSTALLED_STATION_LEASE_V1; disposable CI only; no production deployment'
+          $suffix = [guid]::NewGuid().ToString('N').Substring(0,12)
+          $root = Join-Path $env:SystemDrive "NexaDiag-$suffix"
+          $account = "NexaDiag$suffix"
+          $task = "NexaSession0Diag-$suffix"
+          $createdUser = $false
+          $createdTask = $false
+          $createdProvisioner = $false
+          $provisionTask = 'WriterWorkbench-NexaStationLeaseV1'
+          $providerRoot = Join-Path $env:ProgramFiles 'WriterWorkbench-NexaStationLease-v1'
+          $batchPolicyChanged = $false
+          $observed = $null
+          try {
+            $null = New-Item -ItemType Directory -Path $root
+            # Never run the SYSTEM fixture from a location writable by the
+            # standard test user or guest. Remove inherited root permissions
+            # before writing any executable; only the run subtree is writable.
+            icacls $root /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)(F)' '*S-1-5-32-544:(OI)(CI)(F)' | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Fixture root protection failed' }
+            $source = Join-Path $root 'source'
+            $tools = Join-Path $root 'tools'
+            $run = Join-Path $root 'run'
+            $null = New-Item -ItemType Directory -Path $source,$tools,$run
+            $archive = Join-Path $root 'source.zip'
+            git archive --format=zip --output=$archive $actual
+            if ($LASTEXITCODE -ne 0) { throw 'Fixture archive failed' }
+            Expand-Archive -LiteralPath $archive -DestinationPath $source
+            $nodeDir = Split-Path (Get-Command node.exe -ErrorAction Stop).Source
+            robocopy $nodeDir $tools /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+            if ($LASTEXITCODE -ge 8) { throw 'Fixture toolchain copy failed' }
+            $node = Join-Path $tools 'node.exe'
+            $npm = Join-Path $tools 'node_modules\npm\bin\npm-cli.js'
+            $env:Path = "$tools;$env:Path"
+            & $node $npm ci --prefix $source --no-audit --no-fund
+            if ($LASTEXITCODE -ne 0) { throw 'Fixture dependency install failed' }
+            $pattern = 'fixed hermetic suite (executes|denies|times out)'
+            $test = Join-Path $source 'tests\mcp\pi-workspace-appcontainer.test.mjs'
+            $runnerSession = (Get-Process -Id $PID).SessionId
+            $runnerAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+            Write-Output "BASELINE_SESSION=$runnerSession; BASELINE_ADMIN=$runnerAdmin; NODE=$(& $node --version)"
+            & $node --test --test-name-pattern $pattern $test
+            $baseline = $LASTEXITCODE
+            Write-Output "BASELINE_TEST_EXIT=$baseline"
+
+            # Fresh local standard user, only on this ephemeral CI VM.
+            # The random credential is never printed, persisted as an artifact or passed to the test.
+            $password = 'Nexa!9a-' + [guid]::NewGuid().ToString('N')
+            $secure = ConvertTo-SecureString -String $password -AsPlainText -Force
+            $user = New-LocalUser -Name $account -Password $secure -Description 'Disposable Nexa Session 0 diagnostic'
+            $createdUser = $true
+            $sid = $user.SID.Value
+            # 0x80070569 on previous runs: the disposable account lacks batch logon.
+            # Grant that one logon type to this one temporary CI SID. Preserve all
+            # existing entries and restore the original list in finally. This is
+            # not a change to Nexa's production account or any AppContainer ACL.
+            $policy = Join-Path $root 'original-rights.inf'
+            secedit /export /cfg $policy /areas USER_RIGHTS /quiet
+            if ($LASTEXITCODE -ne 0) { throw 'Fixture rights export failed' }
+            $line = @(Get-Content -LiteralPath $policy | Where-Object { $_ -match '^SeBatchLogonRight\s*=' })
+            if ($line.Count -gt 1) { throw 'Ambiguous batch-logon policy' }
+            $originalBatch = if ($line.Count -eq 1) { ($line[0] -split '=',2)[1].Trim() } else { '' }
+            $entries = @($originalBatch -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+            $newBatch = (@($entries) + "*$sid") -join ','
+            function Set-FixtureBatchRight([string]$Value, [string]$Label) {
+              $inf = Join-Path $root "$Label.inf"
+              $db = Join-Path $root "$Label.sdb"
+              @('[Unicode]', 'Unicode=yes', '[Version]', 'signature="$CHICAGO$"', 'Revision=1', '[Privilege Rights]', "SeBatchLogonRight = $Value") |
+                Set-Content -LiteralPath $inf -Encoding Unicode
+              secedit /configure /db $db /cfg $inf /areas USER_RIGHTS /quiet
+              if ($LASTEXITCODE -ne 0) { throw "Fixture batch-logon $Label failed" }
+            }
+            $batchPolicyChanged = $true
+            Set-FixtureBatchRight $newBatch 'fixture-batch-grant'
+            icacls $root /grant:r "*${sid}:(OI)(CI)(RX)" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Fixture read ACL failed' }
+            icacls $run /grant:r "*${sid}:(OI)(CI)(M)" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Fixture run ACL failed' }
+
+            # Exercise the exact reviewed installation script on the disposable
+            # runner. The limited fixture account starts the task on demand.
+            $exe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+            $install = Join-Path $source 'scripts\register-mcp-session0-station-lease.ps1'
+            $providerSource = Join-Path $source 'scripts\mcp-session0-station-lease-provider.cs'
+            $hash = (Get-FileHash -LiteralPath $providerSource -Algorithm SHA256).Hash
+            $installation = & $exe -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File $install -DispatcherAccount $account -ExpectedSourceSha256 $hash
+            if ($LASTEXITCODE -ne 0) { throw 'Protected station installation failed' }
+            $createdProvisioner = $true
+            $installed = ($installation | Out-String).Trim() | ConvertFrom-Json
+            if (!$installed.installed -or $installed.started -or $installed.dispatcher_sid -ne $sid -or $installed.source_sha256 -ne $hash) { throw 'Installer receipt mismatch' }
+            $installed | ConvertTo-Json -Depth 4
+            if ((Get-ScheduledTask -TaskName $provisionTask).State -ne 'Ready') { throw 'Provider must remain stopped after installation' }
+            $script = Join-Path $root 'probe.ps1'
+            @'
+          param([Parameter(Mandatory=$true)][string]$Root)
+          $ErrorActionPreference = 'Stop'
+          $run = Join-Path $Root 'run'
+          [IO.File]::WriteAllText((Join-Path $run 'probe-entered.txt'), 'entered')
+          $node = Join-Path $Root 'tools\node.exe'
+          $test = Join-Path $Root 'source\tests\mcp\pi-workspace-appcontainer.test.mjs'
+          $env:TEMP = $run
+          $env:TMP = $run
+          $env:Path = (Join-Path $Root 'tools') + ';' + $env:Path
+          $session = (Get-Process -Id $PID).SessionId
+          $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+          $result = [ordered]@{ session_id=$session; administrator=$admin; node_version=$null; initial_exit=$null; test_exit=$null; interrupted_lease=$null; error=$null }
+          function Invoke-FixedTests([string]$Pattern,[string]$Prefix) {
+            $arguments = '--test --test-name-pattern "' + $Pattern + '" "' + $test + '"'
+            $process = Start-Process -FilePath $node -ArgumentList $arguments -RedirectStandardOutput (Join-Path $run "$Prefix.log") -RedirectStandardError (Join-Path $run "$Prefix-stderr.log") -Wait -PassThru -NoNewWindow
+            return $process.ExitCode
+          }
+          try {
+            if ($session -ne 0 -or $admin) { throw 'Expected limited Session 0' }
+            $result.node_version = (& $node --version)
+            if ($LASTEXITCODE -ne 0) { throw 'Host Node version probe failed' }
+            # No administrator starts the provider. The first real fixed runner
+            # must request the protected task using only the configured account.
+            $result.initial_exit = Invoke-FixedTests 'fixed hermetic suite (executes|denies)' 'initial'
+            if ($result.initial_exit -ne 0) { throw 'Initial fixed verification failed' }
+            # Acquire a lease from the standard account, then disconnect before
+            # creating an AppContainer profile or launching a guest. The provider
+            # must clean its resources and accept the following real test runs.
+            $pipeRights = [IO.Pipes.PipeAccessRights]'ReadWrite, ReadPermissions, Synchronize'
+            $connection = New-Object IO.Pipes.NamedPipeClientStream('.', 'NexaStationLeaseV1', $pipeRights, [IO.Pipes.PipeOptions]::Asynchronous, [Security.Principal.TokenImpersonationLevel]::Identification, [IO.HandleInheritability]::None)
+            try {
+              $connection.Connect(5000)
+              $owner = $connection.GetAccessControl().GetOwner([Security.Principal.SecurityIdentifier])
+              if ($owner.Value -ne 'S-1-5-18') { throw 'Unexpected interruption probe provider' }
+              $connection.WriteByte(65)
+              $connection.Flush()
+              $buffer = New-Object byte[] 32
+              $offset = 0
+              $readClock = [Diagnostics.Stopwatch]::StartNew()
+              while ($offset -lt $buffer.Length) {
+                $pending = $connection.BeginRead($buffer, $offset, $buffer.Length - $offset, $null, $null)
+                $remaining = 5000 - [int]$readClock.ElapsedMilliseconds
+                if ($remaining -le 0 -or !$pending.AsyncWaitHandle.WaitOne($remaining)) { throw 'Interrupted lease acquisition timeout' }
+                $size = $connection.EndRead($pending)
+                if ($size -eq 0) { throw 'Interrupted lease closed before acquisition' }
+                $offset += $size
+              }
+              $result.interrupted_lease = [Text.Encoding]::ASCII.GetString($buffer)
+              if ($result.interrupted_lease -cnotmatch '^[0-9a-f]{32}$') { throw 'Malformed interrupted lease' }
+            } finally {
+              $connection.Dispose()
+            }
+            # Actual running guest timeout after the interrupted lease, not
+            # merely an acquisition/disconnection probe.
+            $result.test_exit = Invoke-FixedTests 'fixed hermetic suite times out' 'test'
+          } catch {
+            $result.error = $_.Exception.Message
+          } finally {
+            $tmp = Join-Path $run 'result.tmp'
+            $result | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $tmp -Encoding UTF8
+            Move-Item -LiteralPath $tmp -Destination (Join-Path $run 'result.json')
+          }
+          '@ | Set-Content -LiteralPath $script -Encoding UTF8
+            $exe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+            # Capture failures before the PowerShell script can write its own result.
+            # The wrapper contains only fixed fixture paths on the disposable runner.
+            $wrapper = Join-Path $root 'probe.cmd'
+            @(
+              '@echo off'
+              ('echo entered>"' + (Join-Path $run 'wrapper-entered.txt') + '"')
+              ('"' + $exe + '" -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "' + $script + '" -Root "' + $root + '" >"' + (Join-Path $run 'bootstrap.log') + '" 2>&1')
+              ('echo %ERRORLEVEL%>"' + (Join-Path $run 'wrapper-exit.txt') + '"')
+              'exit /b %ERRORLEVEL%'
+            ) | Set-Content -LiteralPath $wrapper -Encoding ASCII
+            $cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
+            $arguments = '/d /c ""' + $wrapper + '""'
+            $action = New-ScheduledTaskAction -Execute $cmd -Argument $arguments -WorkingDirectory $source
+            # Only the disposable fixture task gets explicit scheduling settings.
+            # No production policy changes; the temporary SID alone has batch logon.
+            $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+            $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(10)
+            $null = Register-ScheduledTask -TaskName $task -Action $action -Trigger $trigger -Settings $settings -User "$env:COMPUTERNAME\$account" -Password $password -RunLevel Limited
+            $createdTask = $true
+            $password = $null
+            $secure.Dispose()
+            $principal = (Get-ScheduledTask -TaskName $task).Principal
+            if ([string]$principal.LogonType -ne 'Password' -or [string]$principal.RunLevel -ne 'Limited') { throw 'Task principal mismatch' }
+            # Enable event history on this disposable CI VM, not on the production host.
+            wevtutil sl Microsoft-Windows-TaskScheduler/Operational /e:true
+            if ($LASTEXITCODE -ne 0) { throw 'Unable to enable disposable fixture task history' }
+            $registered = Get-ScheduledTask -TaskName $task
+            $registered.Settings | Select-Object Enabled,AllowDemandStart,DisallowStartIfOnBatteries,RunOnlyIfIdle,RunOnlyIfNetworkAvailable | Format-List
+            $start = Get-Date
+            $prior = (Get-ScheduledTaskInfo -TaskName $task).LastRunTime
+            Start-ScheduledTask -TaskName $task -ErrorAction Stop
+            $deadline = [datetime]::UtcNow.AddMinutes(5)
+            $resultPath = Join-Path $run 'result.json'
+            while (!(Test-Path -LiteralPath $resultPath)) {
+              $info = Get-ScheduledTaskInfo -TaskName $task
+              $state = (Get-ScheduledTask -TaskName $task).State
+              if (($info.LastRunTime -ne $prior -and $state -eq 'Ready') -or
+                  (Test-Path -LiteralPath (Join-Path $run 'wrapper-exit.txt')) -or
+                  [datetime]::UtcNow -gt $deadline) {
+                Write-Output "TASK_STATE=$state; LAST_RUN_RESULT=$($info.LastTaskResult); LAST_RUN_TIME=$($info.LastRunTime)"
+                foreach ($name in @('wrapper-entered.txt','probe-entered.txt','wrapper-exit.txt','bootstrap.log','test.log')) {
+                  $file = Join-Path $run $name
+                  Write-Output "DIAGNOSTIC_FILE=$name; EXISTS=$(Test-Path -LiteralPath $file)"
+                  if (Test-Path -LiteralPath $file) { Get-Content -LiteralPath $file -Tail 40 }
+                }
+                Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-TaskScheduler/Operational';StartTime=$start} -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Message -like "*$task*" } |
+                  Select-Object -First 12 TimeCreated,Id,Message | Format-List
+                throw 'Session 0 probe ended or timed out without result'
+              }
+              Start-Sleep -Seconds 2
+            }
+            $observed = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+            $observed | ConvertTo-Json -Depth 4
+            foreach ($name in @('initial.log','initial-stderr.log','test.log','test-stderr.log')) {
+              $log = Join-Path $run $name
+              if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log }
+            }
+            if ($observed.error -or $observed.session_id -ne 0 -or $observed.administrator -or $null -eq $observed.test_exit) { throw 'Session 0 probe not completed' }
+            if ($baseline -ne 0 -or $observed.initial_exit -ne 0 -or $observed.test_exit -ne 0) { throw "Observed test failure: baseline=$baseline; limited_session0=$($observed.test_exit)" }
+          } finally {
+            if ($createdTask) {
+              Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
+              Unregister-ScheduledTask -TaskName $task -Confirm:$false
+            }
+            try {
+              if ($createdProvisioner) {
+                # The installed provider must exit by itself after its idle
+                # deadline; forcibly stopping is cleanup only, never a pass.
+                $stopDeadline = [datetime]::UtcNow.AddSeconds(30)
+                while ((Get-ScheduledTask -TaskName $provisionTask).State -eq 'Running' -and [datetime]::UtcNow -lt $stopDeadline) {
+                  Start-Sleep -Seconds 1
+                }
+                $providerState = (Get-ScheduledTask -TaskName $provisionTask).State
+                $providerExit = (Get-ScheduledTaskInfo -TaskName $provisionTask).LastTaskResult
+                Write-Output "PROVIDER_STATE=$providerState; PROVIDER_EXIT=$providerExit"
+                $leaseLog = Join-Path $providerRoot 'station-leases.log'
+                $lines = @()
+                if (Test-Path -LiteralPath $leaseLog) {
+                  $lines = @(Get-Content -LiteralPath $leaseLog)
+                  $lines | Write-Output
+                }
+                Stop-ScheduledTask -TaskName $provisionTask -ErrorAction SilentlyContinue
+                Unregister-ScheduledTask -TaskName $provisionTask -Confirm:$false
+                # Delete the exact newly installed fixture files only.
+                foreach ($name in @('station-lease-provider.cs','station-lease-provider.exe','station-leases.log')) {
+                  $file = Join-Path $providerRoot $name
+                  if (Test-Path -LiteralPath $file) {
+                    $item = Get-Item -LiteralPath $file -Force
+                    if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Fixture cleanup path mismatch' }
+                    Remove-Item -LiteralPath $file -Force
+                  }
+                }
+                [IO.Directory]::Delete($providerRoot,$false)
+                if ($observed -and !$observed.error -and $observed.initial_exit -eq 0 -and $observed.test_exit -eq 0) {
+                  $acquired = @($lines | Where-Object { $_ -match '^acquired=[0-9a-f]{32}; package=S-1-15-2-' })
+                  $closed = @($lines | Where-Object { $_ -match '^closed=[0-9a-f]{32}; released=True; cleaned=True$' })
+                  $ids = @($acquired | ForEach-Object { ($_ -split '[=;]')[1] })
+                  $packages = @($acquired | ForEach-Object { ($_ -split 'package=')[1] })
+                  $closedIds = @($closed | ForEach-Object { ($_ -split '[=;]')[1] })
+                  $interrupted = @($lines | Where-Object { $_ -ceq "closed=$($observed.interrupted_lease); released=False; cleaned=True" })
+                  $normalIds = @($ids | Where-Object { $_ -cne $observed.interrupted_lease })
+                  if ($providerState -ne 'Ready' -or $providerExit -ne 0 -or $ids.Count -ne 5 -or
+                      @($ids | Sort-Object -Unique).Count -ne 5 -or @($packages | Sort-Object -Unique).Count -ne 5 -or
+                      $interrupted.Count -ne 1 -or $normalIds.Count -ne 4 -or $closedIds.Count -ne 4 -or
+                      (Compare-Object ($normalIds | Sort-Object) ($closedIds | Sort-Object))) {
+                    throw 'Expected five unique leases, active guest timeout, matched cleanup and idle provider exit'
+                  }
+                  Write-Output 'INSTALLED_STATION_LEASE_ACCEPTANCE_PASS'
+                }
+              }
+            } finally {
+              try {
+                if ($batchPolicyChanged) { Set-FixtureBatchRight $originalBatch 'fixture-batch-restore' }
+              } finally {
+                if ($createdUser) { Remove-LocalUser -Name $account }
+              }
+            }
+            if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
+          }
