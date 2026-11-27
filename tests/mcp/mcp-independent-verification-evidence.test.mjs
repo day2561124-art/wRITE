@@ -299,3 +299,109 @@ test("independent issuer signs only exact provider and separately observed test 
   const wrong = generateKeyPairSync("ed25519");
   assert.equal((await make({ signPayload: async payload => sign(null, payload, wrong.privateKey) })(request)).issued, false);
 });
+
+test("independent issuer publishes immutable exact receipts and the restarted consumer re-verifies them", async t => {
+  const { mkdtemp, realpath, readdir, readFile, writeFile, rm, mkdir, link } = await import("node:fs/promises");
+  const { default: os } = await import("node:os");
+  const { default: path } = await import("node:path");
+  const { generateKeyPairSync, sign } = await import("node:crypto");
+  const { createIndependentVerificationIssuer } = await import("../../server/src/mcp-independent-verification-issuer.mjs");
+  const { createIndependentCandidateEvidenceGate } = await import("../../server/src/mcp-independent-verification-candidate.mjs");
+  const { createIndependentReceiptPublisher, createIndependentReceiptReader, createIndependentReceiptPublicationRecovery } = await import("../../server/src/mcp-independent-verification-receipt-store.mjs");
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(),"r16-receipt-exchange-")));
+  t.after(() => rm(root,{recursive:true,force:true}));
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const now = Date.now();
+  let time = now;
+  let allowed = true;
+  const candidate = { integration_candidate_id: "dev_integration_20261127-010000_aabbccddeeff",
+    revision:2,integration_commit:"1".repeat(40),source_head:"1".repeat(40),target_head:"2".repeat(40) };
+  const row={suite:"all",platform:"linux",workflow_sha256:"3".repeat(64)};
+  const policy={repository:"owner/disposable",issuer:"fixture-issuer",max_age_ms:60000,
+    required:[row],receipt_ttl_ms:30000};
+  const plan={required_suites:["all"]};
+  const context={candidate,plan,observation_only:true,execution_authorized:false};
+  const request={integration_candidate_id:candidate.integration_candidate_id,expected_revision:2};
+  const binding={...row,commit:candidate.integration_commit,run_id:10,job_id:20,run_attempt:1,completed_at_ms:now-2000};
+  let jobId=20;
+  const issue=createIndependentVerificationIssuer({readContext:async()=>context,resolvePolicy:async()=>policy,
+    collectProviderObservation:async()=>({observed:true,execution_authorized:false,commit:candidate.integration_commit,
+      observations:[{...binding,job_id:jobId,provider_job_conclusion:"success"}]}),
+    observeTestOutcome:async b=>({...b,execution_ok:true,passed:true,timed_out:false,skipped:false,exit_code:0}),
+    signPayload:async payload=>sign(null,payload,privateKey),pinnedPublicKey:publicKey,clock:()=>time});
+  const assertProtectedDirectory=async({directory,role})=>allowed&&directory===root&&["issuer","consumer"].includes(role);
+  const {receipt_ttl_ms,...expectedPolicy}=policy;
+  const publish=createIndependentReceiptPublisher({root,assertProtectedDirectory,pinnedPublicKey:publicKey,
+    resolveExpected:async c=>({...expectedPolicy,candidate:c}),clock:()=>time});
+  const reader=()=>createIndependentReceiptReader({root,assertProtectedDirectory});
+  const issued=await issue(request);
+  assert.equal(issued.issued,true);
+  await assert.rejects(reader()(candidate),{code:"ENOENT"});
+  const published=await publish(candidate,issued.envelope);
+  assert.equal(published.created,true);
+  assert.equal(published.execution_authorized,false);
+  assert.equal((await publish(candidate,issued.envelope)).created,false);
+  assert.equal((await readdir(root)).length,1);
+  const name=(await readdir(root))[0];
+  const file=path.join(root,name);
+  const original=await readFile(file);
+  assert.deepEqual(await reader()(candidate),issued.envelope);
+  const makeGate=()=>createIndependentCandidateEvidenceGate({policy:{repository:policy.repository,issuer:policy.issuer,
+    max_age_ms:policy.max_age_ms,suite_workflows:policy.required,additional_required:[]},
+    pinnedPublicKey:publicKey,readEnvelope:reader(),clock:()=>time});
+  const proof=await makeGate().reviewForValidation({...candidate,state:"preflight_passed"},plan);
+  assert.equal(proof.verified,true);
+  assert.equal(proof.execution_authorized,false);
+  assert.equal(proof.receipt_sha256,published.receipt_sha256);
+  jobId++;
+  const different=await issue(request);
+  assert.equal(different.issued,true);
+  await assert.rejects(publish(candidate,different.envelope),{code:"INDEPENDENT_RECEIPT_CONFLICT"});
+  assert.deepEqual(await readFile(file),original);
+  await assert.rejects(publish(candidate,{...issued.envelope,signature:"A".repeat(86)}),{code:"INDEPENDENT_RECEIPT_PROOF_INVALID"});
+  assert.deepEqual(await readFile(file),original);
+  await assert.rejects(reader()({...candidate,revision:3}),{code:"ENOENT"});
+  await assert.rejects(reader()({...candidate,integration_candidate_id:"../other"}),{code:"INDEPENDENT_RECEIPT_IDENTITY_INVALID"});
+  allowed=false;
+  await assert.rejects(reader()(candidate),{code:"INDEPENDENT_RECEIPT_DIRECTORY_UNVERIFIED"});
+  allowed=true;
+  const alias=path.join(root,"unexpected-hardlink");
+  await link(file,alias);
+  await assert.rejects(reader()(candidate),{code:"INDEPENDENT_RECEIPT_FILE_UNVERIFIED"});
+  await rm(alias);
+  // Simulate the exact on-disk state left by a publisher interrupted after
+  // atomic link but before unlink. The consumer cannot use it prematurely.
+  const temporary = path.join(root, "." + name + ".aabbccdd-1234-4567-8899-aabbccddeeff.tmp");
+  await link(file, temporary);
+  let leaseAvailable = false;
+  const recover = createIndependentReceiptPublicationRecovery({root,assertProtectedDirectory,pinnedPublicKey:publicKey,
+    resolveExpected:async c=>({...expectedPolicy,candidate:c}),clock:()=>time,
+    withQuiescentPublisher:async action=>{
+      if (!leaseAvailable) throw Error("PUBLISHER_ACTIVE");
+      return action();
+    }});
+  await assert.rejects(reader()(candidate),{code:"INDEPENDENT_RECEIPT_FILE_UNVERIFIED"});
+  await assert.rejects(recover(candidate),/PUBLISHER_ACTIVE/);
+  leaseAvailable=true;
+  allowed=false;
+  await assert.rejects(recover(candidate),{code:"INDEPENDENT_RECEIPT_DIRECTORY_UNVERIFIED"});
+  allowed=true;
+  await link(file,alias);
+  await assert.rejects(recover(candidate),{code:"INDEPENDENT_RECEIPT_RECOVERY_UNVERIFIED"});
+  await rm(alias);
+  time=issued.expires_at_ms;
+  await assert.rejects(recover(candidate),{code:"INDEPENDENT_RECEIPT_PROOF_INVALID"});
+  time=now;
+  assert.equal((await recover(candidate)).recovered,true);
+  assert.deepEqual(await readdir(root),[name]);
+  assert.deepEqual(await readFile(file),original);
+  assert.deepEqual(await reader()(candidate),issued.envelope);
+  await assert.rejects(recover(candidate),{code:"INDEPENDENT_RECEIPT_RECOVERY_UNVERIFIED"});
+  // Actual on-disk tampering is still rejected by the signature consumer.
+  await writeFile(file,JSON.stringify({...issued.envelope,signature:"A".repeat(86)}));
+  assert.equal((await makeGate().reviewForValidation({...candidate,state:"preflight_passed"},plan)).verified,false);
+  await writeFile(file,original);
+  time=issued.expires_at_ms;
+  assert.equal((await makeGate().reviewForValidation({...candidate,state:"preflight_passed"},plan)).code,"VERIFICATION_RECEIPT_EXPIRED");
+  await assert.rejects(publish(candidate,issued.envelope),{code:"INDEPENDENT_RECEIPT_PROOF_INVALID"});
+});

@@ -3,7 +3,7 @@ name: R16 independent verification evidence
 # Fixture verification only; no production signer, secret or deployment.
 on:
   pull_request:
-    branches: [nexa/r16-lifecycle-contract, nexa/r16-independent-verification, nexa/r16-candidate-evidence-binding, main]
+    branches: [nexa/r16-lifecycle-contract, nexa/r16-independent-verification, nexa/r16-candidate-evidence-binding, nexa/r16-independent-issuer, main]
     paths:
       - 'server/src/mcp-independent-verification-*.mjs'
       - 'tests/mcp/mcp-independent-verification-evidence.test.mjs'
