@@ -1,0 +1,193 @@
+name: R16 limited Windows suite compatibility
+
+# Disposable hosted CI only. No secrets, OIDC, signing, or production admission.
+# This workflow runs unchanged legacy suites under a limited Password task.
+# The candidate-controlled PR workflow is NOT an independent trusted verifier.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/r16-limited-suite-pilot.yml'
+permissions:
+  contents: read
+concurrency:
+  group: r16-limited-suite-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  limited-suite:
+    runs-on: windows-latest
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [mcp, mcp_tunnel]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          package-manager-cache: false
+      - name: Run complete unchanged suite as a temporary standard user
+        shell: pwsh
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          SUITE: ${{ matrix.suite }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -cne $env:EXPECTED_HEAD) { throw 'Candidate mismatch' }
+          $entry = switch ($env:SUITE) {
+            'mcp' { 'tests\tools\mcp-contract.test.mjs' }
+            'mcp_tunnel' { 'tests\mcp-tunnel-launcher.test.mjs' }
+            default { throw 'Unsupported suite' }
+          }
+          $suffix = [guid]::NewGuid().ToString('N').Substring(0,12)
+          $root = Join-Path $env:SystemDrive "NexaSuite-$suffix"
+          $account = "NexaSuite$suffix"
+          $task = "NexaSuiteTask-$suffix"
+          $createdUser = $false
+          $createdTask = $false
+          $batchPolicyChanged = $false
+          $source = Join-Path $root 'source'
+          $tools = Join-Path $root 'tools'
+          $run = Join-Path $root 'run'
+          function Native-OK([string]$Label) {
+            if ($LASTEXITCODE -ne 0) { throw "$Label failed: $LASTEXITCODE" }
+          }
+          function Set-FixtureBatchRight([string]$Value,[string]$Label) {
+            $inf = Join-Path $root "$Label.inf"
+            $db = Join-Path $root "$Label.sdb"
+            @('[Unicode]', 'Unicode=yes', '[Version]', 'signature="$CHICAGO$"', 'Revision=1', '[Privilege Rights]', "SeBatchLogonRight = $Value") |
+              Set-Content -LiteralPath $inf -Encoding Unicode
+            secedit /configure /db $db /cfg $inf /areas USER_RIGHTS /quiet
+            Native-OK "Fixture batch-logon $Label"
+          }
+          try {
+            $null = New-Item -ItemType Directory -Path $root
+            icacls $root /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)(F)' '*S-1-5-32-544:(OI)(CI)(F)' | Out-Null
+            Native-OK 'Fixture root protection'
+            $null = New-Item -ItemType Directory -Path $tools,$run
+            # Full clone, not a synthetic fixture commit. No persisted remote credentials.
+            git clone --no-local --no-hardlinks --no-checkout -- "$env:GITHUB_WORKSPACE" "$source"
+            Native-OK 'Local clone'
+            git -C $source checkout --detach $actual
+            Native-OK 'Exact checkout'
+            git -C $source remote remove origin
+            Native-OK 'Remove origin'
+            if ((git -C $source rev-parse HEAD).Trim() -cne $actual) { throw 'Guest Git identity mismatch' }
+            Native-OK 'Guest Git identity'
+            $nodeDir = Split-Path (Get-Command node.exe -ErrorAction Stop).Source
+            $gitDir = Split-Path (Get-Command git.exe -ErrorAction Stop).Source
+            robocopy $nodeDir $tools /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+            if ($LASTEXITCODE -ge 8) { throw 'Fixture toolchain copy failed' }
+            $node = Join-Path $tools 'node.exe'
+            $password = 'Nexa!9a-' + [guid]::NewGuid().ToString('N')
+            $secure = ConvertTo-SecureString -String $password -AsPlainText -Force
+            $user = New-LocalUser -Name $account -Password $secure -Description 'Disposable Nexa limited suite diagnostic'
+            $createdUser = $true
+            $sid = $user.SID.Value
+            $policy = Join-Path $root 'original-rights.inf'
+            secedit /export /cfg $policy /areas USER_RIGHTS /quiet
+            Native-OK 'Fixture rights export'
+            $line = @(Get-Content -LiteralPath $policy | Where-Object { $_ -match '^SeBatchLogonRight\s*=' })
+            if ($line.Count -gt 1) { throw 'Ambiguous batch-logon policy' }
+            $originalBatch = if ($line.Count -eq 1) { ($line[0] -split '=',2)[1].Trim() } else { '' }
+            $entries = @($originalBatch -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+            $batchPolicyChanged = $true
+            Set-FixtureBatchRight ((@($entries) + "*$sid") -join ',') 'fixture-batch-grant'
+            icacls $root /grant:r "*${sid}:(OI)(CI)(RX)" | Out-Null
+            Native-OK 'Fixture read ACL'
+            foreach ($dir in @($source,$run)) {
+              icacls $dir /grant:r "*${sid}:(OI)(CI)(M)" | Out-Null
+              Native-OK 'Fixture writable guest ACL'
+            }
+            # Git safe.directory relies on ownership, not only ACL permission.
+            icacls $source /setowner "*$sid" /T /Q | Out-Null
+            Native-OK 'Guest checkout ownership'
+            $script = Join-Path $root 'limited-suite.ps1'
+            @'
+          param([string]$Root,[string]$Expected,[string]$Entry,[string]$GitDir)
+          $ErrorActionPreference = 'Stop'
+          $source = Join-Path $Root 'source'
+          $run = Join-Path $Root 'run'
+          $tools = Join-Path $Root 'tools'
+          $node = Join-Path $tools 'node.exe'
+          $npm = Join-Path $tools 'node_modules\npm\bin\npm-cli.js'
+          $env:PATH = "$tools;$GitDir;$env:SystemRoot\System32;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
+          $env:TEMP = $run
+          $env:TMP = $run
+          $env:GIT_CONFIG_NOSYSTEM = '1'
+          $env:GIT_CONFIG_GLOBAL = 'NUL'
+          $env:GIT_TERMINAL_PROMPT = '0'
+          $env:WRITER_WORKBENCH_PROBE_CREDENTIAL_FILE = ''
+          Set-Location -LiteralPath $source
+          $session = (Get-Process -Id $PID).SessionId
+          $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+          Write-Output "LIMITED_IDENTITY=$([Security.Principal.WindowsIdentity]::GetCurrent().User.Value); SESSION=$session; ADMIN=$admin"
+          if ($session -ne 0 -or $admin) { exit 60 }
+          if ((git rev-parse HEAD).Trim() -cne $Expected -or $LASTEXITCODE -ne 0) { exit 61 }
+          if (git status --porcelain) { exit 62 }
+          if ($LASTEXITCODE -ne 0) { exit 63 }
+          # Dependency installation runs under the same disposable user, never supervisor.
+          & $node $npm ci --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { exit 64 }
+          Write-Output "LIMITED_SUITE_BEGIN=$Entry; HEAD=$Expected"
+          & $node $Entry
+          $code = $LASTEXITCODE
+          Write-Output "LIMITED_SUITE_EXIT=$code"
+          exit $code
+          '@ | Set-Content -LiteralPath $script -Encoding UTF8
+            $wrapper = Join-Path $root 'run.cmd'
+            $exe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+            @('@echo off',
+              ('"' + $exe + '" -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "' + $script + '" -Root "' + $root + '" -Expected "' + $actual + '" -Entry "' + $entry + '" -GitDir "' + $gitDir + '" >"' + (Join-Path $run 'suite.log') + '" 2>&1'),
+              'exit /b %ERRORLEVEL%') | Set-Content -LiteralPath $wrapper -Encoding ASCII
+            $action = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\cmd.exe') -Argument ('/d /c ""' + $wrapper + '""') -WorkingDirectory $source
+            $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 45)
+            $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddHours(2)
+            $null = Register-ScheduledTask -TaskName $task -Action $action -Trigger $trigger -Settings $settings -User "$env:COMPUTERNAME\$account" -Password $password -RunLevel Limited
+            $createdTask = $true
+            $password = $null
+            $secure.Dispose()
+            $principal = (Get-ScheduledTask -TaskName $task).Principal
+            if ([string]$principal.LogonType -ne 'Password' -or [string]$principal.RunLevel -ne 'Limited') { throw 'Unexpected task principal' }
+            $prior = (Get-ScheduledTaskInfo -TaskName $task).LastRunTime
+            Start-ScheduledTask -TaskName $task
+            $deadline = [datetime]::UtcNow.AddMinutes(46)
+            do {
+              Start-Sleep -Seconds 5
+              $state = (Get-ScheduledTask -TaskName $task).State
+              $info = Get-ScheduledTaskInfo -TaskName $task
+              if ([datetime]::UtcNow -ge $deadline) { throw 'Limited suite timeout' }
+            } until ($info.LastRunTime -ne $prior -and $state -eq 'Ready')
+            Write-Output "LIMITED_TASK_RESULT=$($info.LastTaskResult); SUITE=$env:SUITE; HEAD=$actual"
+            if ($info.LastTaskResult -ne 0) { throw "Limited suite failed: $($info.LastTaskResult)" }
+            # Diagnostic output is not an independently trusted process attestation.
+            $log = Join-Path $run 'suite.log'
+            if (!(Test-Path -LiteralPath $log -PathType Leaf)) { throw 'Missing limited suite diagnostic log' }
+            if (!(Select-String -LiteralPath $log -Pattern '^LIMITED_SUITE_EXIT=0$' -Quiet)) { throw 'Suite completion marker missing' }
+            Write-Output 'LIMITED_SUITE_COMPATIBILITY_PASS'
+          } finally {
+            # Keep logs bounded and avoid interpreting candidate output as supervisor evidence.
+            $log = Join-Path $run 'suite.log'
+            if (Test-Path -LiteralPath $log -PathType Leaf) { Get-Content -LiteralPath $log -Tail 100 | ForEach-Object { Write-Output ("GUEST: " + $_) } }
+            try {
+              if ($createdTask) {
+                Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
+                Unregister-ScheduledTask -TaskName $task -Confirm:$false
+              }
+            } finally {
+              try {
+                if ($batchPolicyChanged) { Set-FixtureBatchRight $originalBatch 'fixture-batch-restore' }
+              } finally {
+                if ($createdUser) { Remove-LocalUser -Name $account }
+              }
+            }
+            # This is a disposable hosted VM. No recursive supervisor cleanup
+            # of candidate-writable paths (which could contain junctions).
+          }
