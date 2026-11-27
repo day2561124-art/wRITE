@@ -131,6 +131,32 @@ export async function prepareAppContainerPowerShell({ context, cwd, command, tim
   const inputManifest = [];
   const env = controlledProcessEnvironment();
   const windows = env.SystemRoot ?? env.SYSTEMROOT ?? env.WINDIR;
+  // A native runner failure is not evidence that the same-account profile
+  // guardian finished. Keep the exact staging directory until its receipt
+  // is available; never claim cleanup on an ambiguous or mismatched marker.
+  const guardianMarker = async (name) => {
+    const target = path.join(root, name);
+    const info = await lstat(target).catch(error => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+    if (!info) return null;
+    if (!info.isFile() || info.isSymbolicLink() || info.size > 128) throw new Error("APPCONTAINER_GUARDIAN_MARKER_INVALID");
+    return readFile(target, "ascii");
+  };
+  const awaitGuardianCleanup = async () => {
+    const started = await guardianMarker("profile-guardian.started");
+    if (started === null) return;
+    if (!/^(?:NexaLease|NexaPiShell)[a-f0-9]{32}$/u.test(started)) throw new Error("APPCONTAINER_GUARDIAN_MARKER_INVALID");
+    const deadline = Date.now() + 15000;
+    do {
+      const finished = await guardianMarker("profile-guardian.finished");
+      if (finished === "name=" + started + "; cleaned=True" || finished === "name=" + started + "; owned=False") return;
+      if (finished !== null && finished.length > 0) throw new Error("APPCONTAINER_GUARDIAN_MARKER_MISMATCH");
+      await new Promise(resolve => setTimeout(resolve, 100));
+    } while (Date.now() < deadline);
+    throw new Error("APPCONTAINER_PROFILE_CLEANUP_UNVERIFIED");
+  };
   const cleanup = async () => {
     const info = await lstat(root).catch(error => {
       if (error.code === "ENOENT") return null;
@@ -139,6 +165,7 @@ export async function prepareAppContainerPowerShell({ context, cwd, command, tim
     if (!info) return;
     if (path.dirname(path.resolve(root)) !== path.resolve(os.tmpdir()) || !path.basename(root).startsWith("nexa-pi-shell-")
       || !info.isDirectory() || info.isSymbolicLink()) throw new Error("SANDBOX_CLEANUP_PATH_MISMATCH");
+    await awaitGuardianCleanup();
     await rm(root, { recursive: true, force: true, maxRetries: 4 });
   };
   try {
@@ -187,7 +214,7 @@ export async function prepareAppContainerPowerShell({ context, cwd, command, tim
       const runnerArgs = [stage, relativeCwd, String(timeoutMs)];
       if (fixedHermeticCore) runnerArgs.push("fixed-hermetic-core");
       const { stdout, stderr } = await exec(runner, runnerArgs,
-        { cwd: root, env, windowsHide: true, timeout: timeoutMs + 15_000, maxBuffer: 65_536 });
+        { cwd: root, env, windowsHide: true, timeout: timeoutMs + 40_000, maxBuffer: 65_536 });
       if (stderr) throw new Error("APPCONTAINER_CLEANUP_UNVERIFIED");
       facts = JSON.parse(stdout);
       if (!["completed", "timeout", "stage_limit"].includes(facts.state)
