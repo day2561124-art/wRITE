@@ -16,6 +16,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
+import {traceSpan} from "./mcp-request-tracing.mjs";
 import { promisify } from "node:util";
 import { controlledProcessEnvironment, redactProcessOutput } from "./process-control.mjs";
 import {ISOLATION_RESOLUTION,ISOLATION_RESOLUTION_TOOL,inspectIsolationEvidence,validateIsolationResolution,isolationTarget,assertIsolationOwnerDead,isolationJson} from './mcp-workspace-isolation-resolution.mjs';
@@ -1331,7 +1332,7 @@ export function createDevOperationJournalService({
   // Narrow readers may select records before copying; all callers still
   // participate in a fresh physical verification with live head confirmation.
   async function verifyShared() {
-    verificationInFlight ??= verifyStableSnapshot().finally(() => {
+    verificationInFlight ??= traceSpan('journal.full_verify',()=>verifyStableSnapshot()).finally(() => {
       verificationInFlight = null;
     });
     return verificationInFlight;

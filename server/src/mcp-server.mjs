@@ -1189,14 +1189,14 @@ function devAdditionalFilesystemAuditChanges(tool, result) {
 async function auditedToolCall(tool, args, actor, authentication) {
   const {markIsolationBeforeDispatch}=await import('./mcp-workstream-prewrite-failure.mjs');
   const markBeforeHandler = error => markIsolationBeforeDispatch(markPowerShellPreDispatchFailure(error, tool.name));
-  let before;try{before=await auditSnapshotMap();}catch(error){throw markBeforeHandler(error);}
+  let before;try{before=await traceSpan('audit.snapshot_before',()=>auditSnapshotMap());}catch(error){throw markBeforeHandler(error);}
   const calledAt = new Date();
   const auditId = `MCP-AUDIT-${calledAt.toISOString().replace(/[-:.]/g, "").replace("T", "-").replace("Z", "")}-${hashText(`${tool.name}:${JSON.stringify(args)}:${calledAt.toISOString()}`).slice(0, 8).toUpperCase()}`;
   const auditIntentPath = path.join(mcpAuditIntentDir, `${auditId}.json`);
   let result;
   let effectiveArgs = args;
 
-  try{await atomicWriteFile(auditIntentPath, `${JSON.stringify({
+  try{await traceSpan('audit.intent_write',()=>atomicWriteFile(auditIntentPath, `${JSON.stringify({
     audit_id: auditId,
     created_at: calledAt.toISOString(),
     status: "started",
@@ -1207,7 +1207,7 @@ async function auditedToolCall(tool, args, actor, authentication) {
   }, null, 2)}\n`, {
     tool: "mcp-audit-intent",
     audit_id: auditId,
-  });}catch(error){throw markBeforeHandler(error);}
+  }));}catch(error){throw markBeforeHandler(error);}
 
   let handlerInvoked = false;
   try {
@@ -1217,7 +1217,7 @@ async function auditedToolCall(tool, args, actor, authentication) {
       throw new Error(guardError);
     }
     if (tool.name.startsWith("dev_") || ["powershell_run", "powershell_admin_run"].includes(tool.name)) {
-      await assertDevJournalMutationAllowed();
+      await traceSpan("audit.journal_guard",()=>assertDevJournalMutationAllowed());
     }
     await assertPiManagedMcpCall();
     result = await traceSpan("capability.execution",()=>{
@@ -1240,7 +1240,7 @@ async function auditedToolCall(tool, args, actor, authentication) {
     preservePowerShellPreDispatchFailure(error, result);
   }
 
-  const after = await auditSnapshotMap();
+  const after = await traceSpan('audit.snapshot_after',()=>auditSnapshotMap());
   const changed = diffAuditSnapshots(before, after);
   const patchChange = devApplyPatchAuditChange(tool, result);
   if (patchChange && !changed.some((item) => item.path === patchChange.path)) {
@@ -1265,14 +1265,14 @@ async function auditedToolCall(tool, args, actor, authentication) {
     confirmation_id: confirmationId(effectiveArgs),
     result: auditOutputSummary(result, tool.name),
   };
-  await commitFileTransaction("mcp-audit-complete", [
+  await traceSpan("audit.commit",()=>commitFileTransaction("mcp-audit-complete", [
     {
       type: "append",
       filePath: mcpAuditLogPath,
       content: `${JSON.stringify(auditRecord)}\n`,
     },
     { type: "delete", filePath: auditIntentPath },
-  ], { audit_id: auditId, tool_name: tool.name });
+  ], { audit_id: auditId, tool_name: tool.name }));
 
   return result;
 }
@@ -2167,13 +2167,13 @@ const toolDefinitions = [
         const {request_kind,...request}=intent;
         return jsonContent(await piProductionController.reconcileOnly(request));
       }
-      intent = await adaptPiEngineeringIngress(intent, {
+      intent = await traceSpan('pi.ingress_binding',()=>adaptPiEngineeringIngress(intent, {
         authentication, resolveWorkspace: resolveDevWorkspaceExecutionContext,
         approvalSource: piEngineeringApprovalSource,
         standingApprovalSource: piStandingAuthorizationReader.bind,
         automaticStandingApprovalSource: piStandingAuthorizationReader.bindIfApplicable,
         requireTaskAuthorization: process.env.NEXA_PI_REQUIRE_TASK_AUTHORIZATION === "1",
-      });
+      }));
       return jsonContent(await piProductionController.submit(intent, { authentication }));
     },
   },

@@ -50,3 +50,24 @@ test('transport trace metadata preserves authored arguments and security metadat
   assert.equal(traced.params._meta.reconciliation_key,'EXACT_KEY');
   assert.equal(message.params._meta[REQUEST_TRACE_META_KEY],undefined);
 });
+
+test('admission timing stages retain only fixed metrics and propagate original failures',async()=>{
+ const stages=['audit.snapshot_before','audit.intent_write','audit.journal_guard','pi.ingress_binding',
+  'journal.full_verify','audit.snapshot_after','audit.commit'];
+ const buffer=createTraceBuffer(),observe=row=>buffer.accept(row);
+ const id=traceId(),original=Error('PRIVATE_AUDIT_FAILURE');
+ requestTraceChannel.subscribe(observe);
+ try{
+  await runRequestTrace(id,async()=>{
+   for(const stage of stages.slice(0,-1))
+    assert.equal(await traceSpan(stage,async()=>17),17);
+   await assert.rejects(traceSpan(stages.at(-1),async()=>{throw original;}),error=>error===original);
+  });
+  const rows=buffer.snapshot().records;
+  assert.deepEqual(rows.map(row=>row.stage),stages);
+  assert(rows.every(row=>row.correlation_id===id&&row.duration_ms>=0));
+  assert(rows.slice(0,-1).every(row=>row.ok===true));
+  assert.equal(rows.at(-1).ok,false);
+  assert(!JSON.stringify(rows).includes('PRIVATE_AUDIT_FAILURE'));
+ }finally{requestTraceChannel.unsubscribe(observe);}
+});
