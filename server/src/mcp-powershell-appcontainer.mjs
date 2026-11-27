@@ -151,7 +151,7 @@ export async function prepareAppContainerPowerShell({ context, cwd, command, tim
     const deadline = Date.now() + 15000;
     do {
       const finished = await guardianMarker("profile-guardian.finished");
-      if (finished === "name=" + started + "; cleaned=True") return;
+      if (finished === "name=" + started + "; cleaned=True" || finished === "name=" + started + "; owned=False") return;
       if (finished !== null && finished.length > 0) throw new Error("APPCONTAINER_GUARDIAN_MARKER_MISMATCH");
       await new Promise(resolve => setTimeout(resolve, 100));
     } while (Date.now() < deadline);
