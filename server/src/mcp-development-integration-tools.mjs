@@ -38,6 +38,11 @@ import {
   verifyDevJournal,
 } from "./mcp-development-journal-tools.mjs";
 
+import {
+  INDEPENDENT_INTEGRATION_EVIDENCE, requireIndependentValidationProof,
+  buildIndependentValidationReport, requireIndependentApplyEvidence,
+} from "./mcp-independent-verification-adoption.mjs";
+
 const execFileAsync = promisify(execFile);
 
 export const DEV_INTEGRATION_SCHEMA_VERSION = 1;
@@ -537,6 +542,7 @@ export function createDevIntegrationService({
   workstreamReader = dev_workspace_get_workstream,
   workspaceReader = dev_workspace_get_workspace,
   validationRunner = productionValidationRunner,
+  independentEvidenceGate,
   clock = () => new Date(),
   candidateIdGenerator = generateCandidateId,
   journal = { begin: beginDevJournalOperation, complete: completeDevJournalOperation,
@@ -545,6 +551,8 @@ export function createDevIntegrationService({
   testLockPath = path.join(repositoryRoot, "tests", ".tmp", "dev-run-tests.lock"),
   dependencyRoot = repositoryRoot,
 } = {}) {
+  if (independentEvidenceGate !== undefined && (typeof independentEvidenceGate?.reviewForValidation !== "function"
+    || typeof independentEvidenceGate?.reviewForApply !== "function")) throw new Error("INDEPENDENT_EVIDENCE_HOST_UNBOUND");
   const repoRoot = path.resolve(repositoryRoot);
   const registryFile = path.resolve(registryPath);
   const registryLock = path.resolve(registryLockPath);
@@ -1042,6 +1050,17 @@ export function createDevIntegrationService({
       });
     }
 
+    const independent = independentEvidenceGate === undefined ? null : await (async () => {
+      if (input.expected_revision !== candidate.revision) throw new Error("INDEPENDENT_VERIFICATION_REVISION_REQUIRED");
+      const context = await getIndependentVerificationContext(input);
+      const proof = requireIndependentValidationProof(
+        await independentEvidenceGate.reviewForValidation(structuredClone(candidate), context.plan),
+        candidate, context.plan, clock().getTime());
+      const checked = await getIndependentVerificationContext(input);
+      if (JSON.stringify(context) !== JSON.stringify(checked)) throw new Error("INDEPENDENT_VERIFICATION_CANDIDATE_STALE");
+      return { plan: context.plan, proof, revision: candidate.revision };
+    })();
+
     const journalOperation = await journal.begin({
       operation_type: "integration_validation",
       tool_name: "dev_workspace_validate_integration",
@@ -1057,6 +1076,8 @@ export function createDevIntegrationService({
         target_head: candidate.target_head,
         integration_commit: candidate.integration_commit,
         strategy: candidate.strategy,
+        ...(independent ? { evidence_source: INDEPENDENT_INTEGRATION_EVIDENCE,
+          ...independent.proof.evidence_reference } : {}),
       },
     });
 
@@ -1093,6 +1114,60 @@ export function createDevIntegrationService({
     };
 
     candidate = await updateCandidate(candidateId, candidate.revision, (record) => transitionCandidate(record, "testing"));
+    if (independent) {
+      // No local suite is executed on this route. The materialized exact
+      // candidate is checked and cleaned using the original Git safety path.
+      const afterHead = normalizeSha((await gitRunner(["rev-parse", "--verify", "HEAD"], { cwd: integrationPath })).stdout, "independent integration HEAD");
+      const afterStatus = parseStatus((await gitRunner(["status", "--porcelain=v1", "--untracked-files=all"], { cwd: integrationPath })).stdout);
+      const clean = afterHead === candidate.integration_commit && !afterStatus.dirty;
+      const currentFreshness = await candidateFreshness(candidate);
+      const cleanup = await cleanupIntegrationWorktree(integrationPath);
+      const completedAt = clock().toISOString();
+      let report;
+      try {
+        report = buildIndependentValidationReport({ candidate, plan: independent.plan, proof: independent.proof,
+          originalRevision: independent.revision, operationId: journalOperation.operation_id, diffCheck,
+          postTestWorktreeClean: clean, cleanupCompleted: cleanup.cleaned,
+          freshnessVerified: currentFreshness.fresh && (await candidateFreshness(candidate)).fresh, completedAt });
+      } catch {
+        // Cleanup has already run. Preserve the actual failed gate and
+        // cleanup facts rather than leaving a misleading ready candidate.
+        report = { status: "failed", evidence_source: INDEPENDENT_INTEGRATION_EVIDENCE,
+          integration_commit: candidate.integration_commit, source_head: candidate.source_head, target_head: candidate.target_head,
+          evidence_reference: independent.proof.evidence_reference, independent_validation_operation_id: journalOperation.operation_id,
+          suites: [], execution_ok: false, passed: false, timed_out: false, completed_at: completedAt };
+      }
+      candidate = await updateCandidate(candidateId, candidate.revision, record => {
+        transitionCandidate(record, report.passed ? "validated" : "failed");
+        record.validation_report = report;
+        record.validated_at = report.passed ? completedAt : null;
+        record.integration_workspace.state = cleanup.cleaned ? "removed" : "cleanup_pending";
+        record.integration_workspace.cleanup_pending = !cleanup.cleaned;
+        record.integration_workspace.last_error = cleanup.error;
+        if (!report.passed) record.failure_reason = { code: "INDEPENDENT_VALIDATION_FAILED" };
+      });
+      try {
+        await journal.complete(journalOperation.operation_id, { links: [
+          { relation: "used", commit: candidate.source_head },
+          { relation: "used", commit: candidate.integration_commit },
+          { relation: "related_to", integration_candidate_id: candidateId },
+        ], result: {
+          integration_candidate_id: candidateId, integration_commit: candidate.integration_commit,
+          source_head: candidate.source_head, target_head: candidate.target_head,
+          evidence_source: INDEPENDENT_INTEGRATION_EVIDENCE, ...independent.proof.evidence_reference,
+          passed: report.passed, execution_ok: report.execution_ok, timed_out: false,
+          cleanup_completed: cleanup.cleaned, verification_manifest_sha256: report.verification_manifest_sha256,
+          verification_manifest_gate_result: report.passed ? "passed" : "failed",
+        } });
+      } catch (error) {
+        await journal.markDegraded("Independent integration validation terminal append failed", journalOperation.operation_id);
+        throw Object.assign(new Error("Independent integration validation terminal append failed"), { code: "JOURNAL_TERMINAL_APPEND_FAILED" });
+      }
+      // Publication of ready follows durable terminal, never precedes it.
+      if (report.passed) candidate = await updateCandidate(candidateId, candidate.revision,
+        record => transitionCandidate(record, "ready"));
+      return candidate;
+    }
     let suites;
     let verificationPlan;
     let diagnosticRetries = [];
@@ -1514,6 +1589,10 @@ export function createDevIntegrationService({
     }
     try {
       candidate = await getCandidate({ integration_candidate_id: candidateId });
+      if (candidate.validation_report?.evidence_source === INDEPENDENT_INTEGRATION_EVIDENCE) {
+        if (input.expected_revision !== candidate.revision || !independentEvidenceGate)
+          throw new Error("INDEPENDENT_APPLY_EVIDENCE_REQUIRED");
+      }
       const freshness = await runIntegrationStage("candidate_freshness", () => candidateFreshness(candidate));
       if (!freshness.fresh) {
         return updateCandidate(candidateId, candidate.revision, (record) => {
@@ -1564,6 +1643,17 @@ export function createDevIntegrationService({
           transitionCandidate(record, "failed");
           record.failure_reason = { code: "MAIN_WORKTREE_OVERLAY_CONFLICT_AFTER_LOCK" };
         });
+      }
+
+      if (candidate.validation_report?.evidence_source === INDEPENDENT_INTEGRATION_EVIDENCE) {
+        const plan = await selectCandidateVerificationPlan(repoRoot, candidate, gitRunner);
+        const proof = await independentEvidenceGate.reviewForApply(structuredClone(candidate), plan,
+          structuredClone(candidate.validation_report.evidence_reference));
+        const verifiedJournal = await journal.verify();
+        requireIndependentApplyEvidence({ candidate, plan, proof, events: verifiedJournal.events, nowMs: clock().getTime() });
+        const checked = await getCandidate({ integration_candidate_id: candidateId });
+        if (checked.revision !== candidate.revision || !(await candidateFreshness(checked)).fresh)
+          throw new Error("INDEPENDENT_VERIFICATION_CANDIDATE_STALE");
       }
 
       const journalOperation = await beginDevJournalOperation({
