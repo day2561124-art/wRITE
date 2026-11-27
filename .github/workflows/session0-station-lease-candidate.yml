@@ -240,15 +240,11 @@ jobs:
             while (!(Test-Path -LiteralPath $resultPath)) {
               $info = Get-ScheduledTaskInfo -TaskName $task
               $state = (Get-ScheduledTask -TaskName $task).State
-              # The wrapper can publish its exit marker between the loop's
-              # first result check and this poll. Recheck the atomic result
-              # before treating termination as failure. A running task is
-              # not terminal merely because the wrapper's redirection opened
-              # an empty exit-marker file.
+              # Do not treat a redirection-created empty marker as exit.
               $exitMarker = Join-Path $run 'wrapper-exit.txt'
               $wrapperExited = $false
               if (Test-Path -LiteralPath $exitMarker -PathType Leaf) {
-                $exitText = (Get-Content -LiteralPath $exitMarker -Raw -ErrorAction SilentlyContinue)
+                $exitText = Get-Content -LiteralPath $exitMarker -Raw -ErrorAction SilentlyContinue
                 $wrapperExited = $null -ne $exitText -and $exitText.Trim() -match '^-?\d+$'
               }
               if (Test-Path -LiteralPath $resultPath -PathType Leaf) { break }
@@ -258,101 +254,6 @@ jobs:
                 if (Test-Path -LiteralPath $resultPath -PathType Leaf) { break }
                 Write-Output "TASK_STATE=$state; LAST_RUN_RESULT=$($info.LastTaskResult); LAST_RUN_TIME=$($info.LastRunTime)"
                 foreach ($name in @('wrapper-entered.txt','probe-entered.txt','wrapper-exit.txt','bootstrap.log','test.log','forced.log','forced-stderr.log','result.tmp')) {
-                  $file = Join-Path $run $name
-                  Write-Output "DIAGNOSTIC_FILE=$name; EXISTS=$(Test-Path -LiteralPath $file)"
-                  if (Test-Path -LiteralPath $file) { Get-Content -LiteralPath $file -Tail 40 }
-                }
-                Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-TaskScheduler/Operational';StartTime=$start} -ErrorAction SilentlyContinue |
-                  Where-Object { $_.Message -like "*$task*" } |
-                  Select-Object -First 12 TimeCreated,Id,Message | Format-List
-                throw 'Session 0 probe ended or timed out without result'
-              }
-              Start-Sleep -Seconds 2
-            }
-            $observed = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
-            $observed | ConvertTo-Json -Depth 4
-            foreach ($name in @('initial.log','initial-stderr.log','test.log','test-stderr.log','forced.log','forced-stderr.log')) {
-              $log = Join-Path $run $name
-              if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log }
-            }
-            if ($observed.error -or $observed.session_id -ne 0 -or $observed.administrator -or $null -eq $observed.test_exit) { throw 'Session 0 probe not completed' }
-            if ($baseline -ne 0 -or $observed.initial_exit -ne 0 -or $observed.test_exit -ne 0) { throw "Observed test failure: baseline=$baseline; limited_session0=$($observed.test_exit)" }
-            if ($null -eq $observed.forced_exit -or $observed.forced_exit -ne 0) { throw "R15 forced native termination gate failed: exit=$($observed.forced_exit)" }
-          } finally {
-            if ($createdTask) {
-              Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
-              Unregister-ScheduledTask -TaskName $task -Confirm:$false
-            }
-            try {
-              if ($createdProvisioner) {
-                # The installed provider must exit by itself after its idle
-                # deadline; forcibly stopping is cleanup only, never a pass.
-                $stopDeadline = [datetime]::UtcNow.AddSeconds(30)
-                while ((Get-ScheduledTask -TaskName $provisionTask).State -eq 'Running' -and [datetime]::UtcNow -lt $stopDeadline) {
-                  Start-Sleep -Seconds 1
-                }
-                $providerState = (Get-ScheduledTask -TaskName $provisionTask).State
-                $providerExit = (Get-ScheduledTaskInfo -TaskName $provisionTask).LastTaskResult
-                Write-Output "PROVIDER_STATE=$providerState; PROVIDER_EXIT=$providerExit"
-                $leaseLog = Join-Path $providerRoot 'station-leases.log'
-                $lines = @()
-                if (Test-Path -LiteralPath $leaseLog) {
-                  $lines = @(Get-Content -LiteralPath $leaseLog)
-                  $lines | Write-Output
-                }
-                Stop-ScheduledTask -TaskName $provisionTask -ErrorAction SilentlyContinue
-                Unregister-ScheduledTask -TaskName $provisionTask -Confirm:$false
-                # Delete the exact newly installed fixture files only.
-                foreach ($name in @('station-lease-provider.cs','station-lease-provider.exe','station-leases.log')) {
-                  $file = Join-Path $providerRoot $name
-                  if (Test-Path -LiteralPath $file) {
-                    $item = Get-Item -LiteralPath $file -Force
-                    if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Fixture cleanup path mismatch' }
-                    Remove-Item -LiteralPath $file -Force
-                  }
-                }
-                [IO.Directory]::Delete($providerRoot,$false)
-                if ($observed -and !$observed.error -and $observed.initial_exit -eq 0 -and $observed.test_exit -eq 0) {
-                  $normalLog = Join-Path $run 'normal-station-leases.log'
-                  if (!(Test-Path -LiteralPath $normalLog -PathType Leaf)) { throw 'Original normal-lease evidence missing' }
-                  $lines = @(Get-Content -LiteralPath $normalLog)
-                  Write-Output 'NORMAL_LEASE_EVIDENCE_SNAPSHOT'
-                  $lines | Write-Output
-                  $acquired = @($lines | Where-Object { $_ -match '^acquired=[0-9a-f]{32}; package=S-1-15-2-' })
-                  $closed = @($lines | Where-Object { $_ -match '^closed=[0-9a-f]{32}; released=True; cleaned=True$' })
-                  $ids = @($acquired | ForEach-Object { ($_ -split '[=;]')[1] })
-                  $packages = @($acquired | ForEach-Object { ($_ -split 'package=')[1] })
-                  $closedIds = @($closed | ForEach-Object { ($_ -split '[=;]')[1] })
-                  $interrupted = @($lines | Where-Object { $_ -ceq "closed=$($observed.interrupted_lease); released=False; cleaned=True" })
-                  $normalIds = @($ids | Where-Object { $_ -cne $observed.interrupted_lease })
-                  if ($providerState -ne 'Ready' -or $providerExit -ne 0 -or $ids.Count -ne 5 -or
-                      @($ids | Sort-Object -Unique).Count -ne 5 -or @($packages | Sort-Object -Unique).Count -ne 5 -or
-                      $interrupted.Count -ne 1 -or $normalIds.Count -ne 4 -or $closedIds.Count -ne 4 -or
-                      (Compare-Object ($normalIds | Sort-Object) ($closedIds | Sort-Object))) {
-                    throw 'Expected five unique leases, active guest timeout, matched cleanup and idle provider exit'
-                  }
-                  Write-Output 'INSTALLED_STATION_LEASE_ACCEPTANCE_PASS'
-                }
-              }
-            } finally {
-              try {
-                if ($batchPolicyChanged) { Set-FixtureBatchRight $originalBatch 'fixture-batch-restore' }
-              } finally {
-                if ($createdUser) { Remove-LocalUser -Name $account }
-              }
-            }
-            if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
-          }
-
-              }
-              if (Test-Path -LiteralPath $resultPath -PathType Leaf) { break }
-              if (($info.LastRunTime -ne $prior -and $state -eq 'Ready') -or
-                  $wrapperExited -or [datetime]::UtcNow -gt $deadline) {
-                # Allow an already-published atomic rename to become visible.
-                Start-Sleep -Milliseconds 250
-                if (Test-Path -LiteralPath $resultPath -PathType Leaf) { break }
-                Write-Output "TASK_STATE=$state; LAST_RUN_RESULT=$($info.LastTaskResult); LAST_RUN_TIME=$($info.LastRunTime)"
-                foreach ($name in @('wrapper-entered.txt','probe-entered.txt','wrapper-exit.txt','bootstrap.log','test.log')) {
                   $file = Join-Path $run $name
                   Write-Output "DIAGNOSTIC_FILE=$name; EXISTS=$(Test-Path -LiteralPath $file)"
                   if (Test-Path -LiteralPath $file) { Get-Content -LiteralPath $file -Tail 40 }
