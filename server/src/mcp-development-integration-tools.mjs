@@ -1600,6 +1600,19 @@ export function createDevIntegrationService({
           record.stale_reason = { code: "APPLY_INPUT_STALE", reasons: freshness.reasons };
         });
       }
+      let independentApply = null;
+      if (candidate.validation_report?.evidence_source === INDEPENDENT_INTEGRATION_EVIDENCE) {
+        const plan = await selectCandidateVerificationPlan(repoRoot, candidate, gitRunner);
+        const proof = await independentEvidenceGate.reviewForApply(structuredClone(candidate), plan,
+          structuredClone(candidate.validation_report.evidence_reference));
+        const verifiedJournal = await journal.verify();
+        requireIndependentApplyEvidence({ candidate, plan, proof, events: verifiedJournal.events, nowMs: clock().getTime() });
+        const checked = await getCandidate({ integration_candidate_id: candidateId });
+        if (checked.revision !== candidate.revision || !(await candidateFreshness(checked)).fresh)
+          throw new Error("INDEPENDENT_VERIFICATION_CANDIDATE_STALE");
+        independentApply = proof;
+      }
+
       const safety = await runIntegrationStage("main_safety_status", () => mainSafetyStatus());
       if (safety.branch !== DEV_INTEGRATION_TARGET_BRANCH) throw new Error("Shared repository must have main checked out before integration.");
       if (safety.staged.length > 0) {
@@ -1645,15 +1658,8 @@ export function createDevIntegrationService({
         });
       }
 
-      if (candidate.validation_report?.evidence_source === INDEPENDENT_INTEGRATION_EVIDENCE) {
-        const plan = await selectCandidateVerificationPlan(repoRoot, candidate, gitRunner);
-        const proof = await independentEvidenceGate.reviewForApply(structuredClone(candidate), plan,
-          structuredClone(candidate.validation_report.evidence_reference));
-        const verifiedJournal = await journal.verify();
-        requireIndependentApplyEvidence({ candidate, plan, proof, events: verifiedJournal.events, nowMs: clock().getTime() });
-        const checked = await getCandidate({ integration_candidate_id: candidateId });
-        if (checked.revision !== candidate.revision || !(await candidateFreshness(checked)).fresh)
-          throw new Error("INDEPENDENT_VERIFICATION_CANDIDATE_STALE");
+      if (independentApply && clock().getTime() >= independentApply.expires_at_ms) {
+        throw new Error("INDEPENDENT_APPLY_EVIDENCE_EXPIRED");
       }
 
       const journalOperation = await beginDevJournalOperation({
