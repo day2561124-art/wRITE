@@ -74,3 +74,58 @@ test("unbound or duplicate trusted required plan cannot accept evidence", () => 
     assert.equal(review(signed(body()), { expected: plan }).code, "INVALID_TRUSTED_VERIFICATION_PLAN");
   }
 });
+
+test("host observer records signed evidence in real Journal without changing candidate readiness", async t => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { default: os } = await import("node:os");
+  const { default: path } = await import("node:path");
+  const { createDevOperationJournalService } = await import("../../server/src/mcp-development-journal-tools.mjs");
+  const { createIndependentVerificationObserver } = await import("../../server/src/mcp-independent-verification-observer.mjs");
+  const root = await mkdtemp(path.join(os.tmpdir(), "r16-evidence-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const journal = createDevOperationJournalService({ storageRoot: root });
+  const state = { ...candidate, workspace_id: "dev_workspace_" + "a".repeat(24),
+    workstream_id: "dev_workstream_20261127-050000_aabbccddeeff", state: "preflight_passed" };
+  const policy = { repository: expected.repository, issuer: expected.issuer, required, max_age_ms: expected.max_age_ms };
+  const request = { integration_candidate_id: candidate.integration_candidate_id, expected_revision: candidate.revision };
+  let reads = 0;
+  const make = overrides => createIndependentVerificationObserver({
+    getCandidate: async () => structuredClone(state), resolvePolicy: async () => policy,
+    readEnvelope: async observed => { reads++; assert.deepEqual(observed, candidate); return signed(body()); },
+    pinnedPublicKey: publicKey, clock: () => nowMs, journal, ...overrides,
+  });
+  const observer = make();
+  assert.equal((await observer({ ...request, publicKey })).verified, false);
+  assert.equal(reads, 0);
+  const accepted = await observer(request);
+  assert.equal(accepted.verified, true);
+  assert.equal(accepted.execution_authorized, false);
+  assert.equal(accepted.observation_only, true);
+  assert.equal(state.state, "preflight_passed");
+  const reopened = createDevOperationJournalService({ storageRoot: root });
+  const records = (await reopened.verify()).events;
+  const events = records.filter(e => e.operation_id === accepted.operation_id);
+  assert.equal(events.length, 2);
+  assert.equal(events[1].operation_type, "independent_verification_observation");
+  assert.equal(events[1].result.receipt_sha256, accepted.receipt_sha256);
+  assert.equal(events[1].result.execution_authorized, false);
+  assert.equal(events[1].result.passed, undefined);
+  assert.equal(events[1].workspace_id, state.workspace_id);
+  assert.equal(events[1].links.some(l => l.integration_candidate_id === candidate.integration_candidate_id), true);
+  assert.equal(events[1].links.some(l => l.commit === candidate.integration_commit), true);
+  assert.equal((await reopened.status()).chain_verified, true);
+  assert.equal((await reopened.status()).active_operation_count, 0);
+  const baseline = records.length;
+  const raced = make({ readEnvelope: async () => { state.revision++; return signed(body()); } });
+  assert.equal((await raced(request)).code, "VERIFICATION_CANDIDATE_STALE");
+  state.revision = candidate.revision;
+  const forged = make({ readEnvelope: async () => signed(body(), generateKeyPairSync("ed25519").privateKey) });
+  assert.equal((await forged(request)).code, "VERIFICATION_SIGNATURE_INVALID");
+  let policyReads = 0;
+  const changed = make({ resolvePolicy: async () => ({ ...policy, max_age_ms: policy.max_age_ms - (policyReads++ ? 1 : 0) }) });
+  assert.equal((await changed(request)).code, "VERIFICATION_POLICY_CHANGED");
+  assert.equal((await reopened.verify()).events.length, baseline);
+  const journalFailure = make({ journal: { begin: async () => { throw Error("fixture journal unavailable"); },
+    complete: async () => assert.fail("must not publish success") } });
+  await assert.rejects(journalFailure(request), /fixture journal unavailable/);
+});
