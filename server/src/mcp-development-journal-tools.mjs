@@ -1611,7 +1611,7 @@ export function createDevOperationJournalService({
         let verified;
         try { verified = await verify(); }
         catch (error) {
-          if (isTransientJournalVerificationError(error)) throw error;
+          if (error?.code === "JOURNAL_APPEND_BUSY" || isTransientJournalVerificationError(error)) throw error;
           try {
             await recoverExecutionPublication({validateHistory});
             verified = await verify();
