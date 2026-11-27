@@ -425,3 +425,34 @@ test("R16 integration receipts reject stale, blocked, mismatched and incomplete 
   assert.equal((await reconcile({ ...facts, candidate_cleanup_pending: true })).verdict, "unknown");
   assert.equal((await reconcile({ outcome: "intended_effect_observed" })).verdict, "unknown");
 });
+
+test("R16 capability availability never substitutes hermetic tests for an unavailable full gate", async () => {
+  const { piRuntimeCapabilityAvailability } = await import("../../server/src/pi-runtime-capability-metadata.mjs");
+  const { createPiReliableMcpAdapter } = await import("../../server/src/pi-mcp-reliable-adapter.mjs");
+  const observe = (capability, scopedDispatcher, toolAllowed = true) =>
+    piRuntimeCapabilityAvailability({ capability, scopedDispatcher, toolAllowed });
+  for (const capability of ["verification.affected", "verification.full", "git.integration_validate"]) {
+    assert.equal(observe(capability, true), "unavailable");
+    assert.equal(observe(capability, false), "available");
+    assert.equal(observe(capability, undefined), "unknown");
+  }
+  assert.equal(observe("verification.focused", true), "available");
+  assert.equal(observe("git.integration_preflight", true), "available");
+  assert.equal(observe("verification.focused", true, false), "unavailable");
+  const input = { suite: "all" };
+  const source = intent("verification.full", input, true, {
+    permissions: { ...intent("verification.full", input, true).permissions, tests: true },
+    verification: { focused: [], affected: [], full: ["lifecycle"] },
+  });
+  let sends = 0;
+  const guarded = createPiReliableMcpAdapter({
+    resolveWorkspace: async () => assert.fail("unavailable capability must not resolve a mutation scope"),
+    queryOperation: async () => assert.fail("unavailable capability must not reconcile"),
+    callTool: async () => { sends++; assert.fail("unavailable capability must not dispatch"); },
+    validateCapabilityExpectation: async ({ capability_name }) => ({
+      ok: false, code: observe(capability_name, true) === "unavailable" ? "CAPABILITY_UNAVAILABLE" : "CAPABILITY_EXPECTATION_REQUIRED",
+    }),
+  });
+  await assert.rejects(guarded.execute(source, "lifecycle"), { code: "CAPABILITY_UNAVAILABLE" });
+  assert.equal(sends, 0);
+});
