@@ -1317,7 +1317,7 @@ export function createDevIntegrationService({
   // replaying verification or inferring a successful gate. An old positive
   // inner terminal is historical evidence, not permission to publish ready.
   // A successor must obtain its own exact signed receipt.
-  async function recoverIndependentCleanedValidation(candidate, input, start, boundary, events) {
+  async function recoverIndependentValidation(candidate, start, boundary, events) {
     const id = candidate.integration_candidate_id;
     const report = candidate.validation_report;
     const priorFailure = candidate.state === "failed"
@@ -1372,13 +1372,35 @@ export function createDevIntegrationService({
     const integrationPath = path.join(integrationRoot, id);
     if (candidate.integration_workspace.relative_path !== relativeIntegrationPath(id, integrationRoot, repoRoot))
       throw new Error("VALIDATION_RECOVERY_WORKTREE_MAPPING_MISMATCH");
-    try {
-      await lstat(integrationPath);
-      throw new Error("INDEPENDENT_RECOVERY_WORKTREE_PRESENT");
-    } catch (error) { if (error?.code !== "ENOENT") throw error; }
+    const info = await lstat(integrationPath).catch(error => {
+      if (error?.code === "ENOENT") return null;
+      throw error;
+    });
     const list = (await gitRunner(["worktree", "list", "--porcelain"], { cwd: repoRoot })).stdout;
-    if (list.split(/\r?\n/u).includes(`worktree ${integrationPath.replaceAll("\\", "/")}`))
-      throw new Error("INDEPENDENT_RECOVERY_WORKTREE_REGISTERED");
+    const block = list.split(/\r?\n\r?\n/u).find(b => b.split(/\r?\n/u)[0] === `worktree ${integrationPath.replaceAll("\\", "/")}`);
+    if (info) {
+      // No force or arbitrary removal: only our registered, detached, clean
+      // worktree with the exact HEAD and ownership lock may be cleaned.
+      if (!info.isDirectory() || info.isSymbolicLink() || !block
+        || candidate.integration_workspace.state === "removed"
+        || !["materialized", "testing", "failed"].includes(candidate.state))
+        throw new Error("INDEPENDENT_RECOVERY_WORKTREE_OWNERSHIP_MISMATCH");
+      const lines = block.split(/\r?\n/u);
+      if (!lines.includes(`HEAD ${candidate.integration_commit}`) || !lines.includes("detached")
+        || !lines.includes(`locked Writer Workbench integration ${id}`))
+        throw new Error("INDEPENDENT_RECOVERY_WORKTREE_OWNERSHIP_MISMATCH");
+      if (parseStatus((await gitRunner(["status", "--porcelain=v1", "--untracked-files=all"], { cwd: integrationPath })).stdout).dirty)
+        throw new Error("VALIDATION_RECOVERY_DIRTY_WORKTREE");
+      const cleanup = await cleanupIntegrationWorktree(integrationPath);
+      if (!cleanup.cleaned) throw new Error("INDEPENDENT_RECOVERY_CLEANUP_PENDING");
+      const after = await lstat(integrationPath).catch(error => {
+        if (error?.code === "ENOENT") return null;
+        throw error;
+      });
+      const registrations = (await gitRunner(["worktree", "list", "--porcelain"], { cwd: repoRoot })).stdout;
+      if (after || registrations.split(/\r?\n/u).includes(`worktree ${integrationPath.replaceAll("\\", "/")}`))
+        throw new Error("INDEPENDENT_RECOVERY_CLEANUP_PENDING");
+    } else if (block) throw new Error("INDEPENDENT_RECOVERY_WORKTREE_REGISTERED");
     if (!priorFailure) candidate = await updateCandidate(id, candidate.revision, record => {
       if (record.state !== "failed") transitionCandidate(record, "failed");
       record.failure_reason = { code: "INDEPENDENT_VALIDATION_INTERRUPTED", operation_id: start.operation_id,
@@ -1450,15 +1472,8 @@ export function createDevIntegrationService({
         throw new Error("VALIDATION_RECOVERY_BOUNDARY_MISMATCH");
       }
       if (start.result.evidence_source === INDEPENDENT_INTEGRATION_EVIDENCE) {
-        // The independent route never owns a test-runner lease. For the
-        // post-cleanup boundary, no filesystem deletion or test is necessary.
-        // A still-present worktree is not considered cleaned by this path.
-        const integrationPath = path.join(integrationRoot, candidateId);
-        const absent = await lstat(integrationPath).then(() => false, error => {
-          if (error?.code === "ENOENT") return true;
-          throw error;
-        });
-        if (absent) return await recoverIndependentCleanedValidation(candidate, input, start, boundary, events);
+        // No test-runner lease or local test evidence belongs to this route.
+        return await recoverIndependentValidation(candidate, start, boundary, events);
       }
       if ((!recovering && !finalizingFailed && !["materialized", "testing"].includes(candidate.state))
         || (!recovering && !finalizingFailed && candidate.validation_report !== null)) throw new Error("VALIDATION_RECOVERY_STATE_MISMATCH");
