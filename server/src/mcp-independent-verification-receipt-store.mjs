@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { open, lstat, realpath, link, unlink, readdir } from "node:fs/promises";
 import path from "node:path";
@@ -43,19 +43,19 @@ function boundary({ root, assertProtectedDirectory, role }) {
   return { directory, check };
 }
 
-async function readEnvelopeFile(store, name) {
+async function readEnvelopeFile(store, name, byteLimit = maxBytes) {
   const beforeRoot = await store.check();
   const filename = path.join(store.directory, name);
   const before = await lstat(filename);
   if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1
-    || before.size < 1 || before.size > maxBytes) fail("INDEPENDENT_RECEIPT_FILE_UNVERIFIED");
+    || before.size < 1 || before.size > byteLimit) fail("INDEPENDENT_RECEIPT_FILE_UNVERIFIED");
   const handle = await open(filename, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
     const stat = await handle.stat();
     if (!stat.isFile() || !sameStat(before, stat) || stat.size !== before.size || stat.nlink !== 1)
       fail("INDEPENDENT_RECEIPT_FILE_CHANGED");
     // Bounded read even if the file is modified concurrently.
-    const buffer = Buffer.alloc(maxBytes + 1);
+    const buffer = Buffer.alloc(byteLimit + 1);
     let offset = 0;
     while (offset < buffer.length) {
       const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset);
@@ -65,7 +65,7 @@ async function readEnvelopeFile(store, name) {
     const after = await handle.stat();
     const current = await lstat(filename);
     const afterRoot = await store.check();
-    if (offset !== stat.size || offset > maxBytes || !sameStat(stat, after) || !sameStat(stat, current)
+    if (offset !== stat.size || offset > byteLimit || !sameStat(stat, after) || !sameStat(stat, current)
       || after.size !== stat.size || after.mtimeMs !== stat.mtimeMs || after.ctimeMs !== stat.ctimeMs
       || current.isSymbolicLink() || current.nlink !== 1 || !sameStat(beforeRoot, afterRoot))
       fail("INDEPENDENT_RECEIPT_FILE_CHANGED");
@@ -153,6 +153,27 @@ export function createIndependentReceiptReader({ root, assertProtectedDirectory 
     // its signature, policy, expiry and exact identity.
     return readEnvelopeFile(store, candidateName(candidate));
   };
+}
+
+// Supervisor outcome exchange uses a separate protected directory from the
+// issuer receipt store. An exact binding, not a caller-supplied path, selects
+// one immutable envelope. Signature and freshness are verified by the
+// separately pinned supervisor observer, never inferred from file existence.
+const outcomeBindingFields = ["suite","platform","workflow_sha256","commit","run_id","job_id","run_attempt","completed_at_ms"];
+export function independentOutcomeAttestationFilename(binding) {
+  if (!exact(binding,outcomeBindingFields)
+    || typeof binding.suite !== "string" || !/^[A-Za-z0-9_.-]{1,100}$/u.test(binding.suite)
+    || !["windows","linux"].includes(binding.platform)
+    || typeof binding.workflow_sha256 !== "string" || !/^[a-f0-9]{64}$/u.test(binding.workflow_sha256)
+    || typeof binding.commit !== "string" || !sha.test(binding.commit)
+    || !outcomeBindingFields.slice(4).every(k=>Number.isSafeInteger(binding[k]) && binding[k]>0))
+    fail("INDEPENDENT_OUTCOME_BINDING_INVALID");
+  const canonical=Object.fromEntries(outcomeBindingFields.map(k=>[k,binding[k]]));
+  return "outcome-"+createHash("sha256").update(JSON.stringify(canonical),"utf8").digest("hex")+".json";
+}
+export function createIndependentOutcomeAttestationReader({root,assertProtectedDirectory} = {}) {
+  const store=boundary({root,assertProtectedDirectory,role:"outcome_consumer"});
+  return async binding => readEnvelopeFile(store,independentOutcomeAttestationFilename(binding),100*1024);
 }
 
 export function createIndependentReceiptPublisher({ root, assertProtectedDirectory, pinnedPublicKey, resolveExpected, clock = Date.now } = {}) {
