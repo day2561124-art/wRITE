@@ -10,7 +10,7 @@ import {
   terminateProcessTree,
 } from "./process-control.mjs";
 import { projectRoot } from "./project-paths.mjs";
-import { FIXED_ISOLATED_SUITE, runFixedIsolatedVerification } from "./mcp-fixed-isolated-verification.mjs";
+import { isFixedIsolatedSuite, runFixedIsolatedVerification } from "./mcp-fixed-isolated-verification.mjs";
 import { buildDevelopmentVerificationManifest } from "./mcp-verification-manifest.mjs";
 import { workspaceExecutionProvenance } from "./mcp-development-readonly-tools.mjs";
 import { resolveDevWorkspaceExecutionContext } from "./mcp-development-workstream-tools.mjs";
@@ -27,6 +27,7 @@ export const DEV_TEST_SUITES = Object.freeze([
   "mcp_core",
   "mcp_pi_postseal",
   "mcp_hermetic_core",
+  "mcp_hermetic_manifest",
   "mcp_infrastructure",
   "mcp_reliability",
   "mcp_tunnel",
@@ -47,6 +48,7 @@ const productionSuiteDefinitions = Object.freeze({
   }),
   mcp_pi_postseal: Object.freeze({executable:process.execPath,argv:Object.freeze(["tests/tools/mcp-pi-postseal.test.mjs"]),timeoutMs:600_000}),
   mcp_hermetic_core: Object.freeze({ executable: process.execPath, argv: Object.freeze(["tests/tools/mcp-hermetic-core.test.mjs"]), timeoutMs: 120_000 }),
+  mcp_hermetic_manifest: Object.freeze({ executable: process.execPath, argv: Object.freeze(["tests/mcp/mcp-verification-manifest.test.mjs"]), timeoutMs: 120_000 }),
   mcp_core: Object.freeze({
     executable: process.execPath,
     argv: Object.freeze(["tests/tools/mcp-core.test.mjs"]),
@@ -573,7 +575,7 @@ export function createDevTestRunner({
   return async function runTests(input = {}) {
     const { usesScopedAdminDispatcherRoot } = await import("./mcp-powershell-maintenance-tools.mjs");
     const scoped = usesScopedAdminDispatcherRoot();
-    if (scoped && input?.suite !== FIXED_ISOLATED_SUITE) {
+    if (scoped && !isFixedIsolatedSuite(input?.suite)) {
       throw Object.assign(new Error("Use workspace.powershell_isolated to test under the scoped dispatcher."),
         { code: "ISOLATED_VERIFICATION_REQUIRED" });
     }
