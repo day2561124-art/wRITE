@@ -138,7 +138,7 @@ jobs:
           $env:Path = (Join-Path $Root 'tools') + ';' + $env:Path
           $session = (Get-Process -Id $PID).SessionId
           $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-          $result = [ordered]@{ session_id=$session; administrator=$admin; node_version=$null; initial_exit=$null; test_exit=$null; interrupted_lease=$null; forced_exit=$null; error=$null }
+          $result = [ordered]@{ session_id=$session; administrator=$admin; node_version=$null; initial_exit=$null; test_exit=$null; interrupted_lease=$null; forced_exit=$null; manifest_exit=$null; error=$null }
           function Invoke-FixedTests([string]$Pattern,[string]$Prefix) {
             $arguments = '--test --test-name-pattern "' + $Pattern + '" "' + $test + '"'
             $process = Start-Process -FilePath $node -ArgumentList $arguments -RedirectStandardOutput (Join-Path $run "$Prefix.log") -RedirectStandardError (Join-Path $run "$Prefix-stderr.log") -Wait -PassThru -NoNewWindow
@@ -195,6 +195,9 @@ jobs:
             } finally {
               Remove-Item Env:NEXA_R15_DISPOSABLE_FIXTURE -ErrorAction SilentlyContinue
             }
+            if ($result.forced_exit -ne 0) { throw 'Forced termination verification failed' }
+            $result.manifest_exit = Invoke-FixedTests 'R16 fixed manifest suite executes direct native runner with station lease' 'manifest'
+            if ($result.manifest_exit -ne 0) { throw 'Fixed manifest station verification failed' }
           } catch {
             $result.error = $_.Exception.Message
           } finally {
@@ -253,7 +256,7 @@ jobs:
                 Start-Sleep -Milliseconds 250
                 if (Test-Path -LiteralPath $resultPath -PathType Leaf) { break }
                 Write-Output "TASK_STATE=$state; LAST_RUN_RESULT=$($info.LastTaskResult); LAST_RUN_TIME=$($info.LastRunTime)"
-                foreach ($name in @('wrapper-entered.txt','probe-entered.txt','wrapper-exit.txt','bootstrap.log','test.log','forced.log','forced-stderr.log','result.tmp')) {
+                foreach ($name in @('wrapper-entered.txt','probe-entered.txt','wrapper-exit.txt','bootstrap.log','test.log','forced.log','forced-stderr.log','manifest.log','manifest-stderr.log','result.tmp')) {
                   $file = Join-Path $run $name
                   Write-Output "DIAGNOSTIC_FILE=$name; EXISTS=$(Test-Path -LiteralPath $file)"
                   if (Test-Path -LiteralPath $file) { Get-Content -LiteralPath $file -Tail 40 }
@@ -267,13 +270,15 @@ jobs:
             }
             $observed = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
             $observed | ConvertTo-Json -Depth 4
-            foreach ($name in @('initial.log','initial-stderr.log','test.log','test-stderr.log','forced.log','forced-stderr.log')) {
+            foreach ($name in @('initial.log','initial-stderr.log','test.log','test-stderr.log','forced.log','forced-stderr.log','manifest.log','manifest-stderr.log')) {
               $log = Join-Path $run $name
               if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log }
             }
             if ($observed.error -or $observed.session_id -ne 0 -or $observed.administrator -or $null -eq $observed.test_exit) { throw 'Session 0 probe not completed' }
             if ($baseline -ne 0 -or $observed.initial_exit -ne 0 -or $observed.test_exit -ne 0) { throw "Observed test failure: baseline=$baseline; limited_session0=$($observed.test_exit)" }
             if ($null -eq $observed.forced_exit -or $observed.forced_exit -ne 0) { throw "R15 forced native termination gate failed: exit=$($observed.forced_exit)" }
+            if ($null -eq $observed.manifest_exit -or $observed.manifest_exit -ne 0) { throw "R16 fixed manifest station gate failed: exit=$($observed.manifest_exit)" }
+            Write-Output 'R16_FIXED_MANIFEST_STATION_ACCEPTANCE_PASS'
           } finally {
             if ($createdTask) {
               Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
