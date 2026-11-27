@@ -105,11 +105,14 @@ async function stageNodeToolchain(target) {
 }
 
 export async function prepareAppContainerPowerShell({ context, cwd, command, timeoutMs,
-  sandbox_paths = [], sandbox_directories = [], output_paths = [], toolchain, fixedHermeticCore = false }) {
+  sandbox_paths = [], sandbox_directories = [], output_paths = [], toolchain, fixedHermeticCore = false, fixedVerificationManifest = false }) {
   if (process.platform !== "win32" || process.arch !== "x64") throw new Error("WINDOWS_APPCONTAINER_UNAVAILABLE");
   if (toolchain !== undefined && toolchain !== "node") throw new Error("INVALID_SANDBOX_TOOLCHAIN");
   // Internal fixed verification only: no caller-selected executable or arguments.
-  if (fixedHermeticCore && (toolchain !== "node" || cwd !== context.root || output_paths.length !== 0 || sandbox_directories.length !== 0)) {
+  const fixedNode = fixedHermeticCore === true || fixedVerificationManifest === true;
+  if (typeof fixedHermeticCore !== "boolean" || typeof fixedVerificationManifest !== "boolean"
+    || (fixedHermeticCore && fixedVerificationManifest)
+    || (fixedNode && (toolchain !== "node" || cwd !== context.root || output_paths.length !== 0 || sandbox_directories.length !== 0))) {
     throw new Error("INVALID_FIXED_APPCONTAINER_PLAN");
   }
   // The maintenance entrypoint resolves cwd with realpath. Use the same
@@ -203,7 +206,7 @@ export async function prepareAppContainerPowerShell({ context, cwd, command, tim
     throw error;
   }
   const manifest = { input_manifest_sha256: hash(JSON.stringify(inputManifest)), input_file_count: inputManifest.length,
-    ...(toolchain ? { toolchain } : {}), ...(fixedHermeticCore ? { execution_mode: "fixed_node" } : {}) };
+    ...(toolchain ? { toolchain } : {}), ...(fixedNode ? { execution_mode: "fixed_node" } : {}) };
   const run = async () => {
     const start = Date.now();
     const base = { elevated: false, command_sha256: commandHash, cwd, timeout_ms: timeoutMs,
@@ -213,6 +216,7 @@ export async function prepareAppContainerPowerShell({ context, cwd, command, tim
     try {
       const runnerArgs = [stage, relativeCwd, String(timeoutMs)];
       if (fixedHermeticCore) runnerArgs.push("fixed-hermetic-core");
+      if (fixedVerificationManifest) runnerArgs.push("fixed-verification-manifest");
       const { stdout, stderr } = await exec(runner, runnerArgs,
         { cwd: root, env, windowsHide: true, timeout: timeoutMs + 40_000, maxBuffer: 65_536 });
       if (stderr) throw new Error("APPCONTAINER_CLEANUP_UNVERIFIED");

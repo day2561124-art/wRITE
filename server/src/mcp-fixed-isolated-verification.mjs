@@ -15,14 +15,22 @@ export const FIXED_ISOLATED_SOURCE_PATHS = Object.freeze([
   "server/src/mcp-verification-failure-classifier.mjs",
   "server/src/mcp-verification-controlled-retry.mjs",
 ]);
+export const FIXED_MANIFEST_SUITE = "mcp_hermetic_manifest";
+export const FIXED_MANIFEST_SOURCE_PATHS = Object.freeze([
+  "tests/mcp/mcp-verification-manifest.test.mjs",
+  "server/src/mcp-verification-manifest.mjs",
+  "server/src/mcp-verification-failure-classifier.mjs",
+]);
 export const FIXED_ISOLATED_TIMEOUT_MS = 120_000;
+export const isFixedIsolatedSuite = suite => suite === FIXED_ISOLATED_SUITE || suite === FIXED_MANIFEST_SUITE;
 
 function reject(code) {
   throw Object.assign(new Error(code), { code });
 }
 
 export function fixedIsolatedVerificationPlan(suite, context) {
-  if (suite !== FIXED_ISOLATED_SUITE) reject("ISOLATED_VERIFICATION_REQUIRED");
+  if (!isFixedIsolatedSuite(suite)) reject("ISOLATED_VERIFICATION_REQUIRED");
+  const manifestSuite = suite === FIXED_MANIFEST_SUITE;
   if (context?.workspace_type !== "isolated_worktree" ||
       context.workstream_state !== "active" || context.lifecycle_state !== "active" ||
       context.healthy !== true || context.mutation_allowed !== true ||
@@ -32,22 +40,25 @@ export function fixedIsolatedVerificationPlan(suite, context) {
   return {
     context,
     cwd: context.root,
-    command: "& (Join-Path $env:NEXA_SANDBOX_TOOLCHAIN 'node.exe') (Join-Path $env:NEXA_SANDBOX_WORK 'tests/tools/mcp-hermetic-core.test.mjs')",
+    command: manifestSuite
+      ? "& (Join-Path $env:NEXA_SANDBOX_TOOLCHAIN 'node.exe') (Join-Path $env:NEXA_SANDBOX_WORK 'tests/mcp/mcp-verification-manifest.test.mjs')"
+      : "& (Join-Path $env:NEXA_SANDBOX_TOOLCHAIN 'node.exe') (Join-Path $env:NEXA_SANDBOX_WORK 'tests/tools/mcp-hermetic-core.test.mjs')",
     timeoutMs: FIXED_ISOLATED_TIMEOUT_MS,
-    sandbox_paths: [...FIXED_ISOLATED_SOURCE_PATHS],
+    sandbox_paths: [...(manifestSuite ? FIXED_MANIFEST_SOURCE_PATHS : FIXED_ISOLATED_SOURCE_PATHS)],
     sandbox_directories: [],
     output_paths: [],
     toolchain: "node",
-    fixedHermeticCore: true,
+    fixedHermeticCore: !manifestSuite,
+    fixedVerificationManifest: manifestSuite,
   };
 }
 
 // Reproduce the staging manifest from independently observed workspace bytes.
-// The sandbox receipt must bind the exact five sources, not merely a file count.
+// The sandbox receipt must bind the exact suite sources, not merely a file count.
 const sha256 = value => createHash("sha256").update(value).digest("hex");
-async function observeInputManifest(root) {
+async function observeInputManifest(root, paths) {
   const entries = [];
-  for (const file of FIXED_ISOLATED_SOURCE_PATHS) {
+  for (const file of paths) {
     const target = path.join(root, file);
     await assertExistingSafePath(target, "Fixed verification source", root);
     const info = await lstat(target);
@@ -65,12 +76,12 @@ async function observeInputManifest(root) {
 // snapshot provenance and durable completion.
 export async function runFixedIsolatedVerification({ suite, context, prepare = prepareAppContainerPowerShell }) {
   const plan = fixedIsolatedVerificationPlan(suite, context);
-  const expectedManifest = await observeInputManifest(context.root);
+  const expectedManifest = await observeInputManifest(context.root, plan.sandbox_paths);
   const prepared = await prepare(plan);
   let observed;
   try {
     if (prepared.manifest?.input_manifest_sha256 !== expectedManifest ||
-        prepared.manifest?.input_file_count !== FIXED_ISOLATED_SOURCE_PATHS.length) {
+        prepared.manifest?.input_file_count !== plan.sandbox_paths.length) {
       reject("ISOLATED_VERIFICATION_INPUT_CHANGED");
     }
     observed = await prepared.run();
@@ -80,13 +91,13 @@ export async function runFixedIsolatedVerification({ suite, context, prepare = p
   }
   const valid = observed?.isolation_mode === "appcontainer" &&
     observed.workspace_writes === false && observed.job_terminated === true &&
-    observed.input_file_count === FIXED_ISOLATED_SOURCE_PATHS.length &&
+    observed.input_file_count === plan.sandbox_paths.length &&
     observed.input_manifest_sha256 === expectedManifest &&
     observed.toolchain === "node" &&
     observed.execution_mode === "fixed_node" &&
     Array.isArray(observed.artifacts) && observed.artifacts.length === 0;
   if (!valid) reject("INVALID_ISOLATED_VERIFICATION_RECEIPT");
-  if (await observeInputManifest(context.root) !== expectedManifest) reject("ISOLATED_VERIFICATION_INPUT_CHANGED");
+  if (await observeInputManifest(context.root, plan.sandbox_paths) !== expectedManifest) reject("ISOLATED_VERIFICATION_INPUT_CHANGED");
   const execution_ok = observed.execution_ok === true;
   const passed = execution_ok && observed.ok === true &&
     observed.exit_code === 0 && observed.timed_out === false;

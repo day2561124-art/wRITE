@@ -292,6 +292,7 @@ try {
     "mcp",
     "mcp_pi_postseal",
     "mcp_hermetic_core",
+    "mcp_hermetic_manifest",
     "mcp_core",
     "mcp_infrastructure",
     "mcp_reliability",
@@ -309,6 +310,8 @@ try {
   assert.deepEqual(mapping.mcp_pi_postseal.argv, ["tests/tools/mcp-pi-postseal.test.mjs"]);
   assert.deepEqual(mapping.mcp_hermetic_core.argv, ["tests/tools/mcp-hermetic-core.test.mjs"]);
   assert.equal(mapping.mcp_hermetic_core.timeout_ms, 120_000);
+  assert.deepEqual(mapping.mcp_hermetic_manifest.argv, ["tests/mcp/mcp-verification-manifest.test.mjs"]);
+  assert.equal(mapping.mcp_hermetic_manifest.timeout_ms, 120_000);
   assert.deepEqual(mapping.mcp_infrastructure.argv, ["tests/tools/mcp-infrastructure.test.mjs"]);
   assert.deepEqual(mapping.mcp_reliability.argv, ["tests/tools/mcp-reliability.test.mjs"]);
   assert.deepEqual(mapping.mcp_tunnel.argv, ["tests/mcp-tunnel-launcher.test.mjs"]);
@@ -2046,12 +2049,12 @@ try {
     {
       id: "dev-test-injection-semicolon",
       arguments: { suite: "mcp; whoami" },
-      expected: "suite must be one of: mcp, mcp_core, mcp_pi_postseal, mcp_hermetic_core, mcp_infrastructure, mcp_reliability, mcp_tunnel, affected, communication, world_simulation, cognition, memory_retrieval, all.",
+      expected: "suite must be one of: mcp, mcp_core, mcp_pi_postseal, mcp_hermetic_core, mcp_hermetic_manifest, mcp_infrastructure, mcp_reliability, mcp_tunnel, affected, communication, world_simulation, cognition, memory_retrieval, all.",
     },
     {
       id: "dev-test-injection-powershell",
       arguments: { suite: "mcp && powershell -NoProfile" },
-      expected: "suite must be one of: mcp, mcp_core, mcp_pi_postseal, mcp_hermetic_core, mcp_infrastructure, mcp_reliability, mcp_tunnel, affected, communication, world_simulation, cognition, memory_retrieval, all.",
+      expected: "suite must be one of: mcp, mcp_core, mcp_pi_postseal, mcp_hermetic_core, mcp_hermetic_manifest, mcp_infrastructure, mcp_reliability, mcp_tunnel, affected, communication, world_simulation, cognition, memory_retrieval, all.",
     },
     {
       id: "dev-test-unknown-command",

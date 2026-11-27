@@ -184,9 +184,10 @@ export function buildDevelopmentVerificationManifest({
     workspace_writes: suiteResult.workspace_writes === false ? false : null,
     post_snapshot_verified: suiteResult.post_snapshot_verified === true,
   } : null;
-  const isolationPassed = !isolated || (result.suite === "mcp_hermetic_core"
+  const fixedFileCount = result.suite === "mcp_hermetic_core" ? 5 : result.suite === "mcp_hermetic_manifest" ? 3 : null;
+  const isolationPassed = !isolated || (fixedFileCount !== null
     && isolationEvidence.isolation_mode === "appcontainer" && isolationEvidence.execution_mode === "fixed_node"
-    && isolationEvidence.input_manifest_sha256 !== null && isolationEvidence.input_file_count === 5
+    && isolationEvidence.input_manifest_sha256 !== null && isolationEvidence.input_file_count === fixedFileCount
     && isolationEvidence.job_terminated && isolationEvidence.cleanup_pending === false
     && isolationEvidence.workspace_writes === false && isolationEvidence.post_snapshot_verified);
   const passed = result.execution_ok && result.passed && !result.timed_out
