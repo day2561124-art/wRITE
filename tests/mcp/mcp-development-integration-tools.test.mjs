@@ -1275,8 +1275,9 @@ test("R16 independent adoption keeps actual candidate and Journal fences without
   assert.equal((await journal.status()).chain_verified, true);
 });
 
-test("R16 independent adoption recovers producer exit before and after durable validation terminal", async () => {
-  for (const completed of [false, true]) {
+test("R16 independent adoption recovers producer exit with active worktree or before and after durable validation terminal", async () => {
+  for (const phase of ["active-worktree","before-terminal","after-terminal"]) {
+    const completed=phase==="after-terminal", active=phase==="active-worktree";
     const harness = await createHarness("r16-independent-interruption");
     try {
       const runtime = path.join(harness.root, "runtime");
@@ -1288,6 +1289,9 @@ test("R16 independent adoption recovers producer exit before and after durable v
       const request = { integration_candidate_id: candidate.integration_candidate_id, expected_revision: candidate.revision };
       const worker = `
         import {generateKeyPairSync,sign} from 'node:crypto';
+        import {execFile} from 'node:child_process';
+        import {promisify} from 'node:util';
+        import path from 'node:path';
         import {createDevIntegrationService} from ${JSON.stringify(pathToFileURL(path.resolve("server/src/mcp-development-integration-tools.mjs")).href)};
         import {createIndependentCandidateEvidenceGate} from ${JSON.stringify(pathToFileURL(path.resolve("server/src/mcp-independent-verification-candidate.mjs")).href)};
         import {createDevOperationJournalService} from ${JSON.stringify(pathToFileURL(path.resolve("server/src/mcp-development-journal-tools.mjs")).href)};
@@ -1304,7 +1308,26 @@ test("R16 independent adoption recovers producer exit before and after durable v
               run_attempt:1,completed_at_ms:now-2000,execution_ok:true,passed:true,timed_out:false,skipped:false,exit_code:0}))});
           return {payload,signature:sign(null,Buffer.from(payload),privateKey).toString('base64url')};
         }});
+        const integrationPath=path.join(${JSON.stringify(path.join(harness.root,".writer-workbench-integrations"))},${JSON.stringify(candidate.integration_candidate_id)});
+        const exec=promisify(execFile);
+        let headReads=0;
+        const gitRunner=async(args,{cwd,timeout=60000,maxBuffer=524288,allowFailure=false,extraEnv={}}={})=>{
+          try{
+            const {stdout,stderr}=await exec(process.platform==='win32'?'git.exe':'git',
+              ['--no-pager','-c','core.fsmonitor=false',...args],
+              {cwd,timeout,maxBuffer,windowsHide:true,shell:false,env:{...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_TERMINAL_PROMPT:'0',GIT_PAGER:'cat',...extraEnv}});
+            // The second actual HEAD inspection occurs after the durable
+            // testing transition, before any cleanup or report publication.
+            if(${active}&&cwd===integrationPath&&args.join(' ')==='rev-parse --verify HEAD'&&++headReads===2)
+              process.exit(77);
+            return {stdout,stderr,exit_code:0};
+          }catch(error){
+            if(allowFailure&&Number.isInteger(error.code))return {stdout:String(error.stdout??''),stderr:String(error.stderr??''),exit_code:error.code};
+            throw error;
+          }
+        };
         const service=createDevIntegrationService({
+          ...(${active}?{gitRunner}:{}),
           repositoryRoot:${JSON.stringify(harness.repositoryRoot)},
           registryPath:${JSON.stringify(path.join(runtime,"integration_registry.json"))},
           registryLockPath:${JSON.stringify(path.join(runtime,"integration_registry.lock"))},
@@ -1330,8 +1353,16 @@ test("R16 independent adoption recovers producer exit before and after durable v
       const exit=await new Promise((resolve,reject)=>{child.once("error",reject);child.once("exit",resolve);});
       assert.equal(exit,77,stderr);
       const current=await service.getCandidate({integration_candidate_id:candidate.integration_candidate_id});
-      assert.equal(current.state,"validated");
-      assert.equal(current.integration_workspace.state,"removed");
+      assert.equal(current.state,active?"testing":"validated");
+      assert.equal(current.integration_workspace.state,active?"active":"removed");
+      const integrationPath=path.join(harness.root,".writer-workbench-integrations",current.integration_candidate_id);
+      if(active){
+        assert.equal(current.validation_report,null);
+        assert.equal((await git(integrationPath,["rev-parse","HEAD"])).stdout.trim(),current.integration_commit);
+        assert.equal((await git(integrationPath,["status","--porcelain=v1","--untracked-files=all"])).stdout,"");
+        const registrations=(await git(harness.repositoryRoot,["worktree","list","--porcelain"])).stdout;
+        assert(registrations.includes("locked Writer Workbench integration "+current.integration_candidate_id));
+      }
       const before=await journal.verify();
       const start=before.events.find(e=>e.operation_type==="integration_validation"&&e.stage==="operation_started");
       assert.equal(before.events.some(e=>e.operation_id===start.operation_id&&e.stage==="operation_completed"),completed);
@@ -1345,7 +1376,21 @@ test("R16 independent adoption recovers producer exit before and after durable v
       }}});
       await assert.rejects(liveOwner.recoverInterruptedValidation(input),/OWNER_ACTIVE_OR_UNKNOWN/);
       assert.equal((await journal.verify()).head.latest_event_hash,before.head.latest_event_hash);
+      if(active){
+        const unexpected=path.join(integrationPath,"unexpected-untracked.txt");
+        await writeFile(unexpected,"preserve this data");
+        await assert.rejects(service.recoverInterruptedValidation(input),/VALIDATION_RECOVERY_DIRTY_WORKTREE/);
+        assert.equal(await readFile(unexpected,"utf8"),"preserve this data");
+        assert.equal((await journal.verify()).head.latest_event_hash,before.head.latest_event_hash);
+        assert.equal((await service.getCandidate({integration_candidate_id:current.integration_candidate_id})).revision,current.revision);
+        await rm(unexpected);
+      }
       const retired=await service.recoverInterruptedValidation(input);
+      assert.equal(retired.integration_workspace.state,"removed");
+      assert.equal(retired.integration_workspace.cleanup_pending,false);
+      await assert.rejects(access(integrationPath),error=>error.code==="ENOENT");
+      const remaining=(await git(harness.repositoryRoot,["worktree","list","--porcelain"])).stdout;
+      assert(!remaining.includes("locked Writer Workbench integration "+current.integration_candidate_id));
       assert.equal(retired.state,"failed");
       assert.equal(retired.failure_reason.code,"INDEPENDENT_VALIDATION_INTERRUPTED");
       assert.equal(retired.validation_report.passed,false);
