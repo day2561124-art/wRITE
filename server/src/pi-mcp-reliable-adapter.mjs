@@ -18,7 +18,8 @@ function observations(evidence) {
 // projection replay. Old Journal records must remain byte-for-byte verifiable.
 function verifiedCommit(value, reconciled = false) {
   return value?.committed === true && /^[a-f0-9]{40}$/iu.test(value.commit ?? "")
-    && (reconciled || (value.execution_ok === true && value.commit_created === true && value.exit_code === 0))
+    && (reconciled ? (value.exit_code == null || value.exit_code === 0)
+      : (value.execution_ok === true && value.commit_created === true && value.exit_code === 0))
     && value.execution_ok !== false && value.timed_out !== true && value.commit_created !== false;
 }
 function timedRequest(callback,timeoutMs) {
@@ -83,9 +84,11 @@ export function createPiReliableMcpAdapter({callTool,queryOperation,resolveWorks
     const r=receiptOf(action,deduped??evidence,deduped?"reconciled_facts":"tool_response");
     const failed=facts.some(x=>x?.isError===true||x?.ok===false||x?.execution_ok===false||x?.passed===false);
     const verification=step.capability.startsWith("verification.");
-    const commitFailed = step.capability === "git.commit" && !(deduped
-      ? verifiedCommit(deduped.original_result, true)
-      : facts.some(value => verifiedCommit(value))) ;
+    const commitFailed = step.capability === "git.commit" && (deduped
+      ? !verifiedCommit(deduped.original_result, true)
+      : !facts.some(value => verifiedCommit(value)) || facts.some(value =>
+        value?.committed === false || value?.commit_created === false
+        || (value?.committed === true && value.exit_code != null && value.exit_code !== 0)));
     return {receipt:r,failed:failed||commitFailed||(deduped&&deduped.reconciliation_state!=="completed")
       ||(verification&&!(deduped?deduped.original_result?.passed===true:facts.some(x=>x?.passed===true))),
       error_code:failed||commitFailed?"TOOL_REPORTED_FAILURE":"VALIDATION_EVIDENCE_REQUIRED"};
