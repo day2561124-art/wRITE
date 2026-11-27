@@ -2754,9 +2754,12 @@ function verifiedMcpTestResult(events,started,terminal) {
         // Persist only bounded candidate facts for the managed lifecycle route.
         // A blocked/stale/failed candidate may be a completed registry effect,
         // but the Pi adapter independently requires positive success evidence.
+        // begin() returns a receipt, not the authoritative started event.
+        const admittedEvent = verification.events.find(event => event.operation_id === admission.operation_id
+          && event.stage === "operation_started");
         const integrationPreparation = ["dev_workspace_integration_preflight", "dev_workspace_validate_integration"].includes(context.tool_name)
           && workstreamIdPattern.test(payload.workstream_id ?? "") && workspaceIdPattern.test(payload.workspace_id ?? "")
-          && payload.workstream_id === admission.workstream_id && payload.workspace_id === admission.workspace_id
+          && payload.workstream_id === admittedEvent?.workstream_id && payload.workspace_id === admittedEvent?.workspace_id
           && /^dev_integration_[0-9]{8}-[0-9]{6}_[a-f0-9]{12}$/u.test(payload.integration_candidate_id ?? "")
           && Number.isSafeInteger(payload.revision) && payload.revision > 0;
         const candidateBinding = integrationPreparation ? {
