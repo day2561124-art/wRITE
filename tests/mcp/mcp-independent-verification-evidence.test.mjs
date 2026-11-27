@@ -192,3 +192,65 @@ test("GitHub collector requires exact provider identity, pinned workflow and com
     "GITHUB_RUN_CHANGED_DURING_OBSERVATION");
   assert.equal((await build()({ ...req, repository: "attacker/repo" })).code, "INVALID_GITHUB_VERIFICATION_REQUEST");
 });
+
+test("GitHub read transport binds exact repository, immutable blob bytes and read-only requests", async () => {
+  const { createHash } = await import("node:crypto");
+  const { createGitHubVerificationReadClient } = await import("../../server/src/mcp-independent-verification-github-read.mjs");
+  const repo = "owner/fixture";
+  const commit = "1".repeat(40), root = "2".repeat(40), github = "3".repeat(40), workflows = "4".repeat(40);
+  const bytes = Buffer.from("name: Fixture\n");
+  const blob = createHash("sha1").update("blob " + bytes.length + "\0").update(bytes).digest("hex");
+  const tree = (sha, path, type, mode, child) => ({ sha, truncated: false, tree: [{ path, type, mode, sha: child }] });
+  const fixtures = {
+    ["/actions/runs/111"]: { id: 111 },
+    ["/actions/runs/111/attempts/1/jobs?per_page=100"]: { total_count: 1, jobs: [{ id: 222 }] },
+    ["/git/commits/" + commit]: { sha: commit, tree: { sha: root } },
+    ["/git/trees/" + root]: tree(root, ".github", "tree", "040000", github),
+    ["/git/trees/" + github]: tree(github, "workflows", "tree", "040000", workflows),
+    ["/git/trees/" + workflows]: tree(workflows, "fixture.yml", "blob", "100644", blob),
+    ["/git/blobs/" + blob]: { sha: blob, size: bytes.length, encoding: "base64", content: bytes.toString("base64") },
+  };
+  const base = "https://api.github.com/repos/" + repo;
+  const requests = [];
+  const credential = "fixture_readonly_token_12345";
+  const make = (modify = (path, value) => value) => createGitHubVerificationReadClient({
+    repository: repo, readCredential: async () => credential,
+    fetchImpl: async (url, opts) => {
+      assert.equal(url.startsWith(base + "/"), true);
+      assert.equal(opts.method, "GET");
+      assert.equal(opts.redirect, "error");
+      assert.equal(opts.headers.Authorization, "Bearer " + credential);
+      const p = url.slice(base.length); requests.push(p);
+      assert.ok(Object.hasOwn(fixtures, p));
+      const value = modify(p, structuredClone(fixtures[p]));
+      return value instanceof Response ? value : new Response(JSON.stringify(value), { status: 200 });
+    },
+  });
+  const client = make();
+  assert.deepEqual(await client.readRun({ repository: repo, run_id: 111 }), { id: 111 });
+  assert.deepEqual(await client.readJobs({ repository: repo, run_id: 111, run_attempt: 1 }), { total_count: 1, jobs: [{ id: 222 }] });
+  const input = { repository: repo, commit, path: ".github/workflows/fixture.yml" };
+  assert.deepEqual(await client.readWorkflowBytes(input), bytes);
+  assert.equal(requests.length, 7);
+  for (const bad of [{ ...input, repository: "other/repo" }, { ...input, commit: "main" }, { ...input, path: "../fixture.yml" }]) {
+    await assert.rejects(client.readWorkflowBytes(bad), /GITHUB_READ_ONLY_EVIDENCE_UNAVAILABLE/);
+  }
+  assert.equal(requests.length, 7);
+  const corruption = [
+    ["/git/commits/" + commit, v => ({ ...v, sha: "9".repeat(40) })],
+    ["/git/trees/" + root, v => ({ ...v, truncated: true })],
+    ["/git/trees/" + workflows, v => ({ ...v, tree: [{ ...v.tree[0], mode: "120000" }] })],
+    ["/git/blobs/" + blob, v => ({ ...v, content: Buffer.alloc(bytes.length, 65).toString("base64") })],
+    ["/git/blobs/" + blob, v => ({ ...v, size: bytes.length + 1 })],
+    ["/git/blobs/" + blob, v => ({ ...v, content: v.content + "!" })],
+  ];
+  for (const [target, mutate] of corruption) {
+    await assert.rejects(make((p, v) => p === target ? mutate(v) : v).readWorkflowBytes(input),
+      /GITHUB_READ_ONLY_EVIDENCE_UNAVAILABLE/);
+  }
+  const oversized = make(() => new Response("a".repeat(2 * 1024 * 1024 + 1), { status: 200 }));
+  await assert.rejects(oversized.readRun({ repository: repo, run_id: 111 }), /GITHUB_READ_ONLY_EVIDENCE_UNAVAILABLE/);
+  const unauthorized = make(() => new Response(credential, { status: 403 }));
+  await assert.rejects(unauthorized.readRun({ repository: repo, run_id: 111 }), e =>
+    e.message === "GITHUB_READ_ONLY_EVIDENCE_UNAVAILABLE" && !String(e).includes(credential));
+});
