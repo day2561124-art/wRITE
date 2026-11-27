@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { open, lstat, realpath, link, unlink } from "node:fs/promises";
+import { open, lstat, realpath, link, unlink, readdir } from "node:fs/promises";
 import path from "node:path";
 import { reviewIndependentVerification } from "./mcp-independent-verification-evidence.mjs";
 
@@ -76,6 +76,74 @@ async function readEnvelopeFile(store, name) {
       fail("INDEPENDENT_RECEIPT_FORMAT_INVALID");
     return Object.freeze(envelope);
   } finally { await handle.close(); }
+}
+
+// Issuer-only offline repair. The trusted host must hold an exclusive
+// publisher lease for the entire call (including all awaits). This is not an
+// MCP operation. No caller-supplied path, broad deletion, or overwrite.
+export function createIndependentReceiptPublicationRecovery({ root, assertProtectedDirectory,
+  withQuiescentPublisher, pinnedPublicKey, resolveExpected, clock = Date.now } = {}) {
+  const store = boundary({ root, assertProtectedDirectory, role: "issuer" });
+  if (typeof withQuiescentPublisher !== "function" || typeof resolveExpected !== "function"
+    || typeof clock !== "function" || !pinnedPublicKey) fail("INDEPENDENT_RECEIPT_HOST_UNBOUND");
+  return async function recover(candidate) {
+    const name = candidateName(candidate);
+    candidate = structuredClone(candidate);
+    return withQuiescentPublisher(async () => {
+      const rootStat = await store.check();
+      const filename = path.join(store.directory, name);
+      const stat = await lstat(filename);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 2
+        || stat.size < 1 || stat.size > maxBytes)
+        fail("INDEPENDENT_RECEIPT_RECOVERY_UNVERIFIED");
+      const prefix = "." + name + ".";
+      const entries = await readdir(store.directory);
+      if (entries.length > 10000) fail("INDEPENDENT_RECEIPT_RECOVERY_UNVERIFIED");
+      const aliases = entries.filter(n => n.startsWith(prefix)
+        && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp$/u.test(n.slice(prefix.length)));
+      if (aliases.length !== 1) fail("INDEPENDENT_RECEIPT_RECOVERY_UNVERIFIED");
+      const alias = path.join(store.directory, aliases[0]);
+      const other = await lstat(alias);
+      if (!other.isFile() || other.isSymbolicLink() || other.nlink !== 2 || !sameStat(stat, other))
+        fail("INDEPENDENT_RECEIPT_RECOVERY_UNVERIFIED");
+      // Read only the exact shared file. The ordinary consumer continues to
+      // reject nlink=2 until the separately authorized repair is complete.
+      const handle = await open(filename, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+      try {
+        const opened = await handle.stat();
+        if (!sameStat(stat, opened) || opened.nlink !== 2 || opened.size !== stat.size)
+          fail("INDEPENDENT_RECEIPT_RECOVERY_UNVERIFIED");
+        const buffer = Buffer.alloc(stat.size + 1);
+        let offset = 0;
+        while (offset < buffer.length) {
+          const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset);
+          if (!bytesRead) break;
+          offset += bytesRead;
+        }
+        if (offset !== stat.size) fail("INDEPENDENT_RECEIPT_RECOVERY_UNVERIFIED");
+        const raw = buffer.subarray(0, offset).toString("utf8");
+        const envelope = JSON.parse(raw);
+        if (!exact(envelope, ["payload", "signature"]) || JSON.stringify(envelope) !== raw)
+          fail("INDEPENDENT_RECEIPT_RECOVERY_UNVERIFIED");
+        const expected = structuredClone(await resolveExpected(Object.freeze(candidate)));
+        if (!expected?.candidate || fields.some(k => expected.candidate[k] !== candidate[k]))
+          fail("INDEPENDENT_RECEIPT_CONTEXT_CHANGED");
+        const proof = reviewIndependentVerification({ envelope, expected, pinnedPublicKey, nowMs: clock() });
+        if (!proof.verified) fail("INDEPENDENT_RECEIPT_PROOF_INVALID");
+        const final = await lstat(filename), currentAlias = await lstat(alias), finalOpened = await handle.stat();
+        if (!sameStat(rootStat, await store.check())
+          || [final, currentAlias, finalOpened].some(v => !v.isFile() || v.isSymbolicLink()
+            || v.nlink !== 2 || !sameStat(stat, v) || v.size !== stat.size
+            || v.mtimeMs !== stat.mtimeMs || v.ctimeMs !== stat.ctimeMs))
+          fail("INDEPENDENT_RECEIPT_RECOVERY_UNVERIFIED");
+        await unlink(alias);
+        const stored = await readEnvelopeFile(store, name);
+        if (stored.payload !== envelope.payload || stored.signature !== envelope.signature)
+          fail("INDEPENDENT_RECEIPT_RECOVERY_UNVERIFIED");
+        return Object.freeze({ recovered: true, execution_authorized: false, receipt_sha256: proof.receipt_sha256 });
+      } finally { await handle.close(); }
+    });
+  };
 }
 
 export function createIndependentReceiptReader({ root, assertProtectedDirectory } = {}) {
