@@ -1208,3 +1208,162 @@ test("R16 independent candidate evidence rechecks signed receipt at apply withou
   assert.equal(candidate.state, "preflight_passed");
   assert.equal(ready.state, "ready");
 });
+
+test("R16 independent adoption keeps actual candidate and Journal fences without claiming local tests", async t => {
+  const harness = await createHarness("r16-independent-adoption");
+  t.after(() => harness.cleanup());
+  const journal = createDevOperationJournalService({ storageRoot: path.join(harness.root, "independent-adoption-journal") });
+  const source = await harness.createSource({ changes: { "independent-adoption.txt": "fixture\n" } });
+  const { generateKeyPairSync, sign } = await import("node:crypto");
+  const { createIndependentCandidateEvidenceGate } = await import("../../server/src/mcp-independent-verification-candidate.mjs");
+  const { requireIndependentApplyEvidence } = await import("../../server/src/mcp-independent-verification-adoption.mjs");
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const now = Date.now();
+  let currentTime = now;
+  const rows = ["mcp", "mcp_tunnel"].map(suite => ({ suite, platform: "linux", workflow_sha256: "b".repeat(64) }));
+  const policy = { repository: "owner/disposable", issuer: "fixture-issuer", max_age_ms: 60000, suite_workflows: rows, additional_required: [] };
+  let envelopeAvailable = true;
+  let job = 20;
+  const gate = createIndependentCandidateEvidenceGate({ policy, pinnedPublicKey: publicKey, clock: () => currentTime,
+    readEnvelope: async candidate => {
+      if (!envelopeAvailable) throw Error("source unavailable");
+      const payload = JSON.stringify({ schema_version: 1, issuer: policy.issuer, repository: policy.repository,
+        candidate, issued_at_ms: now - 1000, expires_at_ms: now + 60000 - 1000,
+        results: rows.map((row, i) => ({ ...row, commit: candidate.integration_commit, run_id: 10, job_id: job + i,
+          run_attempt: 1, completed_at_ms: now - 2000, execution_ok: true, passed: true, timed_out: false, skipped: false, exit_code: 0 })) });
+      return { payload, signature: sign(null, Buffer.from(payload), privateKey).toString("base64url") };
+    },
+  });
+  const service = harness.createService({ journal, independentEvidenceGate: gate,
+    clock: () => new Date(currentTime), validationRunner: async () => assert.fail("independent adoption must not run local tests") });
+  const candidate = await service.preflight({ workstream_id: source.workstream_id, expected_workstream_revision: 1 });
+  const req = { integration_candidate_id: candidate.integration_candidate_id, expected_revision: candidate.revision };
+  envelopeAvailable = false;
+  await assert.rejects(service.validateIntegration(req), { code: "INDEPENDENT_VALIDATION_EVIDENCE_REQUIRED" });
+  assert.equal((await service.getCandidate({ integration_candidate_id: req.integration_candidate_id })).state, "preflight_passed");
+  envelopeAvailable = true;
+  const context = await service.getIndependentVerificationContext(req);
+  const ready = await service.validateIntegration(req);
+  assert.equal(ready.state, "ready");
+  assert.equal(ready.integration_workspace.state, "removed");
+  assert.equal(ready.integration_workspace.cleanup_pending, false);
+  assert.equal(ready.validation_report.evidence_source, "independent_signed");
+  assert.deepEqual(ready.validation_report.suites, []);
+  assert.equal(ready.validation_report.verification_manifest.independent_results.length, 2);
+  assert.equal(ready.validation_report.verification_manifest.passed, true);
+  const events = (await journal.verify()).events;
+  assert.equal(events.some(e => e.operation_type === "test_evidence"), false);
+  const proof = await gate.reviewForApply(ready, context.plan, ready.validation_report.evidence_reference);
+  assert.equal(requireIndependentApplyEvidence({ candidate: ready, plan: context.plan, proof, events, nowMs: now }), true);
+  const operation = ready.validation_report.independent_validation_operation_id;
+  assert.throws(() => requireIndependentApplyEvidence({ candidate: ready, plan: context.plan, proof,
+    events: events.filter(e => e.operation_id !== operation || e.stage !== "operation_completed"), nowMs: now }),
+    { code: "INDEPENDENT_APPLY_JOURNAL_EVIDENCE_REQUIRED" });
+  const apply = { integration_candidate_id: ready.integration_candidate_id, expected_revision: ready.revision };
+  const noVerifier = harness.createService({ journal });
+  await assert.rejects(noVerifier.integrate(apply), /INDEPENDENT_APPLY_EVIDENCE_REQUIRED/);
+  job++;
+  await assert.rejects(service.integrate(apply), /INDEPENDENT_APPLY_EVIDENCE_REQUIRED/);
+  job--;
+  currentTime = now + 60000;
+  await assert.rejects(service.integrate(apply), /INDEPENDENT_APPLY_EVIDENCE_REQUIRED/);
+  assert.equal((await git(harness.repositoryRoot, ["rev-parse", "HEAD"])).stdout.trim(), harness.baseHead);
+  currentTime = now;
+  const integrated = await service.integrate(apply);
+  assert.equal(integrated.state, "integrated");
+  assert.equal((await git(harness.repositoryRoot, ["rev-parse", "HEAD"])).stdout.trim(), ready.integration_commit);
+  assert.equal((await journal.status()).chain_verified, true);
+});
+
+test("R16 independent adoption recovers producer exit before and after durable validation terminal", async () => {
+  for (const completed of [false, true]) {
+    const harness = await createHarness("r16-independent-interruption");
+    try {
+      const runtime = path.join(harness.root, "runtime");
+      const journalRoot = path.join(harness.root, "independent-interruption-journal");
+      const journal = createDevOperationJournalService({ storageRoot: journalRoot });
+      const source = await harness.createSource({ changes: { "independent-interruption.txt": "fixture\n" } });
+      const service = harness.createService({ journal });
+      const candidate = await service.preflight({ workstream_id: source.workstream_id, expected_workstream_revision: 1 });
+      const request = { integration_candidate_id: candidate.integration_candidate_id, expected_revision: candidate.revision };
+      const worker = `
+        import {generateKeyPairSync,sign} from 'node:crypto';
+        import {createDevIntegrationService} from ${JSON.stringify(pathToFileURL(path.resolve("server/src/mcp-development-integration-tools.mjs")).href)};
+        import {createIndependentCandidateEvidenceGate} from ${JSON.stringify(pathToFileURL(path.resolve("server/src/mcp-independent-verification-candidate.mjs")).href)};
+        import {createDevOperationJournalService} from ${JSON.stringify(pathToFileURL(path.resolve("server/src/mcp-development-journal-tools.mjs")).href)};
+        import {fingerprintMcpMutationRequest} from ${JSON.stringify(pathToFileURL(path.resolve("server/src/mcp-operation-reconciliation-context.mjs")).href)};
+        const journal=createDevOperationJournalService({storageRoot:${JSON.stringify(journalRoot)}});
+        const {publicKey,privateKey}=generateKeyPairSync('ed25519');
+        const rows=['mcp','mcp_tunnel'].map(suite=>({suite,platform:'linux',workflow_sha256:'b'.repeat(64)}));
+        const policy={repository:'owner/disposable',issuer:'fixture-issuer',max_age_ms:60000,suite_workflows:rows,additional_required:[]};
+        const gate=createIndependentCandidateEvidenceGate({policy,pinnedPublicKey:publicKey,readEnvelope:async candidate=>{
+          const now=Date.now();
+          const payload=JSON.stringify({schema_version:1,issuer:policy.issuer,repository:policy.repository,
+            candidate,issued_at_ms:now-1000,expires_at_ms:now+30000,
+            results:rows.map((row,i)=>({...row,commit:candidate.integration_commit,run_id:10,job_id:20+i,
+              run_attempt:1,completed_at_ms:now-2000,execution_ok:true,passed:true,timed_out:false,skipped:false,exit_code:0}))});
+          return {payload,signature:sign(null,Buffer.from(payload),privateKey).toString('base64url')};
+        }});
+        const service=createDevIntegrationService({
+          repositoryRoot:${JSON.stringify(harness.repositoryRoot)},
+          registryPath:${JSON.stringify(path.join(runtime,"integration_registry.json"))},
+          registryLockPath:${JSON.stringify(path.join(runtime,"integration_registry.lock"))},
+          applyLockPath:${JSON.stringify(path.join(runtime,"integration_apply.lock"))},
+          integrationRootPath:${JSON.stringify(path.join(harness.root,".writer-workbench-integrations"))},
+          workstreamReader:async()=> (${JSON.stringify(harness.workstreams.get(source.workstream_id))}),
+          workspaceReader:async()=> (${JSON.stringify({...harness.workspaces.get(source.workspace_id),
+            healthy:true,registered_branch_matches:true,registry_mapping_consistent:true,git_worktree_head:source.sourceHead})}),
+          independentEvidenceGate:gate,
+          validationRunner:async()=>{throw Error('no local tests');},
+          journal:{...journal,complete:async(...args)=>{
+            if(${completed}) await journal.complete(...args);
+            process.exit(77);
+          }},
+        });
+        const input=${JSON.stringify(request)};
+        await journal.executeReconciled({reconciliation_key:'independent-interruption-fixture',tool_name:'dev_workspace_validate_integration',
+          request_fingerprint_sha256:fingerprintMcpMutationRequest('dev_workspace_validate_integration',input)},async()=>service.validateIntegration(input));
+      `;
+      const child=spawn(process.execPath,["--input-type=module","-e",worker],{cwd:path.resolve("."),windowsHide:true,stdio:"pipe"});
+      let stderr="";
+      child.stderr.on("data",data=>{stderr+=data;});
+      const exit=await new Promise((resolve,reject)=>{child.once("error",reject);child.once("exit",resolve);});
+      assert.equal(exit,77,stderr);
+      const current=await service.getCandidate({integration_candidate_id:candidate.integration_candidate_id});
+      assert.equal(current.state,"validated");
+      assert.equal(current.integration_workspace.state,"removed");
+      const before=await journal.verify();
+      const start=before.events.find(e=>e.operation_type==="integration_validation"&&e.stage==="operation_started");
+      assert.equal(before.events.some(e=>e.operation_id===start.operation_id&&e.stage==="operation_completed"),completed);
+      const input={integration_candidate_id:current.integration_candidate_id,expected_revision:current.revision,
+        operation_id:start.operation_id,expected_start_hash:start.event_hash};
+      await assert.rejects(service.recoverInterruptedValidation({...input,expected_start_hash:"0".repeat(64)}),/BINDING_MISMATCH/);
+      const liveOwner=harness.createService({journal:{...journal,verify:async()=>{
+        const actual=await journal.verify();
+        return {...actual,events:actual.events.map(e=>e.stage==="operation_started"
+          ? {...e,diagnostic:{...e.diagnostic,owner_pid:process.pid}}:e)};
+      }}});
+      await assert.rejects(liveOwner.recoverInterruptedValidation(input),/OWNER_ACTIVE_OR_UNKNOWN/);
+      assert.equal((await journal.verify()).head.latest_event_hash,before.head.latest_event_hash);
+      const retired=await service.recoverInterruptedValidation(input);
+      assert.equal(retired.state,"failed");
+      assert.equal(retired.failure_reason.code,"INDEPENDENT_VALIDATION_INTERRUPTED");
+      assert.equal(retired.validation_report.passed,false);
+      assert.deepEqual(retired.validation_report.prior_validation_report,current.validation_report);
+      const after=await journal.verify();
+      assert.equal(after.dangling_operations.length,0);
+      assert.equal(after.active_operations.length,0);
+      assert.deepEqual(after.events.slice(0,before.events.length),before.events);
+      const recovered=after.events.slice(before.events.length);
+      assert.equal(recovered.length,completed?1:2);
+      assert.ok(recovered.every(e=>e.stage==="operation_recovered"&&e.result.passed===false&&e.result.independent_interruption===true));
+      assert.equal((await journal.status()).health,"healthy");
+      await service.recoverInterruptedValidation({...input,expected_revision:retired.revision});
+      assert.equal((await journal.verify()).head.latest_event_hash,after.head.latest_event_hash);
+      assert.equal((await git(harness.repositoryRoot,["rev-parse","HEAD"])).stdout.trim(),harness.baseHead);
+      const successor=await service.preflight({workstream_id:source.workstream_id,expected_workstream_revision:1});
+      assert.notEqual(successor.integration_candidate_id,retired.integration_candidate_id);
+      assert.equal(successor.state,"preflight_passed");
+    } finally { await harness.cleanup(); }
+  }
+});
