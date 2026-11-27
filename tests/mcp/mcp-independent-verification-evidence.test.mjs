@@ -514,3 +514,41 @@ test("host verifier service composes exact provider reads, independent outcomes 
   assert.equal(replay.published,true);assert.equal(replay.created,false);
   assert.deepEqual(await readFile(path.join(root,name)),original);
 });
+
+
+test("protected outcome source selects only exact attempt files and rejects aliases and oversized evidence",async t=>{
+  const {mkdtemp,realpath,writeFile,link,rm}=await import("node:fs/promises");
+  const {default:os}=await import("node:os");
+  const {default:path}=await import("node:path");
+  const {createIndependentOutcomeAttestationReader,independentOutcomeAttestationFilename}=
+    await import("../../server/src/mcp-independent-verification-receipt-store.mjs");
+  const root=await realpath(await mkdtemp(path.join(os.tmpdir(),"r16-supervisor-source-")));
+  t.after(()=>rm(root,{recursive:true,force:true}));
+  const binding={suite:"all",platform:"linux",workflow_sha256:"1".repeat(64),commit:"2".repeat(40),
+    run_id:111,job_id:222,run_attempt:2,completed_at_ms:1795755600000};
+  const name=independentOutcomeAttestationFilename(binding);
+  assert.match(name,/^outcome-[a-f0-9]{64}\.json$/u);
+  assert.equal(independentOutcomeAttestationFilename(Object.fromEntries(Object.entries(binding).reverse())),name);
+  assert.notEqual(independentOutcomeAttestationFilename({...binding,run_attempt:3}),name);
+  assert.throws(()=>independentOutcomeAttestationFilename({...binding,suite:"../escape"}),/INDEPENDENT_OUTCOME_BINDING_INVALID/);
+  let allowed=true;
+  const read=createIndependentOutcomeAttestationReader({root,assertProtectedDirectory:async({directory,role})=>
+    directory===root&&role==="outcome_consumer"&&allowed});
+  const file=path.join(root,name);
+  const envelope={payload:"untrusted-until-signature-review",signature:"test"};
+  await assert.rejects(read(binding),{code:"ENOENT"});
+  await writeFile(file,JSON.stringify(envelope),{flag:"wx"});
+  assert.deepEqual(await read(binding),envelope);
+  await assert.rejects(read({...binding,run_attempt:3}),{code:"ENOENT"});
+  allowed=false;
+  await assert.rejects(read(binding),{code:"INDEPENDENT_RECEIPT_DIRECTORY_UNVERIFIED"});
+  allowed=true;
+  const alias=path.join(root,"alias.json");
+  await link(file,alias);
+  await assert.rejects(read(binding),{code:"INDEPENDENT_RECEIPT_FILE_UNVERIFIED"});
+  await rm(alias);
+  await writeFile(file,JSON.stringify({payload:"x".repeat(101*1024),signature:"test"}));
+  await assert.rejects(read(binding),{code:"INDEPENDENT_RECEIPT_FILE_UNVERIFIED"});
+  await writeFile(file,JSON.stringify({...envelope,extra:"unexpected"}));
+  await assert.rejects(read(binding),{code:"INDEPENDENT_RECEIPT_FORMAT_INVALID"});
+});
