@@ -1,6 +1,6 @@
 import { hostname } from "node:os";
 import { createExecutionIntent } from "./pi-execution-contract.mjs";
-import { appendDevExecutionProjection, readDevExecutionProjections, recoverDevExecutionPublication } from "./mcp-development-journal-tools.mjs";
+import { appendDevExecutionProjection, readDevExecutionProjections, recoverDevExecutionPublication, transitionDevExecutionProjection } from "./mcp-development-journal-tools.mjs";
 import { validatePiExecutionHistory } from "./pi-execution-state-store.mjs";
 import { reliableFailure, reliableJson, stableJson, initialReliableState, validateRetryPolicy,
   makeReliableProjection, reduceReliableProjection } from "./pi-reliable-execution-state.mjs";
@@ -36,7 +36,7 @@ function output(event,events) {
 // Host-only, opt-in. Reuses the existing journal and append-lock CAS.
 export function createPiReliableExecutionStore({journal={
   readExecutionProjections:readDevExecutionProjections,appendExecutionProjection:appendDevExecutionProjection,
-  recoverExecutionPublication:recoverDevExecutionPublication},
+  recoverExecutionPublication:recoverDevExecutionPublication,transitionExecutionProjection:transitionDevExecutionProjection},
   clock=()=>new Date().toISOString(),isOwnerAlive=localOwnerAlive,admissionBinding,productionBinding,admissionGuard,isolationAuthority,recoverOnReadFailure=true}={}) {
   if(typeof journal.readExecutionProjections!=="function"||typeof journal.appendExecutionProjection!=="function"
     ||typeof clock!=="function"||typeof isOwnerAlive!=="function"||typeof recoverOnReadFailure!=="boolean")reliableFailure("INVALID_STATE_STORE_BINDING");
@@ -76,8 +76,8 @@ export function createPiReliableExecutionStore({journal={
       action_type:"operation_created",intent,state,runtime:{retry_policy:policy,owner:null,active_call:null,retry_at:null,...(intent.bootstrap?{lifecycle_binding:null}:{})},
       command:{type:"operation_created",...(admissionBinding?{canary_binding:admissionBinding}:{}),...(productionBinding?{production_binding:productionBinding}:{})}}),0,events);
   }
-  async function current(args) {
-    const h=await history(),event=h.latest.get(args.operation_id);
+  function currentFromHistory(args,h) {
+    const event=h.latest.get(args.operation_id);
     if(!event)reliableFailure("UNKNOWN_PI_OPERATION");
     contextCheck(event.execution_projection,args.context);
     if(event.execution_projection.schema_version!==2)reliableFailure("LEGACY_OPERATION_NOT_MIGRATED");
@@ -85,8 +85,11 @@ export function createPiReliableExecutionStore({journal={
       reliableFailure("STATE_REVISION_CONFLICT");
     return {event,...h};
   }
-  async function command(args) {
-    const {event,events}=await current(args),prior=event.execution_projection;
+  async function current(args) {
+    return currentFromHistory(args,await history());
+  }
+  async function deriveCommand(args,{event,events}) {
+    const prior=event.execution_projection;
     if(args.command.type==="execution_isolated")reliableFailure("ISOLATION_AUTHORITY_REQUIRED");
     if(prior.runtime.isolation)reliableFailure("OPERATION_ISOLATED");
     const created=events.find(e=>e.execution_projection.state.operation_id===prior.state.operation_id&&e.execution_projection.revision===1);
@@ -98,7 +101,22 @@ export function createPiReliableExecutionStore({journal={
       const alive=await isOwnerAlive(prior.runtime.owner);
       if(alive!==false)reliableFailure(alive===true?"OWNER_ACTIVE":"OWNER_LIVENESS_UNCERTAIN");
     }
-    return publish(reduceReliableProjection(prior,args.command,clock()),prior.revision,events);
+    return reduceReliableProjection(prior,args.command,clock());
+  }
+  async function command(args) {
+    if(typeof journal.transitionExecutionProjection!=="function") {
+      const snapshot=await current(args);
+      return publish(await deriveCommand(args,snapshot),snapshot.event.execution_projection.revision,snapshot.events);
+    }
+    if(!Number.isSafeInteger(args.expected_revision)||args.expected_revision<1)reliableFailure("STATE_REVISION_REQUIRED");
+    let observedEvents,derivedHash;
+    const published=await journal.transitionExecutionProjection(async snapshot=>{
+      const next=await deriveCommand(args,currentFromHistory(args,snapshot));
+      observedEvents=snapshot.events;derivedHash=next.projection_hash;
+      return next;
+    },{expected_revision:args.expected_revision,validateHistory:validatePiExecutionHistory,recoverOnReadFailure});
+    if(!observedEvents||published.execution_projection?.projection_hash!==derivedHash)reliableFailure("CORRUPT_STATE");
+    return output(published,[...observedEvents,published]);
   }
   // Host-only authority: not an intent action, worker command or MCP metadata.
   // The caller must independently authorize revocation and prove quiescence.
