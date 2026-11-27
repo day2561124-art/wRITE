@@ -12,7 +12,9 @@ const stages=new Set(['http.body_read','http.response_finish','transport.round_t
   'mcp.dispatch','runtime.readiness','journal.readiness','checkpoint.readiness','transaction.readiness',
   'pi.prepare','pi.admission','pi.state_transition','pi.capability_dispatch','pi.reconciliation',
   'journal.projection_read','journal.projection_append','journal.route_read','checkpoint.lock_wait',
-  'capability.execution','powershell.process','mcp.serialize_write']);
+  'capability.execution','powershell.process','mcp.serialize_write',
+  'audit.snapshot_before','audit.intent_write','audit.journal_guard','audit.snapshot_after','audit.commit',
+  'pi.ingress_binding','journal.full_verify']);
 export const traceId=value=>typeof value==='string'&&uuid.test(value)?value:randomUUID();
 export function withTraceId(message,id=traceId()) {
   if(!message||typeof message!=='object'||Array.isArray(message))return message;
