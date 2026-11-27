@@ -68,6 +68,9 @@ async function fixture(t) {
           assert.equal(await readFile(file, "utf8"), args.oldText);
           await writeFile(file, args.newText);
         }
+        if (name === "dev_git_commit") return {
+          execution_ok: true, committed: true, commit_created: true, exit_code: 0, commit: "d".repeat(40),
+        };
         if (name !== "dev_run_tests") return { ok: true };
         const passed = !testTimeout && (await readFile(file, "utf8")) === "fixed";
         const result = { suite: args.suite, passed, execution_ok: true, timed_out: testTimeout,
