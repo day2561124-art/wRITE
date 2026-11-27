@@ -8,7 +8,7 @@ import {createPiReliableExecutionEngine} from "./pi-reliable-execution-engine.mj
 import {createPiReliableMcpAdapter} from "./pi-mcp-reliable-adapter.mjs";
 import {validatePiExecutionHistory} from "./pi-execution-state-store.mjs";
 import {createPiProductionRouteStore,validatePiProductionRouteHistory} from "./pi-production-execution-route.mjs";
-import {readDevExecutionProjections,appendDevExecutionProjection,recoverDevExecutionPublication,verifyDevJournal,
+import {readDevExecutionProjections,appendDevExecutionProjection,transitionDevExecutionProjection,recoverDevExecutionPublication,verifyDevJournal,
  beginDevJournalOperation,completeDevJournalOperation} from "./mcp-development-journal-tools.mjs";
 import {reliableFailure,stableJson} from "./pi-reliable-execution-state.mjs";
 const managed=new AsyncLocalStorage();
@@ -40,6 +40,7 @@ export async function guardPiDirectExecution({route,tool,mutation=false,params={
  await auditFallback({tool,decision_owner:"GPT",...p});
 }
 const defaultJournal={readExecutionProjections:readDevExecutionProjections,appendExecutionProjection:appendDevExecutionProjection,
+ transitionExecutionProjection:transitionDevExecutionProjection,
  recoverExecutionPublication:recoverDevExecutionPublication,verify:verifyDevJournal,begin:beginDevJournalOperation,complete:completeDevJournalOperation};
 const workerFaultType = "pi_worker_deferral";
 const workerRetryLimit = 3;
@@ -95,7 +96,9 @@ export function createPiProductionExecutionController({journal=defaultJournal,ro
   route??=createPiProductionRouteStore();
   journal={...boundJournal,
   readExecutionProjections:(...args)=>traceSpan("journal.projection_read",()=>boundJournal.readExecutionProjections(...args)),
-  appendExecutionProjection:(...args)=>traceSpan("journal.projection_append",()=>boundJournal.appendExecutionProjection(...args))};
+  appendExecutionProjection:(...args)=>traceSpan("journal.projection_append",()=>boundJournal.appendExecutionProjection(...args)),
+  ...(typeof boundJournal.transitionExecutionProjection==="function"?{
+   transitionExecutionProjection:(...args)=>traceSpan("journal.projection_append",()=>boundJournal.transitionExecutionProjection(...args))}:{})};
  if(!transport||typeof transport.callTool!=="function"||typeof transport.resolveWorkspace!=="function")reliableFailure("INVALID_PRODUCTION_HOST_BINDING");
  async function unifiedSnapshot({recoverOnReadFailure=false}={}){
   let verified;
