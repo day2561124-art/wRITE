@@ -568,7 +568,12 @@ test("R16 existing AppContainer executes real verification manifest regression",
     assert.equal(evidence.timed_out, false);
     assert.equal(evidence.exit_code, failFixture ? 1 : 0);
     assert.match(evidence.stdout, /fixed AppContainer development evidence is complete and fail-closed/u);
-    assert.match(evidence.stdout, failFixture ? /# fail 1\b/u : /# fail 0\b/u);
+    // Node 24 defaults to the spec reporter in this non-TTY fixture;
+    // accept the explicit counts in either supported reporter format.
+    assert.match(evidence.stdout, failFixture ? /(?:#|ℹ) fail 1\b/u : /(?:#|ℹ) fail 0\b/u);
+    assert.match(evidence.stdout, /(?:#|ℹ) pass 11\b/u);
+    assert.match(evidence.stdout, failFixture ? /(?:#|ℹ) tests 12\b/u : /(?:#|ℹ) tests 11\b/u);
+    assert.match(evidence.stdout, /(?:#|ℹ) skipped 0\b/u);
     if (failFixture) assert.match(evidence.stdout, /R16 deliberate failure/u);
     for (const entry of manifest)
       assert.equal(createHash("sha256").update(await readFile(path.join(f.context.root, entry.path))).digest("hex"), entry.sha256);
