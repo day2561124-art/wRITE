@@ -109,13 +109,15 @@ export function createIndependentReceiptPublisher({ root, assertProtectedDirecto
     if (bytes.length > maxBytes) fail("INDEPENDENT_RECEIPT_FORMAT_INVALID");
     const filename = path.join(store.directory, name);
     const temporary = path.join(store.directory, "." + name + "." + randomUUID() + ".tmp");
-    const handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
-    try {
-      await handle.writeFile(bytes);
-      await handle.sync();
-    } finally { await handle.close(); }
+    // The protected directory must grant only the intended consumer group
+    // read access (or the equivalent inherited Windows ACL).
+    const handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o640);
     let created = false;
     try {
+      try {
+        await handle.writeFile(bytes);
+        await handle.sync();
+      } finally { await handle.close(); }
       const latest = await verify();
       if (latest.receipt_sha256 !== proof.receipt_sha256 || !sameStat(directoryStat, await store.check()))
         fail("INDEPENDENT_RECEIPT_CONTEXT_CHANGED");
