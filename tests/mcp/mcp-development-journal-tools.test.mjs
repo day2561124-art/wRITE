@@ -43,6 +43,7 @@ import {
 } from "../../server/src/mcp-development-write-tools.mjs";
 import { dev_git_diff_check } from "../../server/src/mcp-development-readonly-tools.mjs";
 import { createDevTestRunner } from "../../server/src/mcp-development-test-tools.mjs";
+import {createTraceBuffer,requestTraceChannel,runRequestTrace,traceId} from "../../server/src/mcp-request-tracing.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const execFileAsync = promisify(execFile);
@@ -384,6 +385,30 @@ await expectCorrupt("unexpected-event-entry", async (storageRoot) => {
     await assert.rejects(service.verify(), /immutable prefix/u);
     assert.equal(timings.at(-1).completed, false);
   } finally { await clean(fixture); }
+}
+
+// Exercise the real Journal service rather than only the timing vocabulary.
+{
+  const {fixture} = await completedFixture("physical-trace-span");
+  const buffer=createTraceBuffer(),observe=row=>buffer.accept(row),id=traceId();
+  const service=createDevOperationJournalService({storageRoot:fixture.storageRoot});
+  requestTraceChannel.subscribe(observe);
+  try{
+    await runRequestTrace(id,async()=>{
+      const [a,b]=await Promise.all([service.verify(),service.verify()]);
+      assert.deepEqual(a,b);
+      assert.equal(a.events.length,2);
+      await service.verify();
+      const first=await readEvent(fixture.storageRoot,0);
+      await writeFile(path.join(fixture.storageRoot,"events",first.file),"invalid JSON\n");
+      await assert.rejects(service.verify(),/immutable prefix/u);
+    });
+    const rows=buffer.snapshot().records.filter(row=>row.stage==="journal.full_verify");
+    assert.equal(rows.length,3,"coalesced callers count one physical scan, later reads reverify");
+    assert.deepEqual(rows.map(row=>row.ok),[true,true,false]);
+    assert(rows.every(row=>row.correlation_id===id&&row.duration_ms>=0));
+    assert(rows.every(row=>Object.keys(row).sort().join(",")==="correlation_id,duration_ms,ok,stage"));
+  }finally{requestTraceChannel.unsubscribe(observe);await clean(fixture);}
 }
 
 // Exercise the standalone synthetic generator in ordinary regression runs.
