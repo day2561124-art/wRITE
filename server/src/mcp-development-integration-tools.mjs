@@ -7,7 +7,9 @@ import {
   open,
   readFile,
   readlink,
+  realpath,
   readdir,
+  stat,
   rmdir,
   rename,
   unlink,
@@ -336,6 +338,46 @@ function transitionCandidate(candidate, nextState) {
 
 function relativeIntegrationPath(candidateId, integrationRoot, repositoryRoot) {
   return path.relative(repositoryRoot, path.join(integrationRoot, candidateId)).replaceAll(path.sep, "/");
+}
+
+// Git for Windows can report the expanded or differently cased spelling
+// of a temporary directory. Match only the exact generated candidate leaf
+// under the same physical parent; never accept a basename or case fold alone.
+async function findIntegrationWorktree(gitRunner, repoRoot, expectedPath) {
+  const { stdout } = await gitRunner(["worktree", "list", "--porcelain", "-z"], { cwd: repoRoot });
+  if (typeof stdout !== "string" || !stdout.endsWith("\0\0"))
+    throw new Error("INTEGRATION_WORKTREE_REGISTRATION_INVALID");
+  const matches = [];
+  const expected = path.normalize(expectedPath);
+  let expectedParent;
+  for (const block of stdout.slice(0, -2).split("\0\0")) {
+    const lines = block.split("\0");
+    if (!lines[0]?.startsWith("worktree "))
+      throw new Error("INTEGRATION_WORKTREE_REGISTRATION_INVALID");
+    const registered = lines[0].slice("worktree ".length);
+    if (!path.isAbsolute(registered))
+      throw new Error("INTEGRATION_WORKTREE_REGISTRATION_INVALID");
+    if (path.normalize(registered) === expected) { matches.push(lines); continue; }
+    if (process.platform !== "win32" || path.basename(registered) !== path.basename(expected)) continue;
+    // Both parent paths must identify the same directory. The exact leaf
+    // and detached HEAD / lock / dirtiness gates still apply before cleanup.
+    expectedParent ??= await realpath(path.dirname(expected)).catch(error => {
+      if (error?.code === "ENOENT") return null;
+      throw error;
+    });
+    if (!expectedParent) continue;
+    const actualParent = await realpath(path.dirname(registered)).catch(error => {
+      if (error?.code === "ENOENT") return null;
+      throw error;
+    });
+    if (!actualParent) continue;
+    if (actualParent === expectedParent) { matches.push(lines); continue; }
+    const [a, b] = await Promise.all([stat(actualParent, { bigint: true }), stat(expectedParent, { bigint: true })]);
+    if (a.isDirectory() && b.isDirectory() && a.ino !== 0n && a.dev === b.dev && a.ino === b.ino)
+      matches.push(lines);
+  }
+  if (matches.length > 1) throw new Error("INTEGRATION_WORKTREE_REGISTRATION_AMBIGUOUS");
+  return matches[0] ?? null;
 }
 
 async function defaultGitRunner(args, {
@@ -1376,8 +1418,7 @@ export function createDevIntegrationService({
       if (error?.code === "ENOENT") return null;
       throw error;
     });
-    const list = (await gitRunner(["worktree", "list", "--porcelain"], { cwd: repoRoot })).stdout;
-    const block = list.split(/\r?\n\r?\n/u).find(b => b.split(/\r?\n/u)[0] === `worktree ${integrationPath.replaceAll("\\", "/")}`);
+    const block = await findIntegrationWorktree(gitRunner, repoRoot, integrationPath);
     if (info) {
       // No force or arbitrary removal: only our registered, detached, clean
       // worktree with the exact HEAD and ownership lock may be cleaned.
@@ -1385,7 +1426,7 @@ export function createDevIntegrationService({
         || candidate.integration_workspace.state === "removed"
         || !["materialized", "testing", "failed"].includes(candidate.state))
         throw new Error("INDEPENDENT_RECOVERY_WORKTREE_OWNERSHIP_MISMATCH");
-      const lines = block.split(/\r?\n/u);
+      const lines = block;
       if (!lines.includes(`HEAD ${candidate.integration_commit}`) || !lines.includes("detached")
         || !lines.includes(`locked Writer Workbench integration ${id}`))
         throw new Error("INDEPENDENT_RECOVERY_WORKTREE_OWNERSHIP_MISMATCH");
@@ -1397,8 +1438,8 @@ export function createDevIntegrationService({
         if (error?.code === "ENOENT") return null;
         throw error;
       });
-      const registrations = (await gitRunner(["worktree", "list", "--porcelain"], { cwd: repoRoot })).stdout;
-      if (after || registrations.split(/\r?\n/u).includes(`worktree ${integrationPath.replaceAll("\\", "/")}`))
+      const registration = await findIntegrationWorktree(gitRunner, repoRoot, integrationPath);
+      if (after || registration)
         throw new Error("INDEPENDENT_RECOVERY_CLEANUP_PENDING");
     } else if (block) throw new Error("INDEPENDENT_RECOVERY_WORKTREE_REGISTERED");
     if (!priorFailure) candidate = await updateCandidate(id, candidate.revision, record => {
@@ -1564,17 +1605,16 @@ export function createDevIntegrationService({
       let unregisteredResidue = false;
       if (finalizingFailed && exists) throw new Error("VALIDATION_RECOVERY_COMPLETED_WORKTREE_PRESENT");
       if (finalizingFailed) {
-        const list = (await gitRunner(["worktree", "list", "--porcelain"], { cwd: repoRoot })).stdout;
-        if (list.split(/\r?\n/u).includes(`worktree ${integrationPath.replaceAll("\\", "/")}`)) {
+        const registration = await findIntegrationWorktree(gitRunner, repoRoot, integrationPath);
+        if (registration) {
           throw new Error("VALIDATION_RECOVERY_COMPLETED_WORKTREE_REGISTERED");
         }
       }
       if (exists) {
-        const list = (await gitRunner(["worktree", "list", "--porcelain"], { cwd: repoRoot })).stdout;
-        const block = list.split(/\r?\n\r?\n/u).find(b => b.split(/\r?\n/u)[0] === `worktree ${integrationPath.replaceAll("\\", "/")}`);
+        const block = await findIntegrationWorktree(gitRunner, repoRoot, integrationPath);
         unregisteredResidue = !block && recovering;
         if (!unregisteredResidue) {
-        const lines = block?.split(/\r?\n/u) ?? [];
+        const lines = block ?? [];
         const lockLine = lines.find(line => line.startsWith("locked"));
         if (!lines.includes(`HEAD ${candidate.integration_commit}`) || !lines.includes("detached")
           || (lockLine !== `locked Writer Workbench integration ${candidateId}` && !(recovering && !lockLine))) {
