@@ -1028,4 +1028,71 @@ test("R16 real candidate preflight survives a lost response with exact Journal e
   assert.equal(sends, 1);
   assert.equal((await reopened.status()).chain_verified, true);
   assert.equal((await git(harness.repositoryRoot, ["rev-parse", "HEAD"])).stdout.trim(), harness.baseHead);
+
+  // Exercise actual candidate materialization, diff checks, cleanup and
+  // persisted validation receipt. Suite results below are injected fixture
+  // observations, NOT production or full isolated test-suite execution.
+  const validationService = harness.createService({ journal: reopened,
+    validationRunner: async (integrationPath, candidate) => {
+      const observedHead = (await git(integrationPath, ["rev-parse", "HEAD"])).stdout.trim();
+      assert.equal(observedHead, source.sourceHead);
+      const results = [];
+      for (const suite of ["mcp", "mcp_tunnel"]) {
+        const op = await reopened.begin({ operation_type: "test_evidence", tool_name: "dev_run_tests",
+          workstream_id: source.workstream_id, workspace_id: source.workspace_id,
+          result: { suite, head: observedHead, fixture: true } });
+        await reopened.complete(op.operation_id, { result: { suite, head: observedHead,
+          passed: true, execution_ok: true, timed_out: false, fixture: true } });
+        results.push({ suite, operation_id: op.operation_id, head: observedHead,
+          passed: true, execution_ok: true, timed_out: false, exit_code: 0, duration_ms: 1 });
+      }
+      return results;
+    },
+  });
+  const validateInput = { integration_candidate_id: facts.integration_candidate_id, expected_revision: persisted.revision };
+  const validationIntent = { ...intent, intent_id: "r16-real-validation-fixture",
+    goal: "Verify disposable validation receipt with injected suite observations",
+    requested_actions: [{ step_id: "validate", capability: "git.integration_validate", input: validateInput,
+      depends_on: [], idempotency_key: "r16-real-validation-key" }],
+    mutation_plan: [{ step_id: "validate", target: facts.integration_candidate_id,
+      expected_change: "Validate exact disposable candidate", input_sha256: hashExecutionInput(validateInput) }] };
+  const rejected = makeAdapter(async () => assert.fail("protected validation must not dispatch"), reopened);
+  await assert.rejects(rejected.execute(validationIntent, "validate"), { code: "PERMISSION_DENIED" });
+  const allowedVerifier = createPiLifecycleScopeVerifier({
+    getWorkstream: async ({ workstream_id }) => harness.workstreams.get(workstream_id),
+    getCheckpoint: async () => null, getOperation: args => reopened.getOperation(args),
+    getIntegrationCandidate: args => validationService.getCandidate(args), validationAllowed: async () => true,
+  });
+  const validator = createPiReliableMcpAdapter({
+    resolveWorkspace: async () => null, verifyScope: allowedVerifier, queryOperation: args => reopened.getOperation(args),
+    callTool: async request => {
+      sends++;
+      assert.equal(request.name, "dev_workspace_validate_integration");
+      const outcome = await reopened.executeReconciled({
+        reconciliation_key: request._meta.reconciliation_key,
+        request_fingerprint_sha256: hashExecutionInput({ tool_name: request.name, arguments: request.arguments }),
+        tool_name: request.name,
+        resolve_workspace_scope: async () => ({ workspace_id: source.workspace_id, workstream_id: source.workstream_id }),
+      }, async () => ({ content: [{ type: "text", text: JSON.stringify(await validationService.validateIntegration(request.arguments)) }] }));
+      assert.equal(outcome.reconciled, false);
+      throw Object.assign(new Error("fixture loses response after candidate validation"), { code: "TIMEOUT" });
+    },
+  });
+  await assert.rejects(validator.execute(validationIntent, "validate"), { code: "TIMEOUT" });
+  const cold = createDevOperationJournalService({ storageRoot: journalRoot });
+  const recovered = await makeAdapter(async () => assert.fail("must not replay validation"), cold).reconcile(validationIntent, "validate");
+  assert.equal(recovered.verdict, "completed");
+  const verified = recovered.receipt.evidence.original_result;
+  assert.equal(verified.integration_candidate_id, facts.integration_candidate_id);
+  assert.equal(verified.integration_commit, source.sourceHead);
+  assert.equal(verified.candidate_validation_passed, true);
+  assert.equal(verified.candidate_cleanup_pending, false);
+  const ready = await validationService.getCandidate({ integration_candidate_id: facts.integration_candidate_id });
+  assert.equal(ready.state, "ready");
+  assert.equal(ready.revision, verified.revision);
+  assert.equal(ready.integration_workspace.state, "removed");
+  assert.equal((await cold.status()).chain_verified, true);
+  assert.equal((await cold.status()).active_operation_count, 0);
+  assert.equal(sends, 2);
+  assert.equal((await git(harness.repositoryRoot, ["rev-parse", "HEAD"])).stdout.trim(), harness.baseHead);
 });
