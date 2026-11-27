@@ -9,6 +9,7 @@ on:
       - 'tests/mcp/mcp-independent-verification-*.test.mjs'
       - 'server/src/mcp-development-integration-tools.mjs'
       - 'tests/mcp/mcp-development-integration-tools.test.mjs'
+      - 'tests/mcp/pi-workspace-appcontainer.test.mjs'
       - '.github/workflows/r16-independent-verification.yml'
 permissions:
   contents: read
@@ -40,3 +41,7 @@ jobs:
       - run: node --test tests/mcp/mcp-independent-verification-evidence.test.mjs tests/mcp/mcp-independent-verification-outcome.test.mjs tests/mcp/mcp-independent-verification-azure-batch-probe.test.mjs
       - run: node --test --test-name-pattern="R16 independent (candidate evidence|adoption)" tests/mcp/mcp-development-integration-tools.test.mjs
       - run: node --test tests/mcp/pi-integration-preflight-resolution.test.mjs
+
+      - name: Real additional regression in existing Windows AppContainer
+        if: runner.os == 'Windows'
+        run: node --test --test-name-pattern="R16 existing AppContainer" tests/mcp/pi-workspace-appcontainer.test.mjs
