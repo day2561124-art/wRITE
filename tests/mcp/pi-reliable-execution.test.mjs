@@ -384,7 +384,8 @@ test("write then verification then commit follows GPT order and declared PASS fa
     depends_on:["verify"],idempotency_key:"commit-key-001"};
   const source=intent([write,verify,commit],{verification:{focused:["verify"],affected:[],full:[]},
     permissions:{...intent().permissions,commit:true}});
-  const r=await engine(store,adapter(async p=>{names.push(p.name);return {ok:true,passed:true};})).execute(source);
+  const r=await engine(store,adapter(async p=>{names.push(p.name);
+    return p.name==="dev_git_commit"?{execution_ok:true,committed:true,commit_created:true,exit_code:0,commit:"b".repeat(40)}:{ok:true,passed:true};})).execute(source);
   assert.deepEqual(names,["dev_create_file","dev_run_tests","dev_git_commit"]);assert.equal(r.state.status,"COMPLETED");
   assert.equal(r.state.verification_state.focused,"passed");assert.equal(r.state.checkpoint.at_revision,r.revision-1);
   assert(Object.isFrozen(r.intent.requested_actions));assert(Object.isFrozen(r.receipts));
@@ -496,4 +497,33 @@ for(const variant of ['duplicate_child','wrong_workspace','wrong_workstream','wr
  }
  await f.journal.complete(parent.operation_id,{result:{outcome:'intended_effect_observed'}});const before=(await f.journal.verify()).events.map(e=>e.event_hash);
  const op=await f.journal.getOperation({operation_id:parent.operation_id});assert.equal(op.original_result.passed,undefined);assert.deepEqual((await f.journal.verify()).events.map(e=>e.event_hash),before);
+});
+
+test("new Git commit results require a verified commit, not merely a successful process launch",async t=>{
+  const action={step_id:"commit",capability:"git.commit",input:{message:"GPT commit",paths:[write.input.path],expectedHead:"a".repeat(40)},depends_on:[],idempotency_key:"commit-outcome-proof-001"};
+  const source=intent([action],{permissions:{...intent().permissions,commit:true}});
+  for(const fact of [
+    {execution_ok:true,committed:false,commit_created:false,stage_completed:true,exit_code:128},
+    {ok:true},
+    {execution_ok:true,committed:true,commit_created:true,exit_code:0},
+    {execution_ok:true,committed:true,commit_created:true,exit_code:128,commit:"b".repeat(40)},
+  ]){
+    const {store}=await fixture(t);let sends=0;
+    const a=adapter(async()=>{sends++;return {content:[{type:"text",text:JSON.stringify(fact)}]};});
+    const result=await engine(store,a).execute(source);
+    assert.equal(result.state.status,"DECISION_REQUIRED");
+    assert.equal(result.state.last_error.code,"TOOL_REPORTED_FAILURE");
+    assert.deepEqual(result.state.completed_steps,[]);
+    assert.equal(sends,1);
+    assert.equal((await engine(store,a).execute(source)).state.status,"DECISION_REQUIRED");
+    assert.equal(sends,1);
+  }
+});
+test("Git reconciliation cannot certify a completed operation without positive commit evidence",async()=>{
+  const action={step_id:"commit",capability:"git.commit",input:{message:"GPT commit",paths:[write.input.path],expectedHead:"a".repeat(40)},depends_on:[],idempotency_key:"commit-outcome-proof-002"};
+  const source=intent([action],{permissions:{...intent().permissions,commit:true}});
+  for(const [fact,verdict] of [[{committed:false,exit_code:128},"unknown"],[{},"unknown"],[{committed:true,commit:"b".repeat(40)},"completed"]]){
+    const a=adapter(async()=>assert.fail("reconcile must not dispatch"),async p=>({...p,reconciliation_state:"completed",operation_id:"dev_operation_"+"b".repeat(32),original_result:fact}));
+    assert.equal((await a.reconcile(source,"commit")).verdict,verdict);
+  }
 });

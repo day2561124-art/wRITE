@@ -49,8 +49,9 @@ async function fixture(t) {
         return { ok: true };
       },
     } });
-  const adapt = (request, auth = authentication) => adaptPiEngineeringIngress(request, {
+  const adapt = (request, auth = authentication, approvalSource) => adaptPiEngineeringIngress(request, {
     authentication: auth, resolveWorkspace, standingApprovalSource: reader().bind,
+    automaticStandingApprovalSource: reader().bindIfApplicable, approvalSource,
     requireTaskAuthorization: true,
   });
   const approve = async (input = plan()) => {
@@ -218,4 +219,54 @@ test("permanence requires explicit null; malformed expiry and overlapping finite
   await assert.rejects(f.reader().authorize({ ...(await f.adapt(source("old-record"))),
     standing_authorization: { policy_id: permanent.policy_id, policy_sha256: permanent.policy_sha256, principal } }),
     { code: "PERMISSION_DENIED" });
+});
+
+test("unified autonomous ingress binds an existing policy without caller authorization IDs", async t => {
+  const f = await fixture(t);
+  const auto = (id, ws = first, overrides = {}) => source(id, ws, { request_kind: "autonomous_engineering", ...overrides });
+  const policy = await f.approve({ ...plan(), expires_at_ms: null });
+  const neverFallback = () => assert.fail("standing policy must not use legacy binding");
+  const bound = await f.adapt(auto("unified"), authentication, neverFallback);
+  const legacy = await f.adapt(source("unified"));
+  assert.deepEqual(bound, legacy);
+  assert.equal(bound.task_authorization_id, undefined);
+  assert.equal(bound.standing_authorization.policy_id, policy.policy_id);
+  await f.controller().submit(bound, { authentication });
+  assert.equal((await f.controller().execute(bound)).state.status, "COMPLETED");
+  assert.equal(f.calls.length, 1);
+  // An existing policy is not silently bypassed by requesting additional capabilities.
+  await assert.rejects(f.adapt(auto("extra-capability", first, {
+    requested_actions: [{ step_id: "verify", capability: "verification.focused", input: { suite: "mcp_hermetic_core" } }],
+  }), authentication, neverFallback), { code: "PERMISSION_DENIED" });
+  await assert.rejects(f.adapt(auto("forged", first, { standing_authorization: bound.standing_authorization }),
+    authentication, neverFallback), { code: "PERMISSION_DENIED" });
+  await assert.rejects(f.adapt(auto("local"), { ...authentication, local: true }, neverFallback),
+    { code: "PERMISSION_DENIED" });
+  await f.publisher.revoke(policy.policy_id);
+  await assert.rejects(f.adapt(auto("revoked"), authentication, neverFallback), { code: "PERMISSION_DENIED" });
+});
+
+test("automatic legacy binding is consulted only for verified absence of standing history", async t => {
+  const f = await fixture(t);
+  const auto = (id, ws = first) => source(id, ws, { request_kind: "autonomous_engineering" });
+  const seen = [];
+  const oldBinding = async (request, identity) => {
+    seen.push({ request, identity });
+    // Exercise selection, not authorization. An independent binding must still approve.
+    throw Object.assign(new Error("LEGACY_BINDING_NOT_APPROVED"), { code: "LEGACY_BINDING_NOT_APPROVED" });
+  };
+  await assert.rejects(f.adapt(auto("no-history"), authentication, oldBinding), { code: "LEGACY_BINDING_NOT_APPROVED" });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].identity.authenticatedPrincipal, principal);
+  const policy = await f.approve();
+  await assert.rejects(f.adapt(auto("unrelated", unrelated), authentication, oldBinding), { code: "LEGACY_BINDING_NOT_APPROVED" });
+  assert.equal(seen.length, 2);
+  f.setTime(1000);
+  await assert.rejects(f.adapt(auto("expired"), authentication, oldBinding), { code: "PERMISSION_DENIED" });
+  assert.equal(seen.length, 2);
+  const file = path.join(f.grants, policy.policy_id + ".approved.json");
+  await writeFile(file, "invalid JSON");
+  await assert.rejects(f.adapt(auto("corrupt-store", unrelated), authentication, oldBinding), { code: "PERMISSION_DENIED" });
+  assert.equal(seen.length, 2);
+  assert.deepEqual(f.calls, []);
 });

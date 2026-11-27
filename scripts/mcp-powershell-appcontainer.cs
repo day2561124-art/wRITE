@@ -2,6 +2,7 @@ using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Principal;
@@ -77,6 +78,91 @@ internal static class PowerShellAppContainer {
     [DllImport("kernel32.dll")] private static extern bool TerminateProcess(IntPtr handle, uint exitCode);
     [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
 
+    // Session 0 requires a dedicated station lease; absence fails closed.
+    private sealed class StationLease : IDisposable {
+        private NamedPipeClientStream pipe;
+        internal string Id { get; private set; }
+        private byte[] ReadExact(int count) {
+            byte[] data = new byte[count];
+            var deadline = Stopwatch.StartNew();
+            int offset = 0;
+            while (offset < count) {
+                var pending = pipe.BeginRead(data, offset, count-offset, null, null);
+                int remaining = 5000-(int)deadline.ElapsedMilliseconds;
+                int size;
+                using (var wait = pending.AsyncWaitHandle) {
+                    if (remaining<=0 || !wait.WaitOne(remaining))
+                        throw new TimeoutException("Station lease response timeout");
+                    size = pipe.EndRead(pending);
+                }
+                if (size==0) throw new EndOfStreamException("Station lease ended");
+                offset += size;
+            }
+            return data;
+        }
+        // Starting this fixed, operator-registered resource-only task does not
+        // authorize engineering or permit caller-supplied elevated commands.
+        private static void RequestProviderStart() {
+            string exe = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), @"System32\schtasks.exe");
+            var info = new ProcessStartInfo(exe, @"/Run /TN \WriterWorkbench-NexaStationLeaseV1") {
+                UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
+            };
+            using (var request = Process.Start(info)) {
+                if (request == null) throw new InvalidOperationException("Station provider start unavailable");
+                request.BeginOutputReadLine(); request.BeginErrorReadLine();
+                if (!request.WaitForExit(3000)) {
+                    try { request.Kill(); } catch (InvalidOperationException) { }
+                    throw new TimeoutException("Station provider start deadline");
+                }
+                if (request.ExitCode != 0) throw new InvalidOperationException("Station provider start rejected");
+            }
+        }
+        internal StationLease() {
+            try {
+                pipe = new NamedPipeClientStream(".", "NexaStationLeaseV1",
+                    PipeAccessRights.ReadWrite | PipeAccessRights.ReadPermissions | PipeAccessRights.Synchronize,
+                    PipeOptions.Asynchronous, TokenImpersonationLevel.Identification, HandleInheritability.None);
+                try { pipe.Connect(150); }
+                catch (TimeoutException) {
+                    RequestProviderStart();
+                    pipe.Connect(5000);
+                }
+                var owner = pipe.GetAccessControl().GetOwner(typeof(SecurityIdentifier));
+                if (!owner.Equals(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null)))
+                    throw new InvalidOperationException("Unexpected station provider identity");
+                pipe.WriteByte(65); pipe.Flush();
+                Id=Encoding.ASCII.GetString(ReadExact(32));
+                Guid parsed;
+                if (!Guid.TryParseExact(Id,"N",out parsed) || parsed.ToString("N")!=Id)
+                    throw new InvalidOperationException("Malformed station lease ID");
+            } catch {
+                Dispose();
+                throw;
+            }
+        }
+        internal void Release() {
+            pipe.WriteByte(82); pipe.Flush();
+            if (ReadExact(1)[0]!=75) throw new InvalidOperationException("Station lease cleanup unacknowledged");
+        }
+        public void Dispose() { if(pipe!=null) { pipe.Dispose(); pipe=null; } }
+    }
+
+    [DllImport("advapi32.dll", EntryPoint = "GetTokenInformation", SetLastError = true)]
+    private static extern bool GetTokenInformationBuffer(IntPtr token, int type, IntPtr value, int size, out int required);
+
+    private static void VerifyPackageIdentity(IntPtr token, SecurityIdentifier expected) {
+        int required;
+        GetTokenInformationBuffer(token, 31, IntPtr.Zero, 0, out required);
+        if (required < IntPtr.Size || required > 4096) throw new InvalidOperationException("AppContainer SID unavailable");
+        IntPtr buffer = Marshal.AllocHGlobal(required);
+        try {
+            Require(GetTokenInformationBuffer(token, 31, buffer, required, out required));
+            IntPtr actual = Marshal.ReadIntPtr(buffer);
+            if (actual == IntPtr.Zero || !expected.Equals(new SecurityIdentifier(actual)))
+                throw new InvalidOperationException("Unexpected AppContainer package identity");
+        } finally { Marshal.FreeHGlobal(buffer); }
+    }
+
     private static void Require(bool ok) { if (!ok) throw new Win32Exception(Marshal.GetLastWin32Error()); }
     private static void Close(ref IntPtr handle) { if (handle != IntPtr.Zero) { CloseHandle(handle); handle = IntPtr.Zero; } }
     private static void AllowDirectory(string target, SecurityIdentifier sid, FileSystemRights rights) {
@@ -140,23 +226,38 @@ internal static class PowerShellAppContainer {
 
     public static int Main(string[] args) {
         uint timeout;
-        if (args.Length != 3 || !UInt32.TryParse(args[2], out timeout) || timeout < 1000 || timeout > 120000) return 64;
+        if ((args.Length != 3 && args.Length != 4) || !UInt32.TryParse(args[2], out timeout) || timeout < 1000 || timeout > 120000) return 64;
+        bool fixedHermeticCore = args.Length == 4;
+        if (fixedHermeticCore && (args[3] != "fixed-hermetic-core" || args[1] != ".")) return 64;
         string root = Path.GetFullPath(args[0]);
         string work = Path.Combine(root, "work");
         string tools = Path.Combine(Directory.GetParent(root).FullName, "tools");
         string cwd = Path.GetFullPath(Path.Combine(work, args[1]));
         if (!cwd.Equals(work, StringComparison.OrdinalIgnoreCase) && !cwd.StartsWith(work + "\\", StringComparison.OrdinalIgnoreCase)) return 64;
+        // This change only adds a lease to the fixed verification route.
+        // Keep the pre-existing shell route and its isolation controls unchanged.
+        bool requiresStationLease = fixedHermeticCore && Process.GetCurrentProcess().SessionId == 0;
         string name = "NexaPiShell" + Guid.NewGuid().ToString("N");
         string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
         string system = Path.Combine(windows, "System32");
         string psHome = Path.Combine(system, @"WindowsPowerShell\v1.0");
-        string executable = Path.Combine(psHome, "powershell.exe");
+        string executable = fixedHermeticCore ? Path.Combine(tools, "node.exe") : Path.Combine(psHome, "powershell.exe");
+        string fixedEntrypoint = Path.Combine(work, @"tests\tools\mcp-hermetic-core.test.mjs");
+        if (fixedHermeticCore && (!File.Exists(executable) || !File.Exists(fixedEntrypoint))) return 64;
         IntPtr sid = IntPtr.Zero, attrs = IntPtr.Zero, security = IntPtr.Zero, env = IntPtr.Zero, handles = IntPtr.Zero;
         IntPtr job = IntPtr.Zero, token = IntPtr.Zero, stdoutRead = IntPtr.Zero, stdoutWrite = IntPtr.Zero;
         IntPtr stderrRead = IntPtr.Zero, stderrWrite = IntPtr.Zero, stdinRead = IntPtr.Zero, stdinWrite = IntPtr.Zero;
         ProcessInfo child = new ProcessInfo();
         bool initialized = false;
+        StationLease lease = null;
+        bool profileDeleted = false;
+        bool leaseCleanupVerified = false;
+        string completedResult = null;
         try {
+            if (requiresStationLease) {
+                lease = new StationLease();
+                name = "NexaLease" + lease.Id;
+            }
             Marshal.ThrowExceptionForHR(CreateAppContainerProfile(name, name, "Nexa engineering shell", IntPtr.Zero, 0, out sid));
             var package = new SecurityIdentifier(sid);
             AllowDirectory(root, package, FileSystemRights.Modify);
@@ -191,6 +292,7 @@ internal static class PowerShellAppContainer {
             var limits = new JobExtendedLimits { Basic = new JobBasicLimits { Flags = JobLimits, ActiveProcesses = 32 }, JobMemory = new UIntPtr(768U * 1024 * 1024) };
             Require(SetInformationJobObject(job, 9, ref limits, Marshal.SizeOf(typeof(JobExtendedLimits))));
             var startup = new StartupInfoEx { Info = new StartupInfo { Size = Marshal.SizeOf(typeof(StartupInfoEx)), Flags = UseStdHandles,
+                Desktop = requiresStationLease ? "NexaLeaseStation" + lease.Id + @"\NexaLeaseDesktop" : null,
                 StdIn = stdinRead, StdOut = stdoutWrite, StdErr = stderrWrite }, Attributes = attrs };
             string scratch = Path.Combine(root, "temp");
             env = Marshal.StringToHGlobalUni("COMSPEC=" + Path.Combine(system, "cmd.exe") + "\0LOCALAPPDATA=" + scratch
@@ -203,17 +305,25 @@ internal static class PowerShellAppContainer {
                 + "\0TEMP=" + scratch + "\0TMP=" + scratch + "\0USERPROFILE=" + scratch + "\0WINDIR=" + windows + "\0\0");
             const string loader = "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'; "
                 + "[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); "
-                + "New-PSDrive -Name Nexa -PSProvider FileSystem -Root $env:NEXA_SANDBOX_WORK -Scope Global | Out-Null; "
-                + "Set-Location -LiteralPath (Join-Path 'Nexa:\\' $env:NEXA_SANDBOX_CWD); "
+                // AppContainer may lack normal module discovery. Load only the OS-owned module, never staged source.
+                + "Microsoft.PowerShell.Core\\Import-Module -Name ([IO.Path]::Combine($PSHOME, 'Modules\\Microsoft.PowerShell.Management\\Microsoft.PowerShell.Management.psd1')) -ErrorAction Stop; "
+                + "Microsoft.PowerShell.Core\\Import-Module -Name ([IO.Path]::Combine($PSHOME, 'Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1')) -ErrorAction Stop; "
+                + "Microsoft.PowerShell.Management\\New-PSDrive -Name Nexa -PSProvider FileSystem -Root $env:NEXA_SANDBOX_WORK -Scope Global | Out-Null; "
+                + "Microsoft.PowerShell.Management\\Set-Location -LiteralPath (Microsoft.PowerShell.Management\\Join-Path 'Nexa:\\' $env:NEXA_SANDBOX_CWD); "
                 + "$global:LASTEXITCODE = 0; & ([scriptblock]::Create([IO.File]::ReadAllText($env:NEXA_SANDBOX_SCRIPT))); "
                 + "$successful = $?; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; if (-not $successful) { exit 1 }; exit 0";
-            var command = new StringBuilder("\"" + executable + "\" -NoLogo -NoProfile -NonInteractive -EncodedCommand " + Convert.ToBase64String(Encoding.Unicode.GetBytes(loader)));
+            // The sole direct Node route has a server-fixed entrypoint and identical token/job controls.
+            // The legacy PowerShell route and its working-directory behavior are unchanged.
+            var command = new StringBuilder(fixedHermeticCore
+                ? "\"" + executable + "\" \"" + fixedEntrypoint + "\""
+                : "\"" + executable + "\" -NoLogo -NoProfile -NonInteractive -EncodedCommand " + Convert.ToBase64String(Encoding.Unicode.GetBytes(loader)));
             Require(CreateProcess(executable, command, IntPtr.Zero, IntPtr.Zero, true, Suspended | UnicodeEnvironment | ExtendedStartup | NoWindow, env, cwd, ref startup, out child));
             Require(AssignProcessToJobObject(job, child.Process));
             Require(OpenProcessToken(child.Process, 8, out token));
             int isContainer, needed;
             Require(GetTokenInformation(token, 29, out isContainer, sizeof(int), out needed));
             if (isContainer != 1) throw new InvalidOperationException("Expected an AppContainer token");
+            VerifyPackageIdentity(token, package);
             Close(ref stdoutWrite); Close(ref stderrWrite); Close(ref stdinRead);
             var stdout = new Capture(stdoutRead); stdoutRead = IntPtr.Zero;
             var stderr = new Capture(stderrRead); stderrRead = IntPtr.Zero;
@@ -241,10 +351,9 @@ internal static class PowerShellAppContainer {
             }
             if (!stdout.Reader.Join(5000) || !stderr.Reader.Join(5000) || stdout.Failed || stderr.Failed) return 3;
             if (reason == "completed" && !WithinStageBudget(root)) reason = "stage_limit";
-            Console.WriteLine("{\"state\":\"" + reason + "\",\"exit_code\":" + (reason == "completed" ? code.ToString() : "null")
+            completedResult = "{\"state\":\"" + reason + "\",\"exit_code\":" + (reason == "completed" ? code.ToString() : "null")
                 + ",\"stdout_b64\":\"" + Convert.ToBase64String(stdout.Bytes.ToArray()) + "\",\"stderr_b64\":\"" + Convert.ToBase64String(stderr.Bytes.ToArray())
-                + "\",\"stdout_truncated\":" + (stdout.Truncated ? "true" : "false") + ",\"stderr_truncated\":" + (stderr.Truncated ? "true" : "false") + "}");
-            return 0;
+                + "\",\"stdout_truncated\":" + (stdout.Truncated ? "true" : "false") + ",\"stderr_truncated\":" + (stderr.Truncated ? "true" : "false") + "}";
         } catch (Exception error) {
             Console.Error.WriteLine(error.Message);
             return 2;
@@ -259,8 +368,25 @@ internal static class PowerShellAppContainer {
             if (handles != IntPtr.Zero) Marshal.FreeHGlobal(handles);
             if (sid != IntPtr.Zero) {
                 FreeSid(sid);
-                if (DeleteAppContainerProfile(name) != 0) Console.Error.WriteLine("AppContainer profile cleanup failed");
+                profileDeleted = DeleteAppContainerProfile(name) == 0;
+                if (!profileDeleted) Console.Error.WriteLine("AppContainer profile cleanup failed");
+            }
+            if (lease != null) {
+                try {
+                    if (profileDeleted) {
+                        lease.Release();
+                        leaseCleanupVerified = true;
+                    }
+                }
+                catch (Exception error) { Console.Error.WriteLine("Station lease cleanup failed: " + error.Message); }
+                finally { lease.Dispose(); }
             }
         }
+        // Never publish a successful result before profile deletion and the
+        // provider cleanup acknowledgement have both been observed.
+        if (requiresStationLease && !leaseCleanupVerified) return 3;
+        if (completedResult == null) return 3;
+        Console.WriteLine(completedResult);
+        return 0;
     }
 }

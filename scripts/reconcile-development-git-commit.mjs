@@ -25,13 +25,19 @@ export async function reconcileDevelopmentPowershellObservation(input, {apply=fa
   return apply ? journal.resolveCompletedPowershellMutation(input) : journal.inspectCompletedPowershellMutation(input);
 }
 
+// Trusted-host entry only; no MCP route or new authorization capability.
+export async function reconcileReviewedScopedTestRejection(input,{apply=false,journal=createDevOperationJournalService()}={}) {
+  return apply ? journal.resolveScopedTestRejectionMutation(input) : journal.inspectScopedTestRejectionMutation(input);
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     if (process.argv.length !== 3 || !['--inspect','--apply'].includes(process.argv[2])) throw new Error('INVALID_RECONCILIATION_ACTION');
     process.stdin.setEncoding('utf8');let source='';
     for await (const chunk of process.stdin) {source+=chunk;if(Buffer.byteLength(source)>64*1024)throw new Error('RESOLUTION_RECORD_LIMIT');}
     const input=JSON.parse(source);
-    const reconcile=input.resolution_kind==='completed_powershell_observation'
+    const reconcile=input.resolution_kind==='reviewed_scoped_test_rejection_v1'
+      ?reconcileReviewedScopedTestRejection:input.resolution_kind==='completed_powershell_observation'
       ?reconcileDevelopmentPowershellObservation:input.resolution_kind==='integration_preflight_before_completion'
       ?reconcileDevelopmentIntegrationPreflight:input.resolution_kind==='workstream_committed_update'
       ?reconcileDevelopmentWorkstreamCommitted:input.resolution_kind==='workstream_stale_before_write'

@@ -291,6 +291,7 @@ try {
   assert.deepEqual(Object.keys(mapping), [
     "mcp",
     "mcp_pi_postseal",
+    "mcp_hermetic_core",
     "mcp_core",
     "mcp_infrastructure",
     "mcp_reliability",
@@ -306,6 +307,8 @@ try {
   assert.deepEqual(mapping.mcp.argv, ["tests/tools/mcp-contract.test.mjs"]);
   assert.deepEqual(mapping.mcp_core.argv, ["tests/tools/mcp-core.test.mjs"]);
   assert.deepEqual(mapping.mcp_pi_postseal.argv, ["tests/tools/mcp-pi-postseal.test.mjs"]);
+  assert.deepEqual(mapping.mcp_hermetic_core.argv, ["tests/tools/mcp-hermetic-core.test.mjs"]);
+  assert.equal(mapping.mcp_hermetic_core.timeout_ms, 120_000);
   assert.deepEqual(mapping.mcp_infrastructure.argv, ["tests/tools/mcp-infrastructure.test.mjs"]);
   assert.deepEqual(mapping.mcp_reliability.argv, ["tests/tools/mcp-reliability.test.mjs"]);
   assert.deepEqual(mapping.mcp_tunnel.argv, ["tests/mcp-tunnel-launcher.test.mjs"]);
@@ -1281,6 +1284,25 @@ try {
     /server\/src\/requested\.mjs/u,
   );
 
+  // The protected dispatcher has no personal Git identity. Retain the
+  // ordinary failure case above; the trusted automation option must succeed
+  // with that same empty repository config and previously staged exact file.
+  const automationCommitTool = createDevGitCommitTool({
+    repositoryRoot: commitFailureRoot, automationIdentity: true,
+  });
+  const automationCommit = await automationCommitTool({
+    paths: ["server/src/requested.mjs"],
+    message: "test: fixed protected dispatcher identity",
+  });
+  assert.equal(automationCommit.committed, true, JSON.stringify(automationCommit));
+  assert.equal(automationCommit.commit_created, true);
+  assert.equal(automationCommit.exit_code, 0);
+  assert.notEqual(automationCommit.commit, failureHeadBefore);
+  assert.match(runFixtureGit(commitFailureRoot, ["log", "-1", "--format=%an|%ae|%cn|%ce"]).stdout,
+    /^Writer Workbench Engineering\|writer-workbench@local\.invalid\|Writer Workbench Engineering\|writer-workbench@local\.invalid\s*$/u);
+  assert.equal(runFixtureGit(commitFailureRoot, ["config", "--local", "user.name"]).stdout.trim(), "");
+  assert.equal(runFixtureGit(commitFailureRoot, ["config", "--local", "user.email"]).stdout.trim(), "");
+
   const remoteStatusFixture = await createPushFixture(tempRoot, "remote-status");
   const remoteStatusTool = createDevGitRemoteStatusTool({
     repositoryRoot: remoteStatusFixture.repositoryRoot,
@@ -2024,12 +2046,12 @@ try {
     {
       id: "dev-test-injection-semicolon",
       arguments: { suite: "mcp; whoami" },
-      expected: "suite must be one of: mcp, mcp_core, mcp_pi_postseal, mcp_infrastructure, mcp_reliability, mcp_tunnel, affected, communication, world_simulation, cognition, memory_retrieval, all.",
+      expected: "suite must be one of: mcp, mcp_core, mcp_pi_postseal, mcp_hermetic_core, mcp_infrastructure, mcp_reliability, mcp_tunnel, affected, communication, world_simulation, cognition, memory_retrieval, all.",
     },
     {
       id: "dev-test-injection-powershell",
       arguments: { suite: "mcp && powershell -NoProfile" },
-      expected: "suite must be one of: mcp, mcp_core, mcp_pi_postseal, mcp_infrastructure, mcp_reliability, mcp_tunnel, affected, communication, world_simulation, cognition, memory_retrieval, all.",
+      expected: "suite must be one of: mcp, mcp_core, mcp_pi_postseal, mcp_hermetic_core, mcp_infrastructure, mcp_reliability, mcp_tunnel, affected, communication, world_simulation, cognition, memory_retrieval, all.",
     },
     {
       id: "dev-test-unknown-command",

@@ -36,7 +36,7 @@ const host=createPiProductionExecutionController({journal,route,
    else if(p.name==='dev_read_file')result={content:await readFile(path.join(scope.root,p.arguments.path),'utf8')};
    else if(p.name==='dev_workspace_create_checkpoint')result=await checkpoint.create(p.arguments);
    else if(p.name==='dev_run_tests'){await exec(process.execPath,['--test','tests/mcp/pi-cold-fixture.test.mjs'],{cwd:scope.root,windowsHide:true,timeout:30000});result={passed:true,suite:p.arguments.suite};}
-   else if(p.name==='dev_git_commit'){if((await git(['rev-parse','HEAD'],{cwd:scope.root})).stdout.trim()!==p.arguments.expectedHead)throw Error('HEAD_MISMATCH');await git(['add','--',...p.arguments.paths],{cwd:scope.root});await git(['-c','user.name=Pi fixture','-c','user.email=pi@example.invalid','commit','-m',p.arguments.message],{cwd:scope.root});result={commit_sha:(await git(['rev-parse','HEAD'],{cwd:scope.root})).stdout.trim()};}
+   else if(p.name==='dev_git_commit'){if((await git(['rev-parse','HEAD'],{cwd:scope.root})).stdout.trim()!==p.arguments.expectedHead)throw Error('HEAD_MISMATCH');await git(['add','--',...p.arguments.paths],{cwd:scope.root});await git(['-c','user.name=Pi fixture','-c','user.email=pi@example.invalid','commit','-m',p.arguments.message],{cwd:scope.root});const commit=(await git(['rev-parse','HEAD'],{cwd:scope.root})).stdout.trim();result={execution_ok:true,committed:true,commit_created:true,exit_code:0,commit,commit_sha:commit};}
    else throw Error('UNREQUESTED_FIXTURE_TOOL');
    if((point==='begin_effect'&&p.name==='dev_workspace_begin_workstream')||(point==='isolate_effect'&&p.name==='dev_workspace_create_isolated'))process.exit(73);
    return {content:[{type:'text',text:JSON.stringify(result)}]};

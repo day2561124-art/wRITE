@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { createServer } from "node:net";
 import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { FIXED_ISOLATED_SUITE, FIXED_ISOLATED_SOURCE_PATHS, fixedIsolatedVerificationPlan, runFixedIsolatedVerification } from "../../server/src/mcp-fixed-isolated-verification.mjs";
+import { createDevTestRunner } from "../../server/src/mcp-development-test-tools.mjs";
+import { prepareAppContainerPowerShell } from "../../server/src/mcp-powershell-appcontainer.mjs";
 import { createDevOperationJournalService } from "../../server/src/mcp-development-journal-tools.mjs";
 import { createPowerShellMaintenanceTool } from "../../server/src/mcp-powershell-maintenance-tools.mjs";
 import { fingerprintMcpMutationRequest } from "../../server/src/mcp-operation-reconciliation-context.mjs";
@@ -60,8 +64,17 @@ async function fixture(t, { allowRepair = false, loseFirstShellResponse = false 
         const result = await journal.executeReconciled({ reconciliation_key: params._meta.reconciliation_key,
           request_fingerprint_sha256: fingerprintMcpMutationRequest(params.name, params.arguments), tool_name: params.name,
           resolve_workspace_scope: async () => identities }, async () => {
-          const payload = await tool(params.arguments);
-          return { content: [{ type: "text", text: JSON.stringify(payload) }] };
+          try {
+            const payload = await tool(params.arguments);
+            return { content: [{ type: "text", text: JSON.stringify(payload) }] };
+          } catch (error) {
+            // Only fixture paths and commands are used here. Keep the original
+            // error and reconciliation behavior, but expose the pre-dispatch
+            // failure to hosted CI before the controller records its outcome.
+            t.diagnostic(JSON.stringify({ stage: "appcontainer-fixture-dispatch",
+              code: error?.code ?? null, message: error?.message ?? String(error) }));
+            throw error;
+          }
         });
         if (loseFirstShellResponse && dispatches === 1) {
           throw Object.assign(new Error("Fixture lost the native build response"), { code: "TRANSPORT_ERROR" });
@@ -76,7 +89,7 @@ async function fixture(t, { allowRepair = false, loseFirstShellResponse = false 
   return { root, context, journal, controller, intent, dispatches: () => dispatches };
 }
 
-test("Pi runs sandboxed PowerShell with exact staged input, denied host and loopback access, and a durable output", platform, async t => {
+test("Pi runs sandboxed PowerShell with exact staged input, denied host and loopback access, and a durable output", { ...platform, timeout: 120_000 }, async t => {
   const f = await fixture(t);
   const protectedPath = path.join(f.root, "host-only.txt");
   const source = path.join(f.context.root, "source.txt");
@@ -95,12 +108,14 @@ test("Pi runs sandboxed PowerShell with exact staged input, denied host and loop
     `try { [IO.File]::ReadAllText($outside) | Out-Null; throw 'unexpected host read' } catch [UnauthorizedAccessException] {}`,
     `try { [IO.File]::WriteAllText($outside, 'unexpected'); throw 'unexpected host write' } catch [UnauthorizedAccessException] {}`,
     `$fixture = [Net.Sockets.TcpClient]::new()`,
-    `try { $fixture.Connect('127.0.0.1', ${service.address().port}); throw 'unexpected loopback' } catch [Net.Sockets.SocketException] {} finally { $fixture.Dispose() }`,
+    // A denied TCP connection can be silently dropped instead of immediately refused.
+    // Bound the probe independently of the sandbox watchdog; any successful connection still fails.
+    `try { $pending = $fixture.BeginConnect('127.0.0.1', ${service.address().port}, $null, $null); if ($pending.AsyncWaitHandle.WaitOne(5000)) { $fixture.EndConnect($pending); throw 'unexpected loopback' }; if ($fixture.Connected) { throw 'unexpected loopback' } } catch [Net.Sockets.SocketException] {} finally { $fixture.Dispose() }`,
     `$copied = [IO.File]::ReadAllText([IO.Path]::GetFullPath('source.txt'))`,
     `[IO.File]::WriteAllText([IO.Path]::GetFullPath('source.txt'), $copied + '-edited')`,
     "Write-Output 'isolated-fixture-ok'",
   ].join("\n");
-  const intent = await f.intent("native-appcontainer-read-write", command, { sandbox_paths: ["source.txt"], output_paths: ["source.txt"] });
+  const intent = await f.intent("native-appcontainer-read-write", command, { sandbox_paths: ["source.txt"], output_paths: ["source.txt"], timeoutMs: 60_000 });
   assert.equal(intent.requested_actions[0].capability, shellCapability);
   const completed = await f.controller.execute(intent);
   assert.equal(completed.state.status, "COMPLETED", JSON.stringify(completed.state.last_error) + JSON.stringify(completed.receipts));
@@ -117,17 +132,18 @@ test("Pi runs sandboxed PowerShell with exact staged input, denied host and loop
   assert.equal((await f.journal.status()).health, "healthy");
 });
 
-test("AppContainer timeout terminates a Windows child and records a safe workspace failure", platform, async t => {
+test("AppContainer timeout terminates a Windows child and records a safe workspace failure", { ...platform, timeout: 120_000 }, async t => {
   const f = await fixture(t);
   const command = [
-    `$program = [Diagnostics.ProcessStartInfo]::new([IO.Path]::Combine($PSHOME, 'powershell.exe'), '-NoProfile -NonInteractive -Command Start-Sleep -Seconds 30')`,
+    `$program = [Diagnostics.ProcessStartInfo]::new([IO.Path]::Combine($PSHOME, 'powershell.exe'), '-NoProfile -NonInteractive -Command [Threading.Thread]::Sleep(90000)')`,
     "$program.UseShellExecute = $false",
     "$program.CreateNoWindow = $true",
     "$child = [Diagnostics.Process]::Start($program)",
-    "Write-Output ('sandbox-child=' + $child.Id)",
-    "Start-Sleep -Seconds 30",
+    "[Console]::WriteLine('sandbox-child=' + $child.Id)",
+    "[Console]::Out.Flush()",
+    "[Threading.Thread]::Sleep(90000)",
   ].join("\n");
-  const intent = await f.intent("native-appcontainer-timeout", command, { timeoutMs: 2500 });
+  const intent = await f.intent("native-appcontainer-timeout", command, { timeoutMs: 45_000 });
   const stopped = await f.controller.execute(intent);
   assert.equal(stopped.state.status, "DECISION_REQUIRED");
   const observed = JSON.parse(stopped.command.receipt.evidence.content[0].text);
@@ -166,7 +182,7 @@ test("AppContainer composes a real Windows build and preserves the native test e
   await assert.rejects(readFile(path.join(f.context.root, "code", "probe.exe")), { code: "ENOENT" });
 });
 
-test("AppContainer installs a workspace package offline and runs a Node test in one process", platform, async t => {
+test("AppContainer installs a workspace package offline and runs a Node test in one process", { ...platform, timeout: 120_000 }, async t => {
   const f = await fixture(t);
   await mkdir(path.join(f.context.root, "fixture"));
   await writeFile(path.join(f.context.root, "package.json"), JSON.stringify({ name: "nexa-fixture-root", version: "1.0.0",
@@ -189,7 +205,7 @@ test("AppContainer installs a workspace package offline and runs a Node test in 
     "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }",
     runTest,
   ].join("\n");
-  const intent = await f.intent("native-appcontainer-npm", command, { toolchain: "node", timeoutMs: 30_000,
+  const intent = await f.intent("native-appcontainer-npm", command, { toolchain: "node", timeoutMs: 60_000,
     sandbox_paths: ["package.json", "fixture/package.json", "fixture/index.js", "offline.test.cjs"] });
   const result = await f.controller.execute(intent);
   assert.equal(result.state.status, "COMPLETED", JSON.stringify(result.command));
@@ -270,3 +286,243 @@ for (const loseFirstShellResponse of [false, true]) {
     assert.equal((await f.journal.status()).health, "healthy");
   });
 }
+
+test("fixed isolated verification rejects host suites and invalid workspace contexts before staging", async () => {
+  const context = { root: path.resolve("."), workspace_type: "isolated_worktree",
+    workstream_state: "active", lifecycle_state: "active", healthy: true, mutation_allowed: true };
+  const plan = fixedIsolatedVerificationPlan(FIXED_ISOLATED_SUITE, context);
+  assert.deepEqual(plan.sandbox_paths, FIXED_ISOLATED_SOURCE_PATHS);
+  assert.deepEqual(plan.sandbox_directories, []);
+  assert.deepEqual(plan.output_paths, []);
+  assert.equal(plan.toolchain, "node");
+  assert.equal(plan.fixedHermeticCore, true);
+  assert.equal(plan.timeoutMs, 120_000);
+  for (const suite of ["mcp_pi_postseal", "affected", "all", "mcp; whoami"]) {
+    await assert.rejects(runFixedIsolatedVerification({ suite, context,
+      prepare: () => assert.fail("must not stage a rejected suite") }), { code: "ISOLATED_VERIFICATION_REQUIRED" });
+  }
+  for (const invalid of [{ workspace_type: "shared" }, { healthy: false },
+    { lifecycle_state: "closed" }, { workstream_state: "closed" }, { mutation_allowed: false }]) {
+    await assert.rejects(runFixedIsolatedVerification({ suite: FIXED_ISOLATED_SUITE, context: { ...context, ...invalid },
+      prepare: () => assert.fail("must not stage a rejected workspace") }), { code: "ISOLATED_WORKSPACE_REQUIRED" });
+  }
+});
+
+test("fixed hermetic suite executes its real five-file closure in Windows AppContainer", { ...platform, timeout: 180_000 }, async t => {
+  const f = await fixture(t);
+  const original = new Map();
+  for (const file of FIXED_ISOLATED_SOURCE_PATHS) {
+    const target = path.join(f.context.root, file);
+    const bytes = await readFile(new URL("../../" + file, import.meta.url));
+    original.set(file, bytes);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, bytes);
+  }
+  const result = await runFixedIsolatedVerification({ suite: FIXED_ISOLATED_SUITE, context: f.context });
+  assert.equal(result.passed, true, JSON.stringify(result));
+  assert.equal(result.exit_code, 0);
+  assert.equal(result.input_file_count, 5);
+  assert.equal(result.execution_mode, "fixed_node");
+  assert.equal(result.workspace_writes, false);
+  assert.equal(result.cleanup_pending, false);
+  assert.match(result.input_manifest_sha256, /^[a-f0-9]{64}$/u);
+  for (const [file, bytes] of original) assert.deepEqual(await readFile(path.join(f.context.root, file)), bytes);
+
+  // The fixed entrypoint must propagate a real test failure without host writes.
+  const entry = path.join(f.context.root, FIXED_ISOLATED_SOURCE_PATHS[0]);
+  await writeFile(entry, 'import "node:test"; throw new Error("intentional fixed-suite failure");\n');
+  const failure = await runFixedIsolatedVerification({ suite: FIXED_ISOLATED_SUITE, context: f.context });
+  assert.equal(failure.passed, false, JSON.stringify(failure));
+  assert.notEqual(failure.exit_code, 0);
+  assert.equal(failure.workspace_writes, false);
+});
+
+test("fixed hermetic suite denies host files, toolchain writes and host loopback in Windows AppContainer", { ...platform, timeout: 180_000 }, async t => {
+  const f = await fixture(t);
+  const outside = path.join(f.root, "host-only.txt");
+  await writeFile(outside, "host-fixture");
+  const protectedEnv = "NEXA_FIXED_ISOLATION_TEST_HOST_ONLY";
+  process.env[protectedEnv] = "host-fixture";
+  t.after(() => { delete process.env[protectedEnv]; });
+  let connected = false;
+  const listener = createServer(socket => { connected = true; socket.destroy(); });
+  listener.listen(0, "127.0.0.1");
+  await once(listener, "listening");
+  t.after(() => new Promise(resolve => listener.close(resolve)));
+  for (const file of FIXED_ISOLATED_SOURCE_PATHS) {
+    const target = path.join(f.context.root, file);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, await readFile(new URL("../../" + file, import.meta.url)));
+  }
+  const entry = path.join(f.context.root, FIXED_ISOLATED_SOURCE_PATHS[0]);
+  // Only synthetic fixture inputs are used. Exercise the real fixed Node
+  // route; successful access to any protected resource makes the test fail.
+  const probe = [
+    'import assert from "node:assert/strict";',
+    'import { readFile, writeFile } from "node:fs/promises";',
+    'import { createConnection } from "node:net";',
+    'import path from "node:path";',
+    `const host = ${JSON.stringify(outside)};`,
+    `assert.equal(process.env[${JSON.stringify(protectedEnv)}], undefined);`,
+    'const denied = error => ["EACCES", "EPERM", "ENOENT"].includes(error?.code);',
+    'await assert.rejects(readFile(host, "utf8"), denied);',
+    'await assert.rejects(writeFile(host, "unexpected"), denied);',
+    'await assert.rejects(writeFile(path.join(path.dirname(process.execPath), "fixture-forbidden.txt"), "unexpected", { flag: "wx" }), denied);',
+    // Windows can redirect TEMP to an uncreated package-specific directory.
+    // Use the explicit staged workspace for the positive write control instead.
+    'const guestFile = path.join(process.env.NEXA_SANDBOX_WORK, "guest-only.txt");',
+    'await writeFile(guestFile, "allowed", { flag: "wx" });',
+    'assert.equal(await readFile(guestFile, "utf8"), "allowed");',
+    `await new Promise((resolve, reject) => { const socket = createConnection({ host: "127.0.0.1", port: ${listener.address().port} }); socket.once("connect", () => { socket.destroy(); reject(new Error("host loopback allowed")); }); socket.once("error", resolve); socket.setTimeout(5000, () => { socket.destroy(); resolve(); }); });`,
+    'console.log("FIXED_ISOLATION_NEGATIVE_PROBE_PASS");',
+  ].join("\n");
+  await writeFile(entry, probe);
+  const result = await runFixedIsolatedVerification({ suite: FIXED_ISOLATED_SUITE, context: f.context });
+  assert.equal(result.passed, true, JSON.stringify(result));
+  assert.match(result.stdout, /FIXED_ISOLATION_NEGATIVE_PROBE_PASS/u);
+  assert.equal(result.exit_code, 0);
+  assert.equal(result.input_file_count, 5);
+  assert.equal(result.workspace_writes, false);
+  assert.equal(result.cleanup_pending, false);
+  assert.equal(result.job_terminated, true);
+  assert.equal(connected, false);
+  assert.equal(await readFile(outside, "utf8"), "host-fixture");
+  assert.equal(await readFile(entry, "utf8"), probe);
+});
+
+test("fixed hermetic suite times out a running guest and verifies resource cleanup", { ...platform, timeout: 120_000 }, async t => {
+  const f = await fixture(t);
+  for (const file of FIXED_ISOLATED_SOURCE_PATHS) {
+    const target = path.join(f.context.root, file);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, await readFile(new URL("../../" + file, import.meta.url)));
+  }
+  const entry = path.join(f.context.root, FIXED_ISOLATED_SOURCE_PATHS[0]);
+  const source = 'console.log("GUEST_ENTERED_TIMEOUT_FIXTURE"); setInterval(() => {}, 1000);';
+  await writeFile(entry, source);
+  const prepared = await prepareAppContainerPowerShell({
+    context: f.context, cwd: f.context.root, command: "fixed-verification-timeout-fixture",
+    timeoutMs: 5000, sandbox_paths: FIXED_ISOLATED_SOURCE_PATHS,
+    sandbox_directories: [], output_paths: [], toolchain: "node", fixedHermeticCore: true,
+  });
+  try {
+    const result = await prepared.run();
+    assert.equal(result.timed_out, true, JSON.stringify(result));
+    assert.equal(result.execution_ok, false);
+    assert.equal(result.job_terminated, true);
+    assert.equal(result.workspace_writes, false);
+    assert.equal(result.exit_code, null);
+    assert.match(result.stdout, /GUEST_ENTERED_TIMEOUT_FIXTURE/u);
+    assert.equal(await readFile(entry, "utf8"), source);
+  } finally {
+    await prepared.cleanup();
+  }
+});
+
+test("fixed isolated verification rejects incomplete or changed evidence and always cleans staging", async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "nexa-fixed-receipt-test-"));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
+  const context = { root, workspace_type: "isolated_worktree", workstream_state: "active",
+    lifecycle_state: "active", healthy: true, mutation_allowed: true };
+  const entries = [];
+  const hash = value => createHash("sha256").update(value).digest("hex");
+  for (const file of FIXED_ISOLATED_SOURCE_PATHS) {
+    const bytes = Buffer.from("// isolated receipt fixture: " + file + "\n");
+    const target = path.join(root, file);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, bytes);
+    entries.push({ path: file, sha256: hash(bytes), bytes: bytes.length });
+  }
+  const manifest = { input_manifest_sha256: hash(JSON.stringify(entries)),
+    input_file_count: entries.length };
+  const valid = { ...manifest, isolation_mode: "appcontainer", execution_mode: "fixed_node", workspace_writes: false,
+    job_terminated: true, artifacts: [], toolchain: "node", execution_ok: true,
+    ok: true, exit_code: 0, timed_out: false, duration_ms: 1, stdout: "", stderr: "" };
+  const execute = async ({ staged = manifest, receipt = valid, run, cleanupError } = {}) => {
+    const calls = { run: 0, cleanup: 0 };
+    let value, error;
+    try {
+      value = await runFixedIsolatedVerification({ suite: FIXED_ISOLATED_SUITE, context,
+        prepare: async () => ({
+          manifest: staged,
+          run: async () => { calls.run++; return run ? run() : receipt; },
+          cleanup: async () => { calls.cleanup++; if (cleanupError) throw cleanupError; },
+        }) });
+    } catch (caught) { error = caught; }
+    assert.equal(calls.cleanup, 1);
+    return { value, error, calls };
+  };
+  const good = await execute();
+  assert.equal(good.error, undefined);
+  assert.equal(good.value.passed, true);
+  const mismatch = await execute({ staged: { ...manifest, input_manifest_sha256: "0".repeat(64) } });
+  assert.equal(mismatch.calls.run, 0);
+  assert.equal(mismatch.error?.code, "ISOLATED_VERIFICATION_INPUT_CHANGED");
+  for (const patch of [{ job_terminated: false }, { workspace_writes: true },
+    { input_file_count: 4 }, { input_manifest_sha256: "0".repeat(64) },
+    { isolation_mode: "host" }, { execution_mode: "powershell" }, { artifacts: { length: 0 } },
+    { artifacts: [{ path: "unexpected.txt" }] },
+    { toolchain: "unknown" }]) {
+    const bad = await execute({ receipt: { ...valid, ...patch } });
+    assert.equal(bad.error?.code, "INVALID_ISOLATED_VERIFICATION_RECEIPT");
+  }
+  const failed = await execute({ receipt: { ...valid, ok: false, exit_code: 1 } });
+  assert.equal(failed.value.passed, false);
+  const cleanup = await execute({ cleanupError: new Error("fixture cleanup failed") });
+  assert.equal(cleanup.error?.message, "fixture cleanup failed");
+  const changed = await execute({ run: async () => {
+    await writeFile(path.join(root, FIXED_ISOLATED_SOURCE_PATHS[0]), "// changed after staging\n");
+    return valid;
+  } });
+  assert.equal(changed.error?.code, "ISOLATED_VERIFICATION_INPUT_CHANGED");
+});
+
+test("fixed isolated verification records real scoped dispatcher and Journal evidence", { ...platform, timeout: 180_000 }, async t => {
+  const f = await fixture(t);
+  const git = (...args) => execFileSync("git.exe", args, { cwd: f.context.root, encoding: "utf8", windowsHide: true }).trim();
+  git("init");
+  git("config", "user.name", "Nexa CI");
+  git("config", "user.email", "nexa-ci@example.invalid");
+  git("config", "core.autocrlf", "false");
+  for (const file of FIXED_ISOLATED_SOURCE_PATHS) {
+    const target = path.join(f.context.root, file);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, await readFile(new URL("../../" + file, import.meta.url)));
+  }
+  git("add", "--", ...FIXED_ISOLATED_SOURCE_PATHS);
+  git("commit", "-m", "test: fixed verification fixture");
+  const head = git("rev-parse", "HEAD");
+  const context = { ...f.context, current_head: head, base_head: head, branch: git("branch", "--show-current") };
+  // Exercise only the scope selector in this CI process. No grant files or
+  // protected host state are created, opened, or changed by the fixture.
+  const previous = process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT;
+  const programFiles = process.env.ProgramW6432 ?? process.env.ProgramFiles;
+  assert.ok(programFiles);
+  process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT = path.join(programFiles, "WriterWorkbench-PiMaintenance-v3", "grants");
+  t.after(() => {
+    if (previous === undefined) delete process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT;
+    else process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT = previous;
+  });
+  const resultPath = path.join(f.root, "fixed-verification.last.json");
+  const run = createDevTestRunner({
+    workspaceContextResolver: async () => context,
+    lockPath: path.join(f.root, "fixed-verification.lock"),
+    resultPath,
+    journal: { begin: f.journal.begin, complete: f.journal.complete, fail: f.journal.fail, markDegraded: f.journal.markDegraded },
+  });
+  await assert.rejects(run({ suite: "all", workspace_id: context.workspace_id }), { code: "ISOLATED_VERIFICATION_REQUIRED" });
+  const result = await run({ suite: FIXED_ISOLATED_SUITE, workspace_id: context.workspace_id });
+  assert.equal(result.passed, true, JSON.stringify(result));
+  assert.equal(result.head, head);
+  assert.equal(result.post_snapshot_verified, true);
+  assert.equal(result.verification_manifest.gate_result, "passed");
+  assert.deepEqual(result.verification_manifest.tests_selected, [FIXED_ISOLATED_SUITE]);
+  assert.equal(result.verification_manifest.isolation_evidence.execution_mode, "fixed_node");
+  assert.equal(result.verification_manifest.isolation_evidence.post_snapshot_verified, true);
+  assert.match(result.operation_id, /^dev_operation_[a-f0-9]{32}$/u);
+  const persisted = JSON.parse(await readFile(resultPath, "utf8"));
+  assert.deepEqual(persisted.verification_manifest, result.verification_manifest);
+  assert.equal(persisted.verification_manifest_sha256, result.verification_manifest_sha256);
+  assert.equal((await f.journal.status()).health, "healthy");
+  assert.equal(git("status", "--porcelain"), "");
+});
