@@ -338,3 +338,46 @@ test('blocked recovery requires a later durable passing result in the same works
   const duplicate=await createPiReliableExecutionEngine({store:reopened,adapter:a}).execute(source);
   assert.equal(duplicate.projection_hash,first.projection_hash);assert.equal(dispatches,1);
 });
+
+test("R16 preflight and validation use strict independent lifecycle scopes", async () => {
+  const candidateId = "dev_integration_20261127-010000_" + "a".repeat(12);
+  const completed = { ...workstream, state: "completed" };
+  const candidate = { ...context, integration_candidate_id: candidateId, revision: 3, state: "preflight_passed" };
+  const preInput = { workstream_id: context.workstream_id, expected_workstream_revision: 5 };
+  const valInput = { integration_candidate_id: candidateId, expected_revision: 3 };
+  const make = (capability, input, target) => {
+    const source = intent(capability, input, true);
+    return { ...source, permissions: { ...source.permissions, integrate: true },
+      mutation_plan: [{ ...source.mutation_plan[0], target }] };
+  };
+  const pre = make("git.integration_preflight", preInput, context.workstream_id);
+  const val = make("git.integration_validate", valInput, candidateId);
+  const planner = createMcpCapabilityAdapter();
+  const preStep = planner.describe(pre, "lifecycle");
+  const valStep = planner.describe(val, "lifecycle");
+  assert.equal(preStep.tool, "dev_workspace_integration_preflight");
+  assert.equal(valStep.tool, "dev_workspace_validate_integration");
+  assert.deepEqual(preStep.arguments, preInput);
+  assert.deepEqual(valStep.arguments, valInput);
+  const verifier = await scope({ getWorkstream: async () => completed,
+    getIntegrationCandidate: async () => candidate, validationAllowed: async () => true });
+  assert.equal(await verifier({ context, step: preStep }), true);
+  assert.equal(await verifier({ context, step: valStep }), true);
+  assert.equal(await verifier({ context, step: { ...preStep, arguments: { ...preInput, expected_workstream_revision: 4 } } }), false);
+  assert.equal(await verifier({ context, step: { ...valStep, arguments: { ...valInput, expected_revision: 2 } } }), false);
+  assert.equal(await verifier({ context: { ...context, workspace_id: "dev_workspace_" + "f".repeat(24) }, step: valStep }), false);
+  assert.equal(await (await scope())({ context, step: preStep }), false);
+  const blocked = await scope({ getWorkstream: async () => completed, getIntegrationCandidate: async () => candidate,
+    validationAllowed: async () => false });
+  assert.equal(await blocked({ context, step: valStep }), false);
+  const wrongCandidate = await scope({ getWorkstream: async () => completed,
+    getIntegrationCandidate: async () => ({ ...candidate, workspace_id: "dev_workspace_" + "f".repeat(24) }),
+    validationAllowed: async () => true });
+  assert.equal(await wrongCandidate({ context, step: valStep }), false);
+  assert.throws(() => createExecutionIntent({ ...pre, permissions: { ...pre.permissions, integrate: false } }), /PERMISSION_DENIED/);
+  assert.throws(() => createExecutionIntent({ ...val, mutation_plan: [{ ...val.mutation_plan[0], target: context.workspace_id }] }), /MUTATION_TARGET_MISMATCH/);
+  assert.throws(() => createExecutionIntent({ ...val, standing_authorization: {
+    policy_id: "pi_standing_" + "a".repeat(32), policy_sha256: "b".repeat(64), principal: "fixture"
+  } }), /INVALID_STANDING_AUTHORIZATION/);
+  assert.throws(() => createExecutionIntent(make("git.integration_preflight", { ...preInput, branch: "main" }, context.workstream_id)), /INVALID_CONTRACT_FIELDS/);
+});
