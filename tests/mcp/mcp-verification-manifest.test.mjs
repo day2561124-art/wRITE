@@ -285,6 +285,10 @@ test("fixed AppContainer development evidence is complete and fail-closed", () =
     delete missing[field];
     assert.equal(developmentReceipt(missing, route).gate_result, "failed", field);
   }
+  const manifestSuite = { ...fixed, suite: "mcp_hermetic_manifest", input_file_count: 3 };
+  assert.equal(developmentReceipt(manifestSuite, route).gate_result, "passed");
+  assert.equal(developmentReceipt({ ...manifestSuite, input_file_count: 5 }, route).gate_result, "failed");
+  assert.equal(developmentReceipt({ ...fixed, input_file_count: 3 }, route).gate_result, "failed");
   assert.equal(developmentReceipt(fixed).isolation_evidence, undefined);
   assert.throws(() => developmentReceipt(fixed, { verificationRoute: "unknown" }), /Unknown development verification route/u);
 });
