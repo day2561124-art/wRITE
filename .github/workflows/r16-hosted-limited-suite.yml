@@ -135,17 +135,9 @@ jobs:
             } until ($info.LastRunTime -ne $previous -and $state -eq 'Ready')
             $result = $info.LastTaskResult
             Write-Output "PILOT_TASK_RESULT=$result; LAST_RUN_TIME=$($info.LastRunTime); STATE=$state"
-            # Logs are untrusted diagnostics. They cannot establish authority or pass.
-            foreach ($name in @('npm.log','test.log','test-stderr.log')) {
-              $log = Join-Path $scratch $name
-              if (Test-Path -LiteralPath $log -PathType Leaf) {
-                $item = Get-Item -LiteralPath $log -Force
-                if (!($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-                  Write-Output "DIAGNOSTIC_LOG=$name"
-                  Get-Content -LiteralPath $log -Tail 35 | ForEach-Object { 'guest: ' + $_ }
-                }
-              }
-            }
+            # Never read guest-controlled paths as administrator. Guest logs
+            # remain in the disposable VM; task scheduler status is the pilot
+            # observation, not an independently certified raw Node outcome.
             if ($result -ne 0) { throw "Unchanged limited tunnel suite failed: task result $result" }
             Write-Output 'R16_LIMITED_TUNNEL_COMPATIBILITY_PASS (fixture only; not certification)'
           } finally {
