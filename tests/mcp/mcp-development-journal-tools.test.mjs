@@ -2045,6 +2045,57 @@ assert.equal(
   } finally { await clean(fixture); }
 }
 
+
+{
+  // A mutation has exactly one fresh physical verification in the uncontended
+  // case, including the detached snapshot used for its first head CAS attempt.
+  const fixture = await tempFixture("append-single-verification");
+  try {
+    const observations = [];
+    const service = createDevOperationJournalService({storageRoot: fixture.storageRoot,
+      verificationTimingObserver: record => observations.push(record)});
+    const a = await service.begin({operation_type:"fixture",tool_name:"dev_fixture"});
+    assert.equal(observations.length, 1);
+    assert.equal(observations[0].completed, true);
+    observations.length = 0;
+    await service.complete(a.operation_id);
+    assert.equal(observations.length, 1);
+    assert.equal(observations[0].suffix_files_loaded, 1);
+    observations.length = 0;
+    const b = await service.begin({operation_type:"fixture",tool_name:"dev_fixture"});
+    assert.equal(observations.length, 1);
+    assert.equal(observations[0].prefix_files_checked, 1);
+    assert.equal(observations[0].suffix_files_loaded, 1);
+    await service.fail(b.operation_id, {result:{outcome:"failed_no_effect"}});
+    const before = await service.verify();
+    assert.equal(before.events.length, 4);
+    assert.equal(before.dangling_operations.length, 0);
+    const first = await readEvent(fixture.storageRoot, 0);
+    await writeFile(path.join(fixture.storageRoot,"events",first.file), "tampered\n");
+    await assert.rejects(service.begin({operation_type:"fixture",tool_name:"dev_fixture"}));
+    assert.equal((await service.status()).chain_verified, false);
+    assert.equal((await eventFiles(fixture.storageRoot)).length, 4);
+  } finally { await clean(fixture); }
+}
+{
+  // Both callers can read one head, but only one can publish that CAS. The
+  // losing caller must reverify the changed head and may not duplicate a terminal.
+  const fixture = await tempFixture("append-terminal-cas");
+  try {
+    const a = createDevOperationJournalService({storageRoot: fixture.storageRoot});
+    const b = createDevOperationJournalService({storageRoot: fixture.storageRoot});
+    const started = await a.begin({operation_type:"fixture",tool_name:"dev_fixture"});
+    const outcomes = await Promise.allSettled([a.complete(started.operation_id),b.complete(started.operation_id)]);
+    assert.equal(outcomes.filter(x=>x.status==="fulfilled").length,1);
+    assert.equal(outcomes.filter(x=>x.status==="rejected").length,1);
+    const reopened = createDevOperationJournalService({storageRoot:fixture.storageRoot});
+    const verified = await reopened.verify();
+    assert.equal(verified.events.length,2);
+    assert.equal(verified.dangling_operations.length,0);
+    assert.equal((await reopened.status()).health,"healthy");
+  } finally { await clean(fixture); }
+}
+
 if (process.env.WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL === "1") {
   await rm(path.dirname(DEV_JOURNAL_STORAGE_ROOT), { recursive: true, force: true });
 }
