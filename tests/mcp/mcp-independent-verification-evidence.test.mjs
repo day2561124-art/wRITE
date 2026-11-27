@@ -129,3 +129,66 @@ test("host observer records signed evidence in real Journal without changing can
     complete: async () => assert.fail("must not publish success") } });
   await assert.rejects(journalFailure(request), /fixture journal unavailable/);
 });
+
+test("GitHub collector requires exact provider identity, pinned workflow and complete ordered steps", async () => {
+  const { createHash } = await import("node:crypto");
+  const { createGitHubVerificationCollector } = await import("../../server/src/mcp-independent-verification-github.mjs");
+  const commit = candidate.integration_commit;
+  const bytes = Buffer.from("fixture reviewed definition");
+  const required = { suite: "all", platform: "linux", workflow_id: 77,
+    workflow_path: ".github/workflows/fixture.yml", workflow_sha256: createHash("sha256").update(bytes).digest("hex"),
+    job_name: "full", runner_label: "ubuntu-latest", runner_group_name: "GitHub Actions",
+    required_steps: ["Exact checkout", "Full gate"] };
+  const policy = { repository: expected.repository, repository_id: 123, required: [required], max_age_ms: 600000 };
+  const repository = { id: 123, full_name: expected.repository };
+  const run = () => ({ id: 111, repository, head_repository: repository, head_sha: commit,
+    workflow_id: 77, path: required.workflow_path + "@fixture", event: "push",
+    status: "completed", conclusion: "success", run_attempt: 1,
+    run_started_at: new Date(nowMs - 4000).toISOString(), updated_at: new Date(nowMs - 1000).toISOString() });
+  const job = () => ({ id: 222, run_id: 111, head_sha: commit, name: "full", labels: ["ubuntu-latest"],
+    runner_group_name: "GitHub Actions", status: "completed", conclusion: "success",
+    started_at: new Date(nowMs - 3000).toISOString(), completed_at: new Date(nowMs - 2000).toISOString(),
+    steps: required.required_steps.map((name, index) => ({ name, number: index + 1, status: "completed", conclusion: "success" })) });
+  const req = { commit, runs: [{ suite: "all", platform: "linux", run_id: 111 }] };
+  const build = overrides => createGitHubVerificationCollector({ policy, clock: () => nowMs,
+    readRun: async () => run(), readWorkflowBytes: async () => bytes,
+    readJobs: async args => { assert.equal(args.run_attempt, 1); return { total_count: 1, jobs: [job()] }; },
+    ...overrides });
+  const pass = await build()(req);
+  assert.equal(pass.observed, true);
+  assert.equal(pass.execution_authorized, false);
+  assert.equal(pass.observations[0].provider_job_conclusion, "success");
+  assert.equal(pass.observations[0].exit_code, undefined);
+  assert.equal(pass.observations[0].passed, undefined);
+  for (const [mutate, code] of [
+    [r => { delete r.run_attempt; }, "GITHUB_RUN_IDENTITY_UNVERIFIED"],
+    [r => { r.head_sha = "9".repeat(40); }, "GITHUB_RUN_IDENTITY_UNVERIFIED"],
+    [r => { r.repository = { ...repository, id: 456 }; }, "GITHUB_RUN_IDENTITY_UNVERIFIED"],
+    [r => { r.event = "pull_request"; }, "GITHUB_WORKFLOW_EVENT_UNSUPPORTED"],
+    [r => { r.conclusion = "failure"; }, "GITHUB_RUN_NOT_SUCCESSFUL"],
+  ]) {
+    const result = await build({ readRun: async () => { const r = run(); mutate(r); return r; } })(req);
+    assert.equal(result.code, code);
+    assert.equal(result.observed, false);
+  }
+  assert.equal((await build({ readWorkflowBytes: async () => Buffer.from("different") })(req)).code,
+    "GITHUB_WORKFLOW_DEFINITION_MISMATCH");
+  assert.equal((await build({ readJobs: async () => ({ total_count: 2, jobs: [job()] }) })(req)).code,
+    "GITHUB_JOB_LIST_INCOMPLETE");
+  for (const [mutate, code] of [
+    [j => { j.labels.push("self-hosted"); }, "GITHUB_JOB_IDENTITY_UNVERIFIED"],
+    [j => { delete j.head_sha; }, "GITHUB_JOB_IDENTITY_UNVERIFIED"],
+    [j => { j.conclusion = "skipped"; }, "GITHUB_JOB_NOT_SUCCESSFUL"],
+    [j => { j.steps[1].conclusion = "skipped"; }, "GITHUB_STEP_EVIDENCE_INCOMPLETE"],
+    [j => { j.steps.reverse(); j.steps[0].number = 1; j.steps[1].number = 2; }, "GITHUB_STEP_EVIDENCE_INCOMPLETE"],
+    [j => { delete j.completed_at; }, "GITHUB_JOB_TIMESTAMP_UNVERIFIED"],
+  ]) {
+    const result = await build({ readJobs: async () => { const j = job(); mutate(j); return { total_count: 1, jobs: [j] }; } })(req);
+    assert.equal(result.code, code);
+    assert.equal(result.observed, false);
+  }
+  let calls = 0;
+  assert.equal((await build({ readRun: async () => ({ ...run(), run_attempt: ++calls }) })(req)).code,
+    "GITHUB_RUN_CHANGED_DURING_OBSERVATION");
+  assert.equal((await build()({ ...req, repository: "attacker/repo" })).code, "INVALID_GITHUB_VERIFICATION_REQUEST");
+});
