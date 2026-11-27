@@ -642,3 +642,40 @@ test("R16 fixed manifest suite executes native scoped verification with durable 
   assert.equal((await f.journal.status()).health, "healthy");
   assert.equal(await readFile(target, "utf8"), changed);
 });
+
+
+// Same protected direct Node runner and exact three-file closure in an
+// actual limited Session 0 account; no Git or host state dependency.
+test("R16 fixed manifest suite executes direct native runner with station lease", { ...platform, timeout: 180_000 }, async t => {
+  const f = await fixture(t);
+  const originals = new Map();
+  for (const file of FIXED_MANIFEST_SOURCE_PATHS) {
+    const target = path.join(f.context.root, file);
+    const bytes = await readFile(new URL("../../" + file, import.meta.url));
+    originals.set(target, bytes);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, bytes);
+  }
+  const good = await runFixedIsolatedVerification({ suite: FIXED_MANIFEST_SUITE, context: f.context });
+  assert.equal(good.passed, true, JSON.stringify(good));
+  assert.equal(good.exit_code, 0);
+  assert.equal(good.input_file_count, 3);
+  assert.equal(good.cleanup_pending, false);
+  assert.equal(good.job_terminated, true);
+  assert.equal(good.workspace_writes, false);
+  assert.match(good.stdout, /(?:#|ℹ) pass 11\b/u);
+  for (const [file, bytes] of originals) assert.deepEqual(await readFile(file), bytes);
+  const entry = path.join(f.context.root, FIXED_MANIFEST_SOURCE_PATHS[0]);
+  const changed = (await readFile(entry, "utf8"))+'\n;test("R16 station deliberate failure",()=>assert.fail("R16 deliberate failure"));\n';
+  await writeFile(entry, changed);
+  const failure = await runFixedIsolatedVerification({ suite: FIXED_MANIFEST_SUITE, context: f.context });
+  assert.equal(failure.passed, false, JSON.stringify(failure));
+  assert.equal(failure.exit_code, 1);
+  assert.equal(failure.cleanup_pending, false);
+  assert.equal(failure.job_terminated, true);
+  assert.equal(failure.workspace_writes, false);
+  assert.equal(failure.input_file_count, 3);
+  assert.notEqual(failure.input_manifest_sha256, good.input_manifest_sha256);
+  assert.match(failure.stdout, /(?:#|ℹ) fail 1\b/u);
+  assert.equal(await readFile(entry, "utf8"), changed);
+});
