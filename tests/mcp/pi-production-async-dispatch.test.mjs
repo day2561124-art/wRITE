@@ -192,7 +192,12 @@ test('the host supervisor restarts a failed worker and never restarts after drai
  }finally{supervisor.drain();}
 });
 test('concurrent session inspections use the ready worker and recheck a changed Journal', async t => {
- const { journal, route, storageRoot } = await fixture(t);
+ const f = await fixture(t);
+ const { journal, route, storageRoot } = f;
+ const controller=host(f);
+ const firstOperation=await controller.submit(intent('ipc-exact-first'));
+ const secondOperation=await controller.submit(intent('ipc-exact-second'));
+ const startSequence=(await journal.verify()).head.latest_sequence;
  function channelPair() {
   const a = Object.assign(new EventEmitter(), { connected: true });
   const b = Object.assign(new EventEmitter(), { connected: true });
@@ -207,7 +212,12 @@ test('concurrent session inspections use the ready worker and recheck a changed 
  t.after(() => supervisor.drain());
  let journalCalls = 0;
  let routeCalls = 0;
- t.after(attachPiInspector(workerProcess, view => {
+ let operationCalls = 0;
+ t.after(attachPiInspector(workerProcess, (view,selector) => {
+  if(view==='operation'){
+   operationCalls+=1;
+   return controller.inspectStatus(selector);
+  }
   if (view === 'route') {
    routeCalls += 1;
    return route.inspect();
@@ -225,22 +235,42 @@ test('concurrent session inspections use the ready worker and recheck a changed 
   return client;
  });
  const health = await Promise.all(sessions.map(client => client.inspect('journal')));
- assert.deepEqual(health.map(value => value.latest_sequence), [2, 2]);
+ assert.deepEqual(health.map(value => value.latest_sequence), [startSequence, startSequence]);
  assert.equal(journalCalls, 1);
  const started = await journal.begin({ operation_type: 'inspection_fixture', tool_name: 'fixture' });
  await journal.complete(started.operation_id);
  const [updated, routing] = await Promise.all([
   sessions[0].inspect('journal'), sessions[1].inspect('route'),
  ]);
- assert.equal(updated.latest_sequence, 4);
+ assert.equal(updated.latest_sequence, startSequence+2);
  assert.equal(routing.mode, 'pi_default');
  assert.equal(routeCalls, 1);
  await assert.rejects(sessions[0].inspect('dispatch'), /PI_INSPECTION_UNAVAILABLE/);
+ const a={operation_id:firstOperation.state.operation_id,context};
+ const b={operation_id:secondOperation.state.operation_id,context};
+ const [one,duplicate,two]=await Promise.all([
+  sessions[0].inspect('operation',a),sessions[1].inspect('operation',a),sessions[0].inspect('operation',b)]);
+ assert.equal(operationCalls,2,'only exact in-flight selectors may coalesce');
+ assert.equal(one.operation.state.operation_id,a.operation_id);
+ assert.equal(duplicate.operation.projection_hash,one.operation.projection_hash);
+ assert.equal(two.operation.state.operation_id,b.operation_id);
+ const byIntent=await sessions[0].inspect('operation',{intent_id:'ipc-exact-first',context});
+ assert.equal(byIntent.operation.projection_hash,one.operation.projection_hash);
+ assert.equal(operationCalls,3);
+ await assert.rejects(sessions[0].inspect('operation',{...a,context:{...context,workspace_id:'dev_workspace_'+'f'.repeat(24)}}),/WORKSPACE_CONTEXT_MISMATCH/);
+ await assert.rejects(sessions[0].inspect('operation',{...a,command:'dispatch'}),/PI_INSPECTION_UNAVAILABLE/);
+ await assert.rejects(sessions[0].inspect('journal',a),/PI_INSPECTION_UNAVAILABLE/);
+ const beforeExecution=operationCalls;
+ await controller.execute(intent('ipc-exact-first'));
+ const refreshed=await sessions[0].inspect('operation',a);
+ assert.equal(refreshed.operation.state.status,'COMPLETED');
+ assert.equal(operationCalls,beforeExecution+1);
  const events = path.join(storageRoot, 'events');
  const [first] = (await readdir(events)).sort();
  await appendFile(path.join(events, first), 'invalid JSON');
  assert.equal((await sessions[0].inspect('journal')).chain_verified, false);
- await assert.rejects(sessions[1].inspect('route'), /PI_INSPECTION_FAILED/);
+ await assert.rejects(sessions[1].inspect('route'), /PI_INSPECTION_FAILED|CORRUPT_STATE/);
+ await assert.rejects(sessions[0].inspect('operation',a), /PI_INSPECTION_FAILED|CORRUPT_STATE/);
 });
 test('semantic snapshot reuse rejects altered prior bytes despite unchanged event hashes',async t=>{
  const f=await fixture(t),h=host(f);await h.submit(intent('semantic-prefix'));
