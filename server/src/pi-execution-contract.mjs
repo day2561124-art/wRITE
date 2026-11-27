@@ -11,7 +11,7 @@ export const PERMISSIONS = Object.freeze(["read", "workspace_create", "write", "
 export const PI_TASK_AUTHORIZATION_ID = /^pi_task_[a-f0-9]{32}$/u;
 export const WINDOWS_SERVICE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,79}$/u;
 export const WINDOWS_APPROVED_SCRIPT_ID = /^(?!(?:aux|con|nul|prn|com[0-9]|lpt[0-9])$)[a-z0-9][a-z0-9_-]{0,63}$/u;
-const suites = ["mcp", "mcp_core", "mcp_pi_postseal", "mcp_hermetic_core", "mcp_infrastructure", "mcp_reliability", "mcp_tunnel",
+const suites = ["mcp", "mcp_core", "mcp_pi_postseal", "mcp_hermetic_core", "mcp_hermetic_manifest", "mcp_infrastructure", "mcp_reliability", "mcp_tunnel",
   "communication", "world_simulation", "cognition", "memory_retrieval"];
 function descriptor(capability, tool, permission, effect, required, optional = [], scope = "workspace", inputProperties) {
   return Object.freeze({ capability, tool, permission, effect, required: Object.freeze(required),
