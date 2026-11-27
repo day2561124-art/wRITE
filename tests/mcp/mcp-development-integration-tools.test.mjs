@@ -1208,3 +1208,69 @@ test("R16 independent candidate evidence rechecks signed receipt at apply withou
   assert.equal(candidate.state, "preflight_passed");
   assert.equal(ready.state, "ready");
 });
+
+test("R16 independent adoption keeps actual candidate and Journal fences without claiming local tests", async t => {
+  const harness = await createHarness("r16-independent-adoption");
+  t.after(() => harness.cleanup());
+  const journal = createDevOperationJournalService({ storageRoot: path.join(harness.root, "independent-adoption-journal") });
+  const source = await harness.createSource({ changes: { "independent-adoption.txt": "fixture\n" } });
+  const { generateKeyPairSync, sign } = await import("node:crypto");
+  const { createIndependentCandidateEvidenceGate } = await import("../../server/src/mcp-independent-verification-candidate.mjs");
+  const { requireIndependentApplyEvidence } = await import("../../server/src/mcp-independent-verification-adoption.mjs");
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const now = Date.now();
+  let currentTime = now;
+  const rows = ["mcp", "mcp_tunnel"].map(suite => ({ suite, platform: "linux", workflow_sha256: "b".repeat(64) }));
+  const policy = { repository: "owner/disposable", issuer: "fixture-issuer", max_age_ms: 60000, suite_workflows: rows, additional_required: [] };
+  let envelopeAvailable = true;
+  let job = 20;
+  const gate = createIndependentCandidateEvidenceGate({ policy, pinnedPublicKey: publicKey, clock: () => currentTime,
+    readEnvelope: async candidate => {
+      if (!envelopeAvailable) throw Error("source unavailable");
+      const payload = JSON.stringify({ schema_version: 1, issuer: policy.issuer, repository: policy.repository,
+        candidate, issued_at_ms: now - 1000, expires_at_ms: now + 60000 - 1000,
+        results: rows.map((row, i) => ({ ...row, commit: candidate.integration_commit, run_id: 10, job_id: job + i,
+          run_attempt: 1, completed_at_ms: now - 2000, execution_ok: true, passed: true, timed_out: false, skipped: false, exit_code: 0 })) });
+      return { payload, signature: sign(null, Buffer.from(payload), privateKey).toString("base64url") };
+    },
+  });
+  const service = harness.createService({ journal, independentEvidenceGate: gate,
+    clock: () => new Date(currentTime), validationRunner: async () => assert.fail("independent adoption must not run local tests") });
+  const candidate = await service.preflight({ workstream_id: source.workstream_id, expected_workstream_revision: 1 });
+  const req = { integration_candidate_id: candidate.integration_candidate_id, expected_revision: candidate.revision };
+  envelopeAvailable = false;
+  await assert.rejects(service.validateIntegration(req), { code: "INDEPENDENT_VALIDATION_EVIDENCE_REQUIRED" });
+  assert.equal((await service.getCandidate({ integration_candidate_id: req.integration_candidate_id })).state, "preflight_passed");
+  envelopeAvailable = true;
+  const context = await service.getIndependentVerificationContext(req);
+  const ready = await service.validateIntegration(req);
+  assert.equal(ready.state, "ready");
+  assert.equal(ready.integration_workspace.state, "removed");
+  assert.equal(ready.integration_workspace.cleanup_pending, false);
+  assert.equal(ready.validation_report.evidence_source, "independent_signed");
+  assert.deepEqual(ready.validation_report.suites, []);
+  assert.equal(ready.validation_report.verification_manifest.independent_results.length, 2);
+  assert.equal(ready.validation_report.verification_manifest.passed, true);
+  const events = (await journal.verify()).events;
+  assert.equal(events.some(e => e.operation_type === "test_evidence"), false);
+  const proof = await gate.reviewForApply(ready, context.plan, ready.validation_report.evidence_reference);
+  assert.equal(requireIndependentApplyEvidence({ candidate: ready, plan: context.plan, proof, events, nowMs: now }), true);
+  const operation = ready.validation_report.independent_validation_operation_id;
+  assert.throws(() => requireIndependentApplyEvidence({ candidate: ready, plan: context.plan, proof,
+    events: events.filter(e => e.operation_id !== operation || e.stage !== "operation_completed"), nowMs: now }),
+    { code: "INDEPENDENT_APPLY_JOURNAL_EVIDENCE_REQUIRED" });
+  const apply = { integration_candidate_id: ready.integration_candidate_id, expected_revision: ready.revision };
+  const noVerifier = harness.createService({ journal });
+  await assert.rejects(noVerifier.integrate(apply), /INDEPENDENT_APPLY_EVIDENCE_REQUIRED/);
+  job++;
+  await assert.rejects(service.integrate(apply), /INDEPENDENT_APPLY_EVIDENCE_REQUIRED/);
+  job--;
+  currentTime = now + 60000;
+  await assert.rejects(service.integrate(apply), /INDEPENDENT_APPLY_EVIDENCE_REQUIRED/);
+  assert.equal((await git(harness.repositoryRoot, ["rev-parse", "HEAD"])).stdout.trim(), harness.baseHead);
+  currentTime = now;
+  const integrated = await service.integrate(apply);
+  assert.equal(integrated.state, "integrated");
+  assert.equal((await git(harness.repositoryRoot, ["rev-parse", "HEAD"])).stdout.trim(), ready.integration_commit);
+  assert.equal((await journal.status()).chain_verified, true);
+});
