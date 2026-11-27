@@ -969,3 +969,63 @@ console.log("- persistent candidate identity, exact validation, and cleanup: pas
 console.log("- ancestry, fast-forward, merge-tree, merge commit, and conflict rejection: passed");
 console.log("- dependency, serial race, source/dependency stale validation: passed");
 console.log("- dirty-main carry-forward and overlap rejection: passed");
+
+test("R16 real candidate preflight survives a lost response with exact Journal evidence and no duplicate candidate", async t => {
+  const harness = await createHarness("r16-managed-preflight");
+  t.after(() => harness.cleanup());
+  const source = await harness.createSource({ changes: { "r16.txt": "fixture\n" } });
+  const journalRoot = path.join(harness.root, "r16-journal");
+  const journal = createDevOperationJournalService({ storageRoot: journalRoot });
+  const service = harness.createService({ journal });
+  const { createPiReliableMcpAdapter } = await import("../../server/src/pi-mcp-reliable-adapter.mjs");
+  const { createPiLifecycleScopeVerifier } = await import("../../server/src/pi-lifecycle-scope.mjs");
+  const { hashExecutionInput, REQUIRED_DECISION_BOUNDARIES } = await import("../../server/src/pi-execution-contract.mjs");
+  const context = { project_id: "writer_workbench", workstream_id: source.workstream_id, workspace_id: source.workspace_id };
+  const input = { workstream_id: source.workstream_id, expected_workstream_revision: 1 };
+  const intent = { schema_version: 1, intent_id: "r16-real-preflight-fixture", goal: "Verify disposable candidate preflight",
+    context, constraints: ["Disposable repository only"],
+    requested_actions: [{ step_id: "preflight", capability: "git.integration_preflight", input, depends_on: [], idempotency_key: "r16-real-preflight-key" }],
+    mutation_plan: [{ step_id: "preflight", target: source.workstream_id, expected_change: "Create one exact candidate", input_sha256: hashExecutionInput(input) }],
+    verification: { focused: [], affected: [], full: [] }, completion_conditions: ["Observe exact candidate"],
+    permissions: { read: false, write: false, workspace_create: false, tests: false, commit: false, integrate: true, push: false },
+    decision_boundaries: [...REQUIRED_DECISION_BOUNDARIES] };
+  let sends = 0;
+  const verifyScope = createPiLifecycleScopeVerifier({
+    getWorkstream: async ({ workstream_id }) => harness.workstreams.get(workstream_id),
+    getCheckpoint: async () => null, getOperation: args => journal.getOperation(args),
+    getIntegrationCandidate: args => service.getCandidate(args), validationAllowed: async () => false,
+  });
+  const makeAdapter = (callTool, store = journal) => createPiReliableMcpAdapter({
+    callTool, queryOperation: args => store.getOperation(args),
+    resolveWorkspace: async () => null, verifyScope,
+  });
+  const first = makeAdapter(async request => {
+    sends++;
+    assert.equal(request.name, "dev_workspace_integration_preflight");
+    const outcome = await journal.executeReconciled({
+      reconciliation_key: request._meta.reconciliation_key,
+      request_fingerprint_sha256: hashExecutionInput({ tool_name: request.name, arguments: request.arguments }),
+      tool_name: request.name,
+      resolve_workspace_scope: async () => ({ workspace_id: source.workspace_id, workstream_id: source.workstream_id }),
+    }, async () => ({ content: [{ type: "text", text: JSON.stringify(await service.preflight(request.arguments)) }] }));
+    assert.equal(outcome.reconciled, false);
+    throw Object.assign(new Error("fixture loses response after real candidate creation"), { code: "TIMEOUT" });
+  });
+  await assert.rejects(first.execute(intent, "preflight"), { code: "TIMEOUT" });
+  const reopened = createDevOperationJournalService({ storageRoot: journalRoot });
+  const restored = makeAdapter(async () => assert.fail("must not replay candidate creation"), reopened);
+  const result = await restored.reconcile(intent, "preflight");
+  assert.equal(result.verdict, "completed");
+  const facts = result.receipt.evidence.original_result;
+  assert.equal(facts.integration_commit, source.sourceHead);
+  assert.equal(facts.workspace_id, source.workspace_id);
+  assert.equal(facts.workstream_id, source.workstream_id);
+  const persisted = await harness.createService().getCandidate({ integration_candidate_id: facts.integration_candidate_id });
+  assert.equal(persisted.revision, facts.revision);
+  assert.equal(persisted.state, "preflight_passed");
+  const candidates = await service.listCandidates({ workstream_id: source.workstream_id });
+  assert.equal(candidates.total, 1);
+  assert.equal(sends, 1);
+  assert.equal((await reopened.status()).chain_verified, true);
+  assert.equal((await git(harness.repositoryRoot, ["rev-parse", "HEAD"])).stdout.trim(), harness.baseHead);
+});
