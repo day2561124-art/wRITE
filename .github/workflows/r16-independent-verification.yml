@@ -44,4 +44,4 @@ jobs:
 
       - name: Real additional regression in existing Windows AppContainer
         if: runner.os == 'Windows'
-        run: node --test --test-name-pattern="R16 existing AppContainer" tests/mcp/pi-workspace-appcontainer.test.mjs
+        run: node --test --test-name-pattern="R16 (existing AppContainer|fixed manifest suite)" tests/mcp/pi-workspace-appcontainer.test.mjs
