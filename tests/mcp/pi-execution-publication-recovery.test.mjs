@@ -207,3 +207,47 @@ for(const stage of ["after_started","after_completed"]) {
     assert.equal((await journal.status()).dangling_operation_count,0);
   });
 }
+
+for (const stage of ["after_started","after_completed"]) {
+  test("direct transition read recovers only a proven interrupted projection: "+stage,async t=>{
+    const root=await fixture(t);
+    await assert.rejects(child(root,"none",`
+      const admitted=await store.admit(intent);
+      const {hostname}=await import("node:os");
+      const interrupted=createDevOperationJournalService({storageRoot:path.join(root,"journal"),
+        executionPublicationHook:async stage=>{if(stage===${JSON.stringify(stage)})process.exit(73);}});
+      await createPiReliableExecutionStore({journal:interrupted}).command({
+        operation_id:admitted.state.operation_id,context,expected_revision:1,
+        command:{type:"owner_acquired",owner:{worker_id:"pi_worker_"+"b".repeat(32),pid:process.pid,hostname:hostname()},replaced_worker_id:null}});
+    `),e=>e.code===73);
+    const before=await events(root);
+    const admitted=before[1].value.execution_projection;
+    const args={operation_id:admitted.state.operation_id,context,expected_revision:1,
+      command:{type:"owner_acquired",owner:{worker_id:"pi_worker_"+"a".repeat(32),pid:process.pid,hostname:os.hostname()},replaced_worker_id:null}};
+    const storageRoot=path.join(root,"journal"),headPath=path.join(storageRoot,"head.json");
+    const headBefore=await readFile(headPath,"utf8");
+    const noRecovery=createPiReliableExecutionStore({journal:createDevOperationJournalService({storageRoot}),recoverOnReadFailure:false});
+    await assert.rejects(noRecovery.command(args));
+    assert.equal(await readFile(headPath,"utf8"),headBefore);
+    assert.equal((await events(root)).length,before.length);
+    const journal=createDevOperationJournalService({storageRoot});
+    const writer=createPiReliableExecutionStore({journal});
+    if(stage==="after_started"){
+      const result=await writer.command(args);
+      assert.equal(result.revision,2);
+      assert.equal(result.runtime.owner.worker_id,args.command.owner.worker_id);
+      assert.equal((await journal.verify()).events.length,6);
+    }else{
+      await assert.rejects(writer.command(args),{code:"STATE_REVISION_CONFLICT"});
+      const result=await writer.inspect({operation_id:args.operation_id,context});
+      assert.equal(result.revision,2);
+      assert.equal(result.runtime.owner.worker_id,"pi_worker_"+"b".repeat(32));
+      assert.equal((await journal.verify()).events.length,4);
+    }
+    const verified=await journal.verify();
+    assert.equal(verified.events.at(-1).execution_projection.revision,2);
+    assert.equal((await journal.status()).health,"healthy");
+    assert.equal((await journal.status()).dangling_operation_count,0);
+    await assert.rejects(readFile(path.join(root,"count")),e=>e.code==="ENOENT");
+  });
+}
