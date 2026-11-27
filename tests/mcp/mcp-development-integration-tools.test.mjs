@@ -1278,7 +1278,7 @@ test("R16 independent adoption keeps actual candidate and Journal fences without
 test("R16 independent adoption recovers producer exit with active worktree or before and after durable validation terminal", async () => {
   for (const phase of ["active-worktree","before-terminal","after-terminal"]) {
     const completed=phase==="after-terminal", active=phase==="active-worktree";
-    const harness = await createHarness("r16-independent-interruption");
+    const harness = await createHarness(active ? "r16 interruption" : "r16-independent-interruption");
     try {
       const runtime = path.join(harness.root, "runtime");
       const journalRoot = path.join(harness.root, "independent-interruption-journal");
@@ -1377,6 +1377,13 @@ test("R16 independent adoption recovers producer exit with active worktree or be
       await assert.rejects(liveOwner.recoverInterruptedValidation(input),/OWNER_ACTIVE_OR_UNKNOWN/);
       assert.equal((await journal.verify()).head.latest_event_hash,before.head.latest_event_hash);
       if(active){
+        await git(harness.repositoryRoot,["worktree","unlock",integrationPath]);
+        await git(harness.repositoryRoot,["worktree","lock","--reason","different owner",integrationPath]);
+        await assert.rejects(service.recoverInterruptedValidation(input),/INDEPENDENT_RECOVERY_WORKTREE_OWNERSHIP_MISMATCH/);
+        assert.equal((await journal.verify()).head.latest_event_hash,before.head.latest_event_hash);
+        assert.equal((await service.getCandidate({integration_candidate_id:current.integration_candidate_id})).revision,current.revision);
+        await git(harness.repositoryRoot,["worktree","unlock",integrationPath]);
+        await git(harness.repositoryRoot,["worktree","lock","--reason","Writer Workbench integration "+current.integration_candidate_id,integrationPath]);
         const unexpected=path.join(integrationPath,"unexpected-untracked.txt");
         await writeFile(unexpected,"preserve this data");
         await assert.rejects(service.recoverInterruptedValidation(input),/VALIDATION_RECOVERY_DIRTY_WORKTREE/);
