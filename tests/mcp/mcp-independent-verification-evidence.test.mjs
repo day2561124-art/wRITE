@@ -307,7 +307,7 @@ test("independent issuer publishes immutable exact receipts and the restarted co
   const { generateKeyPairSync, sign } = await import("node:crypto");
   const { createIndependentVerificationIssuer } = await import("../../server/src/mcp-independent-verification-issuer.mjs");
   const { createIndependentCandidateEvidenceGate } = await import("../../server/src/mcp-independent-verification-candidate.mjs");
-  const { createIndependentReceiptPublisher, createIndependentReceiptReader } = await import("../../server/src/mcp-independent-verification-receipt-store.mjs");
+  const { createIndependentReceiptPublisher, createIndependentReceiptReader, createIndependentReceiptPublicationRecovery } = await import("../../server/src/mcp-independent-verification-receipt-store.mjs");
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(),"r16-receipt-exchange-")));
   t.after(() => rm(root,{recursive:true,force:true}));
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
@@ -369,6 +369,34 @@ test("independent issuer publishes immutable exact receipts and the restarted co
   await link(file,alias);
   await assert.rejects(reader()(candidate),{code:"INDEPENDENT_RECEIPT_FILE_UNVERIFIED"});
   await rm(alias);
+  // Simulate the exact on-disk state left by a publisher interrupted after
+  // atomic link but before unlink. The consumer cannot use it prematurely.
+  const temporary = path.join(root, "." + name + ".aabbccdd-1234-4567-8899-aabbccddeeff.tmp");
+  await link(file, temporary);
+  let leaseAvailable = false;
+  const recover = createIndependentReceiptPublicationRecovery({root,assertProtectedDirectory,pinnedPublicKey:publicKey,
+    resolveExpected:async c=>({...expectedPolicy,candidate:c}),clock:()=>time,
+    withQuiescentPublisher:async action=>{
+      if (!leaseAvailable) throw Error("PUBLISHER_ACTIVE");
+      return action();
+    }});
+  await assert.rejects(reader()(candidate),{code:"INDEPENDENT_RECEIPT_FILE_UNVERIFIED"});
+  await assert.rejects(recover(candidate),/PUBLISHER_ACTIVE/);
+  leaseAvailable=true;
+  allowed=false;
+  await assert.rejects(recover(candidate),{code:"INDEPENDENT_RECEIPT_DIRECTORY_UNVERIFIED"});
+  allowed=true;
+  await link(file,alias);
+  await assert.rejects(recover(candidate),{code:"INDEPENDENT_RECEIPT_RECOVERY_UNVERIFIED"});
+  await rm(alias);
+  time=issued.expires_at_ms;
+  await assert.rejects(recover(candidate),{code:"INDEPENDENT_RECEIPT_PROOF_INVALID"});
+  time=now;
+  assert.equal((await recover(candidate)).recovered,true);
+  assert.deepEqual(await readdir(root),[name]);
+  assert.deepEqual(await readFile(file),original);
+  assert.deepEqual(await reader()(candidate),issued.envelope);
+  await assert.rejects(recover(candidate),{code:"INDEPENDENT_RECEIPT_RECOVERY_UNVERIFIED"});
   // Actual on-disk tampering is still rejected by the signature consumer.
   await writeFile(file,JSON.stringify({...issued.envelope,signature:"A".repeat(86)}));
   assert.equal((await makeGate().reviewForValidation({...candidate,state:"preflight_passed"},plan)).verified,false);
