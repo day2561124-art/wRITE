@@ -56,10 +56,10 @@ export function createPiDurableWorkerSupervisor({spawnProcess=spawn,root=release
   if(child?.connected){publish({state:'draining'});child.send({protocol:PI_DURABLE_WORKER_PROTOCOL,kind:'drain'},()=>{});}
   else if(!child)publish({state:'stopped'});
  }
- async function inspect(view){
+ async function inspect(view,selector){
   if(!inspection||closed)throw new Error('PI_INSPECTION_UNAVAILABLE');
   if(!['ready','idle','executing'].includes(status.state))throw new Error('PI_INSPECTION_NOT_READY');
-  return inspection.inspect(view);
+  return inspection.inspect(view,selector);
  }
  start();
  return Object.freeze({getStatus:()=>({...status,last_exit:status.last_exit?{...status.last_exit}:null}),drain,inspect});

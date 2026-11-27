@@ -2215,8 +2215,9 @@ const toolDefinitions = [
       if ((!args.operation_id === !args.intent_id) || (args.bootstrap
         ? args.workstream_id!==undefined || args.workspace_id!==undefined
         : !args.workstream_id || !args.workspace_id)) throw new Error("PI_OPERATION_CONTEXT_REQUIRED");
-      return jsonContent(await piProductionController.inspectStatus({ ...(args.operation_id ? {operation_id: args.operation_id} : {intent_id: args.intent_id}),
-        context: { project_id: "writer_workbench", workstream_id: args.bootstrap?null:args.workstream_id, workspace_id: args.bootstrap?"dev_workspace_shared_repository_v1":args.workspace_id } }));
+      const selector = { ...(args.operation_id ? {operation_id: args.operation_id} : {intent_id: args.intent_id}),
+        context: { project_id: "writer_workbench", workstream_id: args.bootstrap?null:args.workstream_id, workspace_id: args.bootstrap?"dev_workspace_shared_repository_v1":args.workspace_id } };
+      return jsonContent(await (parentPiInspection?.inspect('operation',selector) ?? piProductionController.inspectStatus(selector)));
     },
   },
   {
@@ -6621,8 +6622,9 @@ if(process.argv.includes('--pi-worker')){
   await runPiDurableWorker({controller:piProductionController,ready:async()=>{
    void runtimeComponents.start();
    await runtimeComponents.ensure("journal");
-   detachInspection = attachPiInspector(process, view => view === 'route'
-     ? piProductionController.status() : dev_workspace_journal_status());
+   detachInspection = attachPiInspector(process, (view,selector) => view === 'route'
+     ? piProductionController.status() : view === 'operation'
+       ? piProductionController.inspectStatus(selector) : dev_workspace_journal_status());
   }});
  } finally {
   detachInspection();
