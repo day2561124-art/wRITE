@@ -9,6 +9,7 @@ import { pathToFileURL } from "node:url";
 import test from "node:test";
 import "./mcp-integration-verification-router.test.mjs";
 import "./mcp-verification-manifest.test.mjs";
+import "./mcp-independent-verification-evidence.test.mjs";
 import {
   DEV_INTEGRATION_SCHEMA_VERSION,
   createDevIntegrationService,
