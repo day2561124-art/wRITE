@@ -1,0 +1,276 @@
+name: R16 limited-account full suite pilot
+# Feasibility on disposable hosted runners, NOT a trusted verifier or release gate.
+# Candidate code runs with no production credentials, OIDC or attestation permission.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/r16-limited-account-full-suite.yml'
+permissions:
+  contents: read
+concurrency:
+  group: r16-limited-suite-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          package-manager-cache: false
+      - name: Run unchanged mandatory suites in a disposable non-admin account
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$EXPECTED_HEAD" ]]
+          account="nexapilot$(openssl rand -hex 6)"
+          root="$(sudo mktemp -d /opt/nexa-pilot.XXXXXXXX)"
+          sudo chmod 0755 "$root"
+          sudo useradd --user-group --no-create-home --shell /bin/bash "$account"
+          cleanup() {
+            sudo pkill -KILL -u "$account" || true
+            sudo userdel "$account"
+            sudo rm -rf -- "$root"
+          }
+          trap cleanup EXIT
+          sudo install -d -m 0700 -o "$account" -g "$account" "$root/home" "$root/work" "$root/tmp"
+          sudo install -d -m 0700 "$root/observer"
+          # Source bundle and copied toolchain are prepared without executing repository scripts.
+          git -c core.hooksPath=/dev/null bundle create "$RUNNER_TEMP/nexa-$account.bundle" HEAD
+          sudo install -m 0444 "$RUNNER_TEMP/nexa-$account.bundle" "$root/source.bundle"
+          rm -f "$RUNNER_TEMP/nexa-$account.bundle"
+          node_dir="$(dirname "$(readlink -f "$(command -v node)")")"
+          # Node distribution includes its npm installation. Copy out of runner-owned tree.
+          sudo cp -a "$node_dir/.." "$root/toolchain"
+          sudo chown -R root:root "$root/toolchain"
+          sudo chmod -R go-w "$root/toolchain"
+          guest() {
+            sudo -u "$account" -- env -i HOME="$root/home" USER="$account" LOGNAME="$account" TMPDIR="$root/tmp" PATH="$root/toolchain/bin:/usr/bin:/bin" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 /bin/bash -c 'cd "$1" || exit 125; shift; exec "$@"' _ "$root/work" "$@"
+          }
+          guest bash -c 'test "$(id -u)" -ne 0 && ! sudo -n true >/dev/null 2>&1 && ! test -w "$1" && ! test -r "$2"' _ "$root/toolchain/bin/node" "$root/observer"
+          # The limited user must not inherit the inaccessible runner checkout cwd.
+          guest git -c core.hooksPath=/dev/null -c init.templateDir= clone --no-checkout "$root/source.bundle" "$root/work"
+          guest git -C "$root/work" -c core.hooksPath=/dev/null checkout --detach "$EXPECTED_HEAD"
+          [[ "$(guest git -C "$root/work" rev-parse HEAD)" == "$EXPECTED_HEAD" ]]
+          guest git -C "$root/work" remote remove origin
+          marker="$(openssl rand -hex 32)"
+          echo "::stop-commands::$marker"
+          guest bash -c 'cd "$1"; npm ci --no-audit --no-fund' _ "$root/work"
+          # Capture actual outer process status. This is feasibility evidence only.
+          set +e
+          guest timeout --kill-after=15s 2400s bash -c 'cd "$1"; exec node tests/tools/mcp-contract.test.mjs' _ "$root/work"
+          mcp_exit=$?
+          guest timeout --kill-after=15s 600s bash -c 'cd "$1"; exec node tests/mcp-tunnel-launcher.test.mjs' _ "$root/work"
+          tunnel_exit=$?
+          set -e
+          echo "::$marker::"
+          printf 'R16_LIMITED_LINUX_RESULT mcp=%s tunnel=%s\n' "$mcp_exit" "$tunnel_exit"
+          [[ "$mcp_exit" == 0 && "$tunnel_exit" == 0 ]]
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          package-manager-cache: false
+      - name: Run unchanged mandatory suites in a disposable limited Session 0 account
+        shell: pwsh
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -cne $env:EXPECTED_HEAD) { throw 'Candidate mismatch' }
+          Write-Output "Candidate HEAD: $actual"
+          Write-Output 'INSTALLED_STATION_LEASE_V1; disposable CI only; no production deployment'
+          $suffix = [guid]::NewGuid().ToString('N').Substring(0,12)
+          $root = Join-Path $env:SystemDrive "NexaDiag-$suffix"
+          $account = "NexaDiag$suffix"
+          $task = "NexaSession0Diag-$suffix"
+          $createdUser = $false
+          $createdTask = $false
+          $createdProvisioner = $false
+          $provisionTask = 'WriterWorkbench-NexaStationLeaseV1'
+          $providerRoot = Join-Path $env:ProgramFiles 'WriterWorkbench-NexaStationLease-v1'
+          $batchPolicyChanged = $false
+          $observed = $null
+          try {
+            $null = New-Item -ItemType Directory -Path $root
+            # Never run the SYSTEM fixture from a location writable by the
+            # standard test user or guest. Remove inherited root permissions
+            # before writing any executable; only the run subtree is writable.
+            icacls $root /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)(F)' '*S-1-5-32-544:(OI)(CI)(F)' | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Fixture root protection failed' }
+            $source = Join-Path $root 'source'
+            $tools = Join-Path $root 'tools'
+            $run = Join-Path $root 'run'
+            $null = New-Item -ItemType Directory -Path $source,$tools,$run
+            $archive = Join-Path $root 'source.zip'
+            # Installer source is the reviewed main revision, not the candidate.
+            $trusted = '3abf37d67959bc264195f5882297fcf68c447b58'
+            git archive --format=zip --output=$archive $trusted scripts/register-mcp-session0-station-lease.ps1 scripts/mcp-session0-station-lease-provider.cs
+            if ($LASTEXITCODE -ne 0) { throw 'Trusted installer archive failed' }
+            Expand-Archive -LiteralPath $archive -DestinationPath $source
+            $bundle = Join-Path $root 'candidate.bundle'
+            git -c core.hooksPath=NUL bundle create $bundle HEAD
+            if ($LASTEXITCODE -ne 0) { throw 'Exact candidate bundle failed' }
+            $nodeDir = Split-Path (Get-Command node.exe -ErrorAction Stop).Source
+            robocopy $nodeDir $tools /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+            if ($LASTEXITCODE -ge 8) { throw 'Fixture toolchain copy failed' }
+            $gitExe = (Get-Command git.exe -ErrorAction Stop).Source
+            $gitDir = Split-Path $gitExe
+            if ($gitDir -notlike "$env:ProgramFiles\Git\*") { throw 'Expected installed Git toolchain' }
+            # Use only fixed local tool directories, no runner PATH or credentials.
+            $env:Path = "$tools;$gitDir;$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
+
+            # Fresh local standard user, only on this ephemeral CI VM.
+            # The random credential is never printed, persisted as an artifact or passed to the test.
+            $password = 'Nexa!9a-' + [guid]::NewGuid().ToString('N')
+            $secure = ConvertTo-SecureString -String $password -AsPlainText -Force
+            $user = New-LocalUser -Name $account -Password $secure -Description 'Disposable Nexa Session 0 diagnostic'
+            $createdUser = $true
+            $sid = $user.SID.Value
+            # 0x80070569 on previous runs: the disposable account lacks batch logon.
+            # Grant that one logon type to this one temporary CI SID. Preserve all
+            # existing entries and restore the original list in finally. This is
+            # not a change to Nexa's production account or any AppContainer ACL.
+            $policy = Join-Path $root 'original-rights.inf'
+            secedit /export /cfg $policy /areas USER_RIGHTS /quiet
+            if ($LASTEXITCODE -ne 0) { throw 'Fixture rights export failed' }
+            $line = @(Get-Content -LiteralPath $policy | Where-Object { $_ -match '^SeBatchLogonRight\s*=' })
+            if ($line.Count -gt 1) { throw 'Ambiguous batch-logon policy' }
+            $originalBatch = if ($line.Count -eq 1) { ($line[0] -split '=',2)[1].Trim() } else { '' }
+            $entries = @($originalBatch -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+            $newBatch = (@($entries) + "*$sid") -join ','
+            function Set-FixtureBatchRight([string]$Value, [string]$Label) {
+              $inf = Join-Path $root "$Label.inf"
+              $db = Join-Path $root "$Label.sdb"
+              @('[Unicode]', 'Unicode=yes', '[Version]', 'signature="$CHICAGO$"', 'Revision=1', '[Privilege Rights]', "SeBatchLogonRight = $Value") |
+                Set-Content -LiteralPath $inf -Encoding Unicode
+              secedit /configure /db $db /cfg $inf /areas USER_RIGHTS /quiet
+              if ($LASTEXITCODE -ne 0) { throw "Fixture batch-logon $Label failed" }
+            }
+            $batchPolicyChanged = $true
+            Set-FixtureBatchRight $newBatch 'fixture-batch-grant'
+            icacls $root /grant:r "*${sid}:(OI)(CI)(RX)" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Fixture read ACL failed' }
+            icacls $run /grant:r "*${sid}:(OI)(CI)(M)" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Fixture run ACL failed' }
+
+            # Exercise the exact reviewed installation script on the disposable
+            # runner. The limited fixture account starts the task on demand.
+            $exe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+            $install = Join-Path $source 'scripts\register-mcp-session0-station-lease.ps1'
+            $providerSource = Join-Path $source 'scripts\mcp-session0-station-lease-provider.cs'
+            $hash = (Get-FileHash -LiteralPath $providerSource -Algorithm SHA256).Hash
+            $installation = & $exe -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File $install -DispatcherAccount $account -ExpectedSourceSha256 $hash
+            if ($LASTEXITCODE -ne 0) { throw 'Protected station installation failed' }
+            $createdProvisioner = $true
+            $installed = ($installation | Out-String).Trim() | ConvertFrom-Json
+            if (!$installed.installed -or $installed.started -or $installed.dispatcher_sid -ne $sid -or $installed.source_sha256 -ne $hash) { throw 'Installer receipt mismatch' }
+            $installed | ConvertTo-Json -Depth 4
+            if ((Get-ScheduledTask -TaskName $provisionTask).State -ne 'Ready') { throw 'Provider must remain stopped after installation' }
+            $script = Join-Path $root 'suite.cmd'
+            # The task action is protected; all candidate scripts and dependency
+            # installation execute only as the temporary non-admin account.
+            # Actual scheduler LastTaskResult is observed by the parent. Guest
+            # logs remain diagnostics, not independently signed evidence.
+            @(
+              '@echo off'
+              'setlocal'
+              'set ERRORLEVEL='
+              ('set "PATH=' + $env:Path + '"')
+              ('set "TEMP=' + $run + '"')
+              ('set "TMP=' + $run + '"')
+              'set "GIT_CONFIG_NOSYSTEM=1"'
+              'set "GIT_CONFIG_GLOBAL=NUL"'
+              'set "GIT_TERMINAL_PROMPT=0"'
+              ('"' + $exe + '" -NoProfile -NonInteractive -Command "if ((Get-Process -Id $PID).SessionId -ne 0 -or ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { exit 1 }; Write-Output ''R16_LIMITED_IDENTITY_PASS''" > identity.log 2>&1')
+              'if errorlevel 1 exit /b 9'
+              ('cd /d "' + $run + '"')
+              ('"' + $gitExe + '" -c core.hooksPath=NUL -c init.templateDir= clone --no-checkout "' + $bundle + '" work > setup.log 2>&1')
+              'if errorlevel 1 exit /b 10'
+              'cd work'
+              ('"' + $gitExe + '" -c core.hooksPath=NUL checkout --detach ' + $actual + ' >> ..\setup.log 2>&1')
+              'if errorlevel 1 exit /b 11'
+              ('"' + $gitExe + '" rev-parse HEAD >> ..\setup.log 2>&1')
+              ('"' + $gitExe + '" remote remove origin')
+              'if errorlevel 1 exit /b 12'
+              ('"' + (Join-Path $tools 'node.exe') + '" "' + (Join-Path $tools 'node_modules\npm\bin\npm-cli.js') + '" ci --no-audit --no-fund >> ..\setup.log 2>&1')
+              'if errorlevel 1 exit /b 13'
+              ('"' + (Join-Path $tools 'node.exe') + '" tests/tools/mcp-contract.test.mjs > ..\mcp.log 2>&1')
+              'set "mcp_exit=%ERRORLEVEL%"'
+              ('"' + (Join-Path $tools 'node.exe') + '" tests/mcp-tunnel-launcher.test.mjs > ..\tunnel.log 2>&1')
+              'set "tunnel_exit=%ERRORLEVEL%"'
+              'echo R16_LIMITED_WINDOWS_RESULT mcp=%mcp_exit% tunnel=%tunnel_exit% > ..\outcome.txt'
+              'if not "%mcp_exit%"=="0" exit /b 20'
+              'if not "%tunnel_exit%"=="0" exit /b 21'
+              'exit /b 0'
+            ) | Set-Content -LiteralPath $script -Encoding ASCII
+            $cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
+            $action = New-ScheduledTaskAction -Execute $cmd -Argument ('/d /c ""' + $script + '""') -WorkingDirectory $run
+            $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 55)
+            $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(90)
+            $null = Register-ScheduledTask -TaskName $task -Action $action -Trigger $trigger -Settings $settings -User "$env:COMPUTERNAME\$account" -Password $password -RunLevel Limited
+            $createdTask = $true
+            $password = $null
+            $secure.Dispose()
+            $principal = (Get-ScheduledTask -TaskName $task).Principal
+            if ([string]$principal.LogonType -ne 'Password' -or [string]$principal.RunLevel -ne 'Limited') { throw 'Task principal mismatch' }
+            $prior = (Get-ScheduledTaskInfo -TaskName $task).LastRunTime
+            Start-ScheduledTask -TaskName $task
+            $deadline = [datetime]::UtcNow.AddMinutes(56)
+            do {
+              Start-Sleep -Seconds 5
+              $info = Get-ScheduledTaskInfo -TaskName $task
+              $state = (Get-ScheduledTask -TaskName $task).State
+            } while (($info.LastRunTime -eq $prior -or $state -ne 'Ready') -and [datetime]::UtcNow -lt $deadline)
+            $marker = [guid]::NewGuid().ToString('N')
+            Write-Output "::stop-commands::$marker"
+            foreach ($name in @('identity.log','setup.log','mcp.log','tunnel.log','outcome.txt')) {
+              $log = Join-Path $run $name
+              if (Test-Path -LiteralPath $log -PathType Leaf) {
+                $item = Get-Item -LiteralPath $log -Force
+                if (!($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { Get-Content -LiteralPath $log -Tail 120 }
+              }
+            }
+            Write-Output "::${marker}::"
+            if ($info.LastRunTime -eq $prior -or $state -ne 'Ready') { throw 'Limited suite task did not terminate' }
+            Write-Output "R16_LIMITED_WINDOWS_SCHEDULER_EXIT=$($info.LastTaskResult)"
+            if ($info.LastTaskResult -ne 0) { throw 'Limited mandatory suite compatibility failed' }
+          } finally {
+            try {
+              if ($createdTask) {
+                Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
+                Unregister-ScheduledTask -TaskName $task -Confirm:$false
+              }
+              if ($createdProvisioner) {
+                Stop-ScheduledTask -TaskName $provisionTask -ErrorAction SilentlyContinue
+                Unregister-ScheduledTask -TaskName $provisionTask -Confirm:$false
+              }
+            } finally {
+              try {
+                if ($batchPolicyChanged) { Set-FixtureBatchRight $originalBatch 'fixture-batch-restore' }
+              } finally {
+                if ($createdUser) { Remove-LocalUser -Name $account }
+              }
+            }
+            # Do not recursively traverse candidate-writable trees as administrator.
+            # The disposable hosted VM is destroyed after this feasibility job.
+          }

@@ -127,7 +127,7 @@ try {
       timeoutMs: 5_000,
     });
     assert.equal(normal.execution_ok, true, normal.stderr);
-    assert.equal(normal.ok, true, normal.stderr);
+    assert.equal(normal.ok, true, JSON.stringify({ exit_code: normal.exit_code, timed_out: normal.timed_out, signal: normal.signal, duration_ms: normal.duration_ms, stdout: normal.stdout, stderr: normal.stderr }));
     assert.match(normal.stdout, /normal-powershell-ok/u);
 
     const oversized = await runPowerShellProcess({
