@@ -526,3 +526,54 @@ test("fixed isolated verification records real scoped dispatcher and Journal evi
   assert.equal((await f.journal.status()).health, "healthy");
   assert.equal(git("status", "--porcelain"), "");
 });
+
+
+// Feasibility only: use the existing, explicitly granted disposable workspace
+// shell fixture, not the fixed five-file verification capability. No change
+// to production suite membership, privilege or verification evidence.
+test("R16 existing AppContainer executes real verification manifest regression", { ...platform, timeout: 180_000 }, async t => {
+  const paths = [
+    "tests/mcp/mcp-verification-manifest.test.mjs",
+    "server/src/mcp-verification-manifest.mjs",
+    "server/src/mcp-verification-failure-classifier.mjs",
+  ];
+  const command = [
+    "& node.exe tests/mcp/mcp-verification-manifest.test.mjs",
+    "exit $LASTEXITCODE",
+  ].join("\n");
+  async function run(failFixture) {
+    const f = await fixture(t);
+    const manifest = [];
+    for (const file of paths) {
+      const bytes = await readFile(new URL("../../" + file, import.meta.url));
+      const staged = failFixture && file === paths[0]
+        ? Buffer.concat([bytes, Buffer.from('\n;test("R16 deliberate failure",()=>assert.fail("R16 deliberate failure"));\n')])
+        : bytes;
+      const target = path.join(f.context.root, file);
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, staged);
+      manifest.push({ path: file, sha256: createHash("sha256").update(staged).digest("hex"), bytes: staged.length });
+    }
+    const result = await f.controller.execute(await f.intent(
+      failFixture ? "r16-real-manifest-failure" : "r16-real-manifest-success", command,
+      { toolchain: "node", sandbox_paths: paths, timeoutMs: 60_000 }));
+    const receipt = failFixture ? result.command?.receipt : result.receipts?.[0];
+    assert.equal(result.state.status, failFixture ? "DECISION_REQUIRED" : "COMPLETED", JSON.stringify(result.command));
+    const evidence = JSON.parse(receipt.evidence.content[0].text);
+    assert.equal(evidence.isolation_mode, "appcontainer");
+    assert.equal(evidence.input_file_count, paths.length);
+    assert.equal(evidence.input_manifest_sha256, createHash("sha256").update(JSON.stringify(manifest)).digest("hex"));
+    assert.equal(evidence.job_terminated, true);
+    assert.equal(evidence.workspace_writes, false);
+    assert.equal(evidence.timed_out, false);
+    assert.equal(evidence.exit_code, failFixture ? 1 : 0);
+    assert.match(evidence.stdout, /fixed AppContainer development evidence is complete and fail-closed/u);
+    assert.match(evidence.stdout, failFixture ? /# fail 1\b/u : /# fail 0\b/u);
+    if (failFixture) assert.match(evidence.stdout, /R16 deliberate failure/u);
+    for (const entry of manifest)
+      assert.equal(createHash("sha256").update(await readFile(path.join(f.context.root, entry.path))).digest("hex"), entry.sha256);
+    assert.equal((await f.journal.status()).health, "healthy");
+  }
+  await run(false);
+  await run(true);
+});
