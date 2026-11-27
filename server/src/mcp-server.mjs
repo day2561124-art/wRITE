@@ -5941,6 +5941,12 @@ const piLifecycleScopeVerifier = createPiLifecycleScopeVerifier({
   getWorkstream: args => dev_workspace_get_workstream(args),
   getCheckpoint: args => dev_workspace_get_checkpoint(args),
   getOperation: args => dev_workspace_get_operation(args),
+  getIntegrationCandidate: args => dev_workspace_get_integration_candidate(args),
+  validationAllowed: async () => {
+    const { usesScopedAdminDispatcherRoot } = await import("./mcp-powershell-maintenance-tools.mjs");
+    // Host-dependent integration suites have no protected-dispatcher route yet.
+    return !usesScopedAdminDispatcherRoot();
+  },
 });
 // The controller's default route is backed by the same authoritative Journal.
 // Retain piProductionRoute for guardPiDirectExecution below; do not substitute
@@ -6066,7 +6072,11 @@ async function callToolDirect(params, authentication) {
       admission_details: journalMutationDetails(tool.name, effectiveArgs, isPiManagedMcpCall()),
     resolve_workspace_scope: async () => {
         if (!mutationArgs.workspace_id) {
-          if(["dev_workspace_create_isolated","dev_workspace_update_workstream","dev_workspace_end_workstream"].includes(tool.name)) {
+          if (tool.name === "dev_workspace_validate_integration") {
+            const record = await dev_workspace_get_integration_candidate({integration_candidate_id: mutationArgs.integration_candidate_id});
+            return {workspace_id:record.workspace_id,workstream_id:record.workstream_id};
+          }
+          if(["dev_workspace_create_isolated","dev_workspace_update_workstream","dev_workspace_end_workstream","dev_workspace_integration_preflight"].includes(tool.name)) {
             const record=await dev_workspace_get_workstream({workstream_id:mutationArgs.workstream_id});
             return {workspace_id:record.workspace_id,workstream_id:record.workstream_id};
           }
