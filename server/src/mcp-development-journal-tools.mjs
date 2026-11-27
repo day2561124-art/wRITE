@@ -1582,19 +1582,53 @@ export function createDevOperationJournalService({
   // STARTED + COMPLETED share the existing append lock and one head publication.
   // Partial publication fails the existing cardinality/hash checks after restart.
   // No long-lived development operation is retained for a logical Pi lifecycle.
-  async function appendExecutionProjection(value, { expected_revision, validateHistory, admissionGuard } = {}) {
-    const record = normalizeExecutionProjection(value);
+  async function appendExecutionProjection(value, options = {}) {
+    return appendExecutionProjectionInternal(value, options);
+  }
+
+  // Host-only non-admission transition. Derive the next record from the exact
+  // freshly verified history inside this append attempt; never accept a caller
+  // snapshot or a cache token. The callback receives detached history and is
+  // repeated only if the head CAS loses to a concurrent publication.
+  async function transitionExecutionProjection(deriveRecord, options = {}) {
+    if (typeof deriveRecord !== "function" || !Number.isSafeInteger(options.expected_revision)
+      || options.expected_revision < 1 || options.admissionGuard !== undefined
+      || typeof options.recoverOnReadFailure !== "boolean") throw new Error("Invalid Pi transition binding.");
+    return appendExecutionProjectionInternal(undefined, options, deriveRecord);
+  }
+
+  async function appendExecutionProjectionInternal(value, { expected_revision, validateHistory, admissionGuard,
+    recoverOnReadFailure = false } = {}, deriveRecord) {
+    const suppliedRecord = deriveRecord ? null : normalizeExecutionProjection(value);
     if (!Number.isSafeInteger(expected_revision) || expected_revision < 0
       || typeof validateHistory !== "function") throw new Error("Invalid Pi persistence binding.");
     for (let pass = 0; pass < DEV_JOURNAL_VERIFY_MAX_CATCHUP_PASSES; pass += 1) {
-      // Both mutation admission and projection history use the same freshly
-      // verified snapshot for this attempt. A head-CAS miss repeats verification.
-      const verification = await verifyMutationAllowed();
+      // Preserve the writer's original read-time recovery semantics, but never
+      // replay a callback or publication after a write error. A recovery is
+      // attempted only on the initial physical read, before deriving anything.
+      let verification;
+      if (deriveRecord && pass === 0 && recoverOnReadFailure) {
+        let verified;
+        try { verified = await verify(); }
+        catch (error) {
+          if (isTransientJournalVerificationError(error)) throw error;
+          try {
+            await recoverExecutionPublication({validateHistory});
+            verified = await verify();
+          } catch { throw Object.assign(new Error("CORRUPT_STATE"), {code:"CORRUPT_STATE"}); }
+        }
+        verification = checkVerifiedMutationAllowed(verified);
+      } else {
+        verification = await verifyMutationAllowed();
+      }
       const { eventsPath } = await ensureStorageRoot(storageRoot);
       // Validate the captured immutable history and candidate before taking the
       // append lock. Exact head CAS below discards this work on any publication.
       const history = executionProjectionEvents(verification.events);
       const latest = validateHistory(history);
+      const record = deriveRecord
+        ? normalizeExecutionProjection(await deriveRecord(structuredClone({events:history,latest})))
+        : suppliedRecord;
       const existing = [...latest.values()].find(event => event.execution_projection.intent.intent_id === record.intent.intent_id);
       function conflict(code) { const error = new Error(code); error.code = code; throw error; }
       let publication = null, publicationFailure = null;
@@ -1646,6 +1680,8 @@ export function createDevOperationJournalService({
       }
       const handle = await acquireJournalLock(lockPath, { timeoutMs: lockAcquireTimeoutMs });
       try {
+        if (runtimeHealth === "corrupt") throw new Error(`JOURNAL_CORRUPT: ${lastHealthError ?? "journal integrity failure"}`);
+        if (explicitDegraded) throw Object.assign(new Error(`JOURNAL_${runtimeHealth.toUpperCase()}: development mutation is blocked until journal reconciliation succeeds.`), {code:`JOURNAL_${runtimeHealth.toUpperCase()}`});
         const head = await readHead(headPath);
         if (canonicalJson(head) !== canonicalJson(verification.head)) continue;
         // Trusted host admission authority runs inside the same CAS/append lock as publication.
@@ -2046,7 +2082,10 @@ export function createDevOperationJournalService({
   }
 
   async function verifyMutationAllowed() {
-    const verified = await verify();
+    return checkVerifiedMutationAllowed(await verify());
+  }
+
+  function checkVerifiedMutationAllowed(verified) {
     if (explicitDegraded) {
       const error = new Error(`JOURNAL_${runtimeHealth.toUpperCase()}: development mutation is blocked until journal reconciliation succeeds.`);
       error.code = `JOURNAL_${runtimeHealth.toUpperCase()}`;
@@ -2999,6 +3038,7 @@ function verifiedMcpTestResult(events,started,terminal) {
     appendProductionRoute,
     readExecutionProjections,
     appendExecutionProjection,
+    transitionExecutionProjection,
     recoverExecutionPublication,
     storageRoot,
   };
@@ -3010,6 +3050,7 @@ export const readDevProductionRoutes = () => defaultJournal.readProductionRoutes
 export const appendDevProductionRoute = (record, options) => defaultJournal.appendProductionRoute(record, options);
 export const readDevExecutionProjections = () => defaultJournal.readExecutionProjections();
 export const appendDevExecutionProjection = (value, options) => defaultJournal.appendExecutionProjection(value, options);
+export const transitionDevExecutionProjection = (deriveRecord, options) => defaultJournal.transitionExecutionProjection(deriveRecord, options);
 const snapshotFingerprintCacheByWorkspace = new Map();
 const snapshotFingerprintStateSet = new Set(["modified", "added", "untracked"]);
 
