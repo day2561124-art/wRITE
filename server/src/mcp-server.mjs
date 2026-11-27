@@ -190,6 +190,7 @@ import {
   powershell_admin_run,
   powershell_run,
   powershell_isolated_run,
+  usesScopedAdminDispatcherRoot,
 } from "./mcp-powershell-maintenance-tools.mjs";
 import {
   DEV_WORKSTREAM_ID_PATTERN_SOURCE,
@@ -1837,7 +1838,7 @@ import {CAPABILITY_DEFINITIONS, verifyPiWorkspaceShellScope, WINDOWS_APPROVED_SC
 import {beginPiWorkstreamBootstrap} from "./mcp-development-workstream-tools.mjs";
 import {isPiManagedMcpCall,assertPiManagedMcpCall} from "./pi-production-execution-controller.mjs";
 import {getMcpOperationReconciliationContext as getPiBootstrapReconciliation} from "./mcp-operation-reconciliation-context.mjs";
-import {createPiRuntimeCapabilityMetadata} from "./pi-runtime-capability-metadata.mjs";
+import {createPiRuntimeCapabilityMetadata,piRuntimeCapabilityAvailability} from "./pi-runtime-capability-metadata.mjs";
 const toolDefinitions = [
   {name:"dev_capability_get_schema",description:"Read bounded server-owned capability schema/version/hash metadata; no source-file access or dispatch.",risk:"read",annotations:{readOnlyHint:true},inputSchema:baseSchema({capability_name:{type:"string",maxLength:128},expected_schema_version:{type:"string",maxLength:16}},["capability_name"]),handler:async args=>jsonContent(piCapabilityMetadata.getSchema(args))},
   {name:"dev_capability_list",description:"Read bounded registered capability metadata. Does not select replacement tools or execute effects.",risk:"read",annotations:{readOnlyHint:true},inputSchema:baseSchema({capability_names:{type:"array",maxItems:64,uniqueItems:true,items:{type:"string",maxLength:128}},offset:{type:"integer",minimum:0,maximum:128},limit:{type:"integer",minimum:1,maximum:64}}),handler:async args=>jsonContent(piCapabilityMetadata.list(args))},
@@ -5929,7 +5930,8 @@ function writeMessage(message, framing = "line") {
 }
 
 const piCapabilityMetadata=createPiRuntimeCapabilityMetadata({tools:toolDefinitions,availability:name=>{
-  const definition=CAPABILITY_DEFINITIONS.find(c=>c.capability===name);return definition&&isToolAllowed(definition.tool)?"available":"unavailable";
+  const definition=CAPABILITY_DEFINITIONS.find(c=>c.capability===name);
+  return piRuntimeCapabilityAvailability({capability:name,toolAllowed:!!definition&&isToolAllowed(definition.tool),scopedDispatcher:usesScopedAdminDispatcherRoot()});
 }});
 const piProductionRoute = createPiProductionRouteStore();
 async function auditPiFallback(record) {
@@ -5943,7 +5945,6 @@ const piLifecycleScopeVerifier = createPiLifecycleScopeVerifier({
   getOperation: args => dev_workspace_get_operation(args),
   getIntegrationCandidate: args => dev_workspace_get_integration_candidate(args),
   validationAllowed: async () => {
-    const { usesScopedAdminDispatcherRoot } = await import("./mcp-powershell-maintenance-tools.mjs");
     // Host-dependent integration suites have no protected-dispatcher route yet.
     return !usesScopedAdminDispatcherRoot();
   },
