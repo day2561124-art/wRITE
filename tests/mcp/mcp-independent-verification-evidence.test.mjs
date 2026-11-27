@@ -513,6 +513,63 @@ test("host verifier service composes exact provider reads, independent outcomes 
   const replay=await service.verifyAndPublish(request);
   assert.equal(replay.published,true);assert.equal(replay.created,false);
   assert.deepEqual(await readFile(path.join(root,name)),original);
+
+  // Full protected composition: independently signed files, not an injected
+  // positive result callback, are required before issuing the receipt.
+  const {mkdir,writeFile}=await import("node:fs/promises");
+  const {createProtectedIndependentVerifierService,createProtectedIndependentCandidateGate}=
+    await import("../../server/src/mcp-independent-verification-host.mjs");
+  const {independentOutcomeAttestationFilename}=
+    await import("../../server/src/mcp-independent-verification-receipt-store.mjs");
+  const protectedReceiptRoot=path.join(root,"bound-receipts"),outcomeRoot=path.join(root,"bound-outcomes");
+  await mkdir(protectedReceiptRoot);await mkdir(outcomeRoot);
+  const supervisorKey=generateKeyPairSync("ed25519");
+  const supervisor="independent-fixture-supervisor";
+  let outcomeAllowed=true;
+  const boundOptions={...options,receiptRoot:protectedReceiptRoot,outcomeRoot,supervisor,
+    pinnedSupervisorKey:supervisorKey.publicKey,
+    assertReceiptDirectory:async({directory,role})=>directory===protectedReceiptRoot&&["issuer","consumer"].includes(role),
+    assertOutcomeDirectory:async({directory,role})=>outcomeAllowed&&directory===outcomeRoot&&role==="outcome_consumer"};
+  assert.throws(()=>createProtectedIndependentVerifierService({...boundOptions,outcomeRoot:protectedReceiptRoot}),
+    /INDEPENDENT_HOST_ROOTS_OVERLAP/);
+  assert.throws(()=>createProtectedIndependentVerifierService({...boundOptions,pinnedSupervisorKey:key}),
+    /INDEPENDENT_OUTCOME_KEY_INVALID/);
+  const bound=createProtectedIndependentVerifierService(boundOptions);
+  const beforeSigns=signs,beforeOutcomes=outcomes;
+  assert.equal((await bound.verifyAndPublish(request)).published,false);
+  assert.equal(signs,beforeSigns);
+  const bindings=workflows.map((w,i)=>({suite:w.suite,platform:w.platform,workflow_sha256:w.workflow_sha256,
+    commit:c.integration_commit,run_id:111,job_id:222+i,run_attempt:1,completed_at_ms:now-2000}));
+  const record=async(binding,privateKey=supervisorKey.privateKey,exit=0)=>{
+    const payload=JSON.stringify({schema_version:1,supervisor,repository:policy.repository,binding,
+      observed_at_ms:now-1000,expires_at_ms:now+30000,outcome:{execution_ok:true,passed:exit===0,
+        timed_out:false,skipped:false,exit_code:exit}});
+    const envelope={payload,signature:sign(null,Buffer.from(payload),privateKey).toString("base64url")};
+    await writeFile(path.join(outcomeRoot,independentOutcomeAttestationFilename(binding)),JSON.stringify(envelope));
+  };
+  await record(bindings[0]);await record(bindings[1],signer);
+  assert.equal((await bound.verifyAndPublish(request)).published,false);
+  await record(bindings[1],supervisorKey.privateKey,7);
+  assert.equal((await bound.verifyAndPublish(request)).published,false);
+  await record(bindings[1]);
+  outcomeAllowed=false;
+  assert.equal((await bound.verifyAndPublish(request)).published,false);
+  assert.equal(signs,beforeSigns);
+  assert.deepEqual(await readdir(protectedReceiptRoot),[]);
+  outcomeAllowed=true;
+  const result=await bound.verifyAndPublish(request);
+  assert.equal(result.published,true);
+  assert.equal(signs,beforeSigns+1);
+  assert.equal(outcomes,beforeOutcomes,"injected outcome callback was not used");
+  const gate=createProtectedIndependentCandidateGate({policy:{repository:policy.repository,issuer:policy.issuer,
+    max_age_ms:policy.max_age_ms,suite_workflows:workflows.map(({suite,platform,workflow_sha256})=>({suite,platform,workflow_sha256})),
+    additional_required:policy.additional_required},pinnedPublicKey:key,receiptRoot:protectedReceiptRoot,
+    assertReceiptDirectory:boundOptions.assertReceiptDirectory,clock:()=>now});
+  const checked=await gate.reviewForValidation({...c,state:"preflight_passed"},context.plan);
+  assert.equal(checked.verified,true);
+  assert.equal(checked.receipt_sha256,result.receipt_sha256);
+  assert.equal(checked.execution_authorized,false);
+  assert.equal((await gate.reviewForValidation({...c,revision:c.revision+1,state:"preflight_passed"},context.plan)).verified,false);
 });
 
 
