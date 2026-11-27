@@ -7,7 +7,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { FIXED_ISOLATED_SUITE, FIXED_ISOLATED_SOURCE_PATHS, fixedIsolatedVerificationPlan, runFixedIsolatedVerification } from "../../server/src/mcp-fixed-isolated-verification.mjs";
+import { FIXED_ISOLATED_SUITE, FIXED_ISOLATED_SOURCE_PATHS, FIXED_MANIFEST_SUITE, FIXED_MANIFEST_SOURCE_PATHS, fixedIsolatedVerificationPlan, runFixedIsolatedVerification } from "../../server/src/mcp-fixed-isolated-verification.mjs";
 import { createDevTestRunner } from "../../server/src/mcp-development-test-tools.mjs";
 import { prepareAppContainerPowerShell } from "../../server/src/mcp-powershell-appcontainer.mjs";
 import { createDevOperationJournalService } from "../../server/src/mcp-development-journal-tools.mjs";
@@ -297,6 +297,11 @@ test("fixed isolated verification rejects host suites and invalid workspace cont
   assert.equal(plan.toolchain, "node");
   assert.equal(plan.fixedHermeticCore, true);
   assert.equal(plan.timeoutMs, 120_000);
+  const manifestPlan = fixedIsolatedVerificationPlan(FIXED_MANIFEST_SUITE, context);
+  assert.deepEqual(manifestPlan.sandbox_paths, FIXED_MANIFEST_SOURCE_PATHS);
+  assert.equal(manifestPlan.fixedHermeticCore, false);
+  assert.equal(manifestPlan.fixedVerificationManifest, true);
+  assert.deepEqual(manifestPlan.output_paths, []);
   for (const suite of ["mcp_pi_postseal", "affected", "all", "mcp; whoami"]) {
     await assert.rejects(runFixedIsolatedVerification({ suite, context,
       prepare: () => assert.fail("must not stage a rejected suite") }), { code: "ISOLATED_VERIFICATION_REQUIRED" });
@@ -581,4 +586,59 @@ test("R16 existing AppContainer executes real verification manifest regression",
   }
   await run(false);
   await run(true);
+});
+
+
+test("R16 fixed manifest suite executes native scoped verification with durable evidence", { ...platform, timeout: 180_000 }, async t => {
+  const f = await fixture(t);
+  const git = (...args) => execFileSync("git.exe", args, { cwd: f.context.root, encoding: "utf8", windowsHide: true }).trim();
+  git("init"); git("config", "user.name", "Nexa CI"); git("config", "user.email", "nexa-ci@example.invalid");
+  git("config", "core.autocrlf", "false");
+  for (const file of FIXED_MANIFEST_SOURCE_PATHS) {
+    const target = path.join(f.context.root, file);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, await readFile(new URL("../../" + file, import.meta.url)));
+  }
+  git("add", "--", ...FIXED_MANIFEST_SOURCE_PATHS);
+  git("commit", "-m", "test: fixed manifest fixture");
+  const head = git("rev-parse", "HEAD");
+  const context = { ...f.context, current_head: head, base_head: head, branch: git("branch", "--show-current") };
+  const previous = process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT;
+  const programFiles = process.env.ProgramW6432 ?? process.env.ProgramFiles;
+  assert.ok(programFiles);
+  process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT = path.join(programFiles, "WriterWorkbench-PiMaintenance-v3", "grants");
+  t.after(() => {
+    if (previous === undefined) delete process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT;
+    else process.env.NEXA_PI_TASK_AUTHORIZATION_ROOT = previous;
+  });
+  const resultPath = path.join(f.root, "fixed-manifest.last.json");
+  const run = createDevTestRunner({ workspaceContextResolver: async () => context,
+    lockPath: path.join(f.root, "fixed-manifest.lock"), resultPath,
+    journal: { begin: f.journal.begin, complete: f.journal.complete, fail: f.journal.fail, markDegraded: f.journal.markDegraded } });
+  const good = await run({ suite: FIXED_MANIFEST_SUITE, workspace_id: context.workspace_id });
+  assert.equal(good.passed, true, JSON.stringify(good));
+  assert.equal(good.exit_code, 0);
+  assert.equal(good.input_file_count, 3);
+  assert.equal(good.post_snapshot_verified, true);
+  assert.equal(good.verification_manifest.gate_result, "passed");
+  assert.deepEqual(good.verification_manifest.tests_selected, [FIXED_MANIFEST_SUITE]);
+  assert.equal(good.verification_manifest.isolation_evidence.execution_mode, "fixed_node");
+  assert.match(good.stdout, /(?:#|ℹ) pass 11\b/u);
+  assert.equal(git("status", "--porcelain"), "");
+  const target = path.join(f.context.root, FIXED_MANIFEST_SOURCE_PATHS[0]);
+  const body = await readFile(target, "utf8");
+  const changed = body+'\n;test("R16 native deliberate failure",()=>assert.fail("R16 deliberate failure"));\n';
+  await writeFile(target, changed);
+  const failed = await run({ suite: FIXED_MANIFEST_SUITE, workspace_id: context.workspace_id });
+  assert.equal(failed.passed, false, JSON.stringify(failed));
+  assert.equal(failed.exit_code, 1);
+  assert.equal(failed.post_snapshot_verified, true);
+  assert.equal(failed.verification_manifest.gate_result, "failed");
+  assert.equal(failed.verification_manifest.isolation_evidence.input_file_count, 3);
+  assert.equal(failed.head, head);
+  assert.notEqual(failed.workspace_snapshot_id, good.workspace_snapshot_id);
+  assert.match(failed.stdout, /(?:#|ℹ) fail 1\b/u);
+  assert.equal(JSON.parse(await readFile(resultPath, "utf8")).verification_manifest.gate_result, "failed");
+  assert.equal((await f.journal.status()).health, "healthy");
+  assert.equal(await readFile(target, "utf8"), changed);
 });
