@@ -1160,3 +1160,51 @@ test("R16 independent candidate evidence binds the real Git risk plan and refuse
   assert.equal((await service.getCandidate({ integration_candidate_id: candidate.integration_candidate_id })).state, "preflight_passed");
   assert.equal((await journal.status()).chain_verified, true);
 });
+
+test("R16 independent candidate evidence rechecks signed receipt at apply without treating observation as authority", async () => {
+  const { generateKeyPairSync, sign } = await import("node:crypto");
+  const { createIndependentCandidateEvidenceGate } = await import("../../server/src/mcp-independent-verification-candidate.mjs");
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const now = Date.now();
+  let currentTime = now;
+  const candidate = { integration_candidate_id: "dev_integration_20261127-010000_aabbccddeeff",
+    revision: 2, state: "preflight_passed", source_head: "1".repeat(40),
+    target_head: "2".repeat(40), integration_commit: "3".repeat(40) };
+  const row = { suite: "all", platform: "linux", workflow_sha256: "4".repeat(64) };
+  const policy = { repository: "owner/disposable", issuer: "fixture-issuer", max_age_ms: 60000,
+    suite_workflows: [row], additional_required: [] };
+  const plan = { required_suites: ["all"] };
+  let jobId = 2;
+  let reads = 0;
+  const readEnvelope = async identity => {
+    reads++;
+    const payload = JSON.stringify({ schema_version: 1, issuer: policy.issuer, repository: policy.repository,
+      candidate: identity, issued_at_ms: now - 1000, expires_at_ms: now + 1000,
+      results: [{ ...row, commit: identity.integration_commit, run_id: 1, job_id: jobId,
+        run_attempt: 1, completed_at_ms: now - 2000, execution_ok: true, passed: true, timed_out: false, skipped: false, exit_code: 0 }] });
+    return { payload, signature: sign(null, Buffer.from(payload), privateKey).toString("base64url") };
+  };
+  const build = overrides => createIndependentCandidateEvidenceGate({ policy, pinnedPublicKey: publicKey,
+    readEnvelope, clock: () => currentTime, ...overrides });
+  const gate = build();
+  const verified = await gate.reviewForValidation(candidate, plan);
+  assert.equal(verified.verified, true);
+  assert.equal(verified.execution_authorized, false);
+  assert.equal(verified.evidence_reference.candidate_revision, candidate.revision);
+  const ready = { ...candidate, revision: 6, state: "ready" };
+  assert.equal((await gate.reviewForApply(ready, plan, verified.evidence_reference)).verified, true);
+  assert.equal(reads, 2);
+  assert.equal((await gate.reviewForApply(ready, plan)).verified, false);
+  assert.equal((await gate.reviewForApply(ready, plan, { ...verified.evidence_reference, candidate_revision: 6 })).verified, false);
+  assert.equal((await gate.reviewForApply(candidate, plan, verified.evidence_reference)).verified, false);
+  assert.equal((await gate.reviewForValidation(candidate, { required_suites: ["mcp_hermetic_core"] })).verified, false);
+  const differentPolicy = build({ policy: { ...policy, max_age_ms: 59999 } });
+  assert.equal((await differentPolicy.reviewForApply(ready, plan, verified.evidence_reference)).code, "INDEPENDENT_EVIDENCE_POLICY_CHANGED");
+  jobId++;
+  assert.equal((await gate.reviewForApply(ready, plan, verified.evidence_reference)).code, "INDEPENDENT_EVIDENCE_RECEIPT_CHANGED");
+  jobId--;
+  currentTime = now + 1000;
+  assert.equal((await gate.reviewForApply(ready, plan, verified.evidence_reference)).code, "VERIFICATION_RECEIPT_EXPIRED");
+  assert.equal(candidate.state, "preflight_passed");
+  assert.equal(ready.state, "ready");
+});
