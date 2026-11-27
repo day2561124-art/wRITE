@@ -1,26 +1,33 @@
 # R16 independent full verification
 
-Status: implementation candidate, not a release approval or production trust configuration.
+Status: independent evidence and adoption foundation merged; issuer candidate under review. Not a release approval or production trust configuration.
 
-## Why a separate verifier
+## Verified implementation baseline
 
-The installed dispatcher can only execute the explicitly fixed five-file AppContainer suite. The full test suites use network listeners, subprocesses, Git, dependency installation and platform-specific fixtures. Expanding the existing sandbox to allow those facilities would change its security boundary. Do not substitute hermetic success for full-gate success or execute full suites unconfined on the operator host.
+- #137: typed managed integration preparation/validation, exact scope and positive Journal evidence, fail-closed capability availability. Full affected/all, Session 0 and Journal scale passed.
+- #138: signed Ed25519 verification, trusted read-only GitHub collector and transport, candidate observation without authority. Full affected/all and both platform fixtures passed.
+- #139: exact registered candidate and immutable Git delta, original risk-routed suites, receipt and policy recheck. Full affected/all and historical preflight recovery passed.
+- #140: opt-in independent adoption, original local Git worktree/clean/diff/cleanup gates, signed remote evidence recorded separately from local test execution. Ready publication follows a durable terminal. Apply rechecks the proof and Journal. Independent interrupted validation retires the candidate without replay or inferred success. Exact tested head e890821e9ae46d59e935aebdc64ffbf408bf8b37: workflow 45955068591 (17 fixture tests per platform), 45955068617 (Session 0), 45955068596 (Journal scale), 45955068637 (full affected/all, six executed jobs). Merged main c7777a44990695e0d021b13a78204d66ad57fd95, identical tree.
 
-Use disposable hosted verification for committed candidate objects. Preserve the original exact integration diff, risk-routed required suite plan and all original gate assertions. A separate trusted verifier must observe the actual checkout, reviewed workflow identity, job/attempt and outcome, not a candidate's self-reported JSON or stdout. Full release verification requires the original all suite and any independently required platform gates; focused integration verification remains governed by its own existing plan.
+## Execution boundary
 
-## Evidence consumer implemented on this branch
+The installed protected dispatcher only executes the fixed five-file AppContainer suite. Do not substitute it for full suites, run host-dependent tests unconfined, or extend its privilege. Hosted disposable committed-candidate verification retains the actual risk-routed suite plan and full release/platform requirements. A dirty uncommitted workspace is not an exact remote commit.
 
-- `server/src/mcp-independent-verification-evidence.mjs` is a read-only verifier. Host-owned expected identity binds candidate ID, revision, integration commit, source and target heads, repository, issuer and required suite/platform/workflow hashes.
-- Verify Ed25519 signatures over exact bytes using an independently pinned issuer public key. Enforce bounded, fresh receipts; reject partial, duplicate, failed, skipped, timed-out, stale and mismatched evidence. Do not accept a caller-supplied trust key or policy in an MCP tool.
-- A positive result always has `execution_authorized:false`. There is no signing key, production trust configuration, new MCP operation, integration-state mutation or new grant in this branch.
-- Tests use an ephemeral fixture key and synthetic signed results, not actual external verifier observations.
+GitHub provider success alone is not an independently verified raw process outcome. The collector requires complete attempt-specific data, pinned repository/workflow/runner identity and reviewed mandatory steps; abbreviated connector results, candidate stdout, or candidate-provided artifacts are not trusted. The read-only GitHub transport binds a separately owned credential and immutable Git object bytes.
 
-## Remaining implementation
+## Issuer candidate
 
-1. Select an independently operated verification source with a pinned reviewed execution definition and a protected signing identity that candidate code cannot read, modify or invoke to sign arbitrary data. Reuse existing disposable GitHub CI where its actual exact checkout and required jobs can be independently verified; do not use candidate-controlled artifact text as the source of trust.
-2. Implement the trusted source adapter, independent proof collection, issuer and policy configuration through the existing operator-approved host mechanism. No shared production credentials, live grant storage changes or operator data in the candidate runner.
-3. Bind the verified evidence to the current server-owned integration candidate and existing Journal provenance; preserve freshness/CAS, dependency, diff and cleanup gates. Recheck immediately before any independently authorized application. Never publish a synthetic local test receipt as if a remote suite had run locally.
-4. Exercise exact committed fixtures with full suite, failure/expiry/forgery, cleanup, duplicate and stale-candidate scenarios. Run the original platform and full gates; separately prove host adoption under existing authority.
-5. A dirty uncommitted workspace is not an exact remote commit. Keep the full-workspace route unavailable until an appropriate independently verified snapshot mechanism exists; no inferred equivalence.
+The host-only issuer module takes an exact registered candidate identity, derives the host-owned policy, collects the exact provider observation, and requires a separate trusted observation of the original mandatory test outcome. The test result must match suite/platform/workflow/commit/run/job/attempt/timestamp. The independent signer is supplied only by the already trusted verifier process. The returned envelope is verified against the pinned issuer public key, exact context and freshness; its expiry never extends the observed jobs' maximum age. The caller cannot provide the policy, job data or key. A receipt grants no execution permission.
 
-The current PR #137 remains unchanged while its full CI runs. This branch is stacked on 5723490d62b4fa44c71874da109e5877d8e9fff6. No production deployment or authorization change is made.
+No private key, real credential, new privileged operation or production enrollment is included. The test uses ephemeral fixture keys and injected observations.
+
+## Remaining acceptance and operational binding
+
+1. Establish the independent verification service identity and reviewed immutable execution definitions through the existing authorized host/operator mechanism. Keep issuer credentials and signing keys inaccessible to candidate execution and engineering agents.
+2. Bind actual provider observation plus independently trusted test outcome evidence to that service. A provider job conclusion must not be promoted to an invented exit code. Use exact committed candidate objects and the required suite/platform plan. Confirm real full-suite, postseal, failure, expiry and changed-attempt scenarios.
+3. Configure the production integration service's opt-in evidence gate using that independently enrolled issuer and protected read source. Enable managed validation availability only after its exact host binding and positive acceptance have been proven. No self-issued standing grant or bypass of protected host controls.
+4. Exercise the complete authenticated lifecycle, including exact candidate publication, verification, local safe integration, push to a disposable remote and existing approved maintenance fixture. Separately verify live release deployment and host identity. Keep #106 open until these gates have actual evidence.
+
+## Live host observation
+
+At the #140 merge, authoritative remote main was c7777a44990695e0d021b13a78204d66ad57fd95. Local main remained 2955dc448943443750d478aecdbd216b0a754a17, dirty, with stale tracking and remote object not locally available. Pi isolated sidecar reported ready; Journal was healthy, chain verified, sequence 66462, no active, dangling, ambiguous or isolated operations. No local sync, deployment, or grant mutation was made. Preserve the existing dirty worktree.
