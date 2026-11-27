@@ -48,7 +48,7 @@ jobs:
           }
           $suffix = [guid]::NewGuid().ToString('N').Substring(0,12)
           $root = Join-Path $env:SystemDrive "NexaSuite-$suffix"
-          $account = "NexaSuite$suffix"
+          $account = "NexaSuit$suffix"
           $task = "NexaSuiteTask-$suffix"
           $createdUser = $false
           $createdTask = $false
@@ -109,6 +109,11 @@ jobs:
             # Git safe.directory relies on ownership, not only ACL permission.
             icacls $source /setowner "*$sid" /T /Q | Out-Null
             Native-OK 'Guest checkout ownership'
+            # Supervisor-owned filename and parent, never read guest-selected paths.
+            $log = Join-Path $root 'suite.log'
+            [IO.File]::WriteAllText($log, '')
+            icacls $log /grant:r "*${sid}:(W)" | Out-Null
+            Native-OK 'Diagnostic log ACL'
             $script = Join-Path $root 'limited-suite.ps1'
             @'
           param([string]$Root,[string]$Expected,[string]$Entry,[string]$GitDir)
@@ -145,7 +150,7 @@ jobs:
             $wrapper = Join-Path $root 'run.cmd'
             $exe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
             @('@echo off',
-              ('"' + $exe + '" -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "' + $script + '" -Root "' + $root + '" -Expected "' + $actual + '" -Entry "' + $entry + '" -GitDir "' + $gitDir + '" >"' + (Join-Path $run 'suite.log') + '" 2>&1'),
+              ('"' + $exe + '" -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "' + $script + '" -Root "' + $root + '" -Expected "' + $actual + '" -Entry "' + $entry + '" -GitDir "' + $gitDir + '" >"' + (Join-Path $root 'suite.log') + '" 2>&1'),
               'exit /b %ERRORLEVEL%') | Set-Content -LiteralPath $wrapper -Encoding ASCII
             $action = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\cmd.exe') -Argument ('/d /c ""' + $wrapper + '""') -WorkingDirectory $source
             $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 45)
@@ -168,14 +173,18 @@ jobs:
             Write-Output "LIMITED_TASK_RESULT=$($info.LastTaskResult); SUITE=$env:SUITE; HEAD=$actual"
             if ($info.LastTaskResult -ne 0) { throw "Limited suite failed: $($info.LastTaskResult)" }
             # Diagnostic output is not an independently trusted process attestation.
-            $log = Join-Path $run 'suite.log'
-            if (!(Test-Path -LiteralPath $log -PathType Leaf)) { throw 'Missing limited suite diagnostic log' }
+            $log = Join-Path $root 'suite.log'
+            $item = Get-Item -LiteralPath $log -Force
+            if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Invalid limited suite diagnostic log' }
             if (!(Select-String -LiteralPath $log -Pattern '^LIMITED_SUITE_EXIT=0$' -Quiet)) { throw 'Suite completion marker missing' }
             Write-Output 'LIMITED_SUITE_COMPATIBILITY_PASS'
           } finally {
             # Keep logs bounded and avoid interpreting candidate output as supervisor evidence.
-            $log = Join-Path $run 'suite.log'
-            if (Test-Path -LiteralPath $log -PathType Leaf) { Get-Content -LiteralPath $log -Tail 100 | ForEach-Object { Write-Output ("GUEST: " + $_) } }
+            $log = Join-Path $root 'suite.log'
+            $item = Get-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue
+            if ($item -and !$item.PSIsContainer -and !($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -and $item.Length -le 16MB) {
+              Get-Content -LiteralPath $log -Tail 100 | ForEach-Object { Write-Output ("GUEST: " + $_) }
+            }
             try {
               if ($createdTask) {
                 Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
