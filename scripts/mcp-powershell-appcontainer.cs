@@ -59,6 +59,7 @@ internal static class PowerShellAppContainer {
     [DllImport("userenv.dll", CharSet = CharSet.Unicode)] private static extern int CreateAppContainerProfile(string name, string label, string description, IntPtr capabilities, uint count, out IntPtr sid);
     [DllImport("userenv.dll", CharSet = CharSet.Unicode)] private static extern int DeleteAppContainerProfile(string name);
     [DllImport("advapi32.dll")] private static extern IntPtr FreeSid(IntPtr sid);
+    [DllImport("userenv.dll", CharSet = CharSet.Unicode)] private static extern int DeriveAppContainerSidFromAppContainerName(string name, out IntPtr sid);
     [DllImport("advapi32.dll", SetLastError = true)] private static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
     [DllImport("advapi32.dll", SetLastError = true)] private static extern bool GetTokenInformation(IntPtr token, int type, out int value, int size, out int required);
     [DllImport("kernel32.dll", SetLastError = true)] private static extern bool InitializeProcThreadAttributeList(IntPtr attributes, int count, uint flags, ref IntPtr size);
@@ -77,6 +78,141 @@ internal static class PowerShellAppContainer {
     [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GetExitCodeProcess(IntPtr handle, out uint code);
     [DllImport("kernel32.dll")] private static extern bool TerminateProcess(IntPtr handle, uint exitCode);
     [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
+
+    // The same-account guardian creates and owns the exact per-run profile.
+    // It is outside the guest Job and survives termination of the native runner.
+    // No service, privileged token, caller-supplied path, or pre-existing profile
+    // deletion is involved. A simultaneous guardian/host crash is not certified.
+    private sealed class ProfileGuardian : IDisposable {
+        private Process process;
+        internal ProfileGuardian(string name) {
+            using (var parent = Process.GetCurrentProcess()) {
+                string executable = parent.MainModule.FileName;
+                var info = new ProcessStartInfo(executable, "--profile-guardian " + name + " " +
+                    parent.Id.ToString(System.Globalization.CultureInfo.InvariantCulture) + " " +
+                    parent.StartTime.ToUniversalTime().Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture)) {
+                    UseShellExecute = false, CreateNoWindow = true,
+                    RedirectStandardInput = true, RedirectStandardOutput = true
+                };
+                process = Process.Start(info);
+            }
+            if (process == null) throw new InvalidOperationException("Profile guardian unavailable");
+            try {
+                var ready = process.StandardOutput.ReadLineAsync();
+                if (!ready.Wait(10000) || ready.Result != "READY" || process.HasExited)
+                    throw new InvalidOperationException("Profile guardian readiness unverified");
+            } catch {
+                Dispose(); // Closing stdin is not a request to kill the guardian.
+                throw;
+            }
+        }
+        internal bool Alive { get { return process != null && !process.HasExited; } }
+        internal bool Finish() {
+            if (!Alive) return false;
+            try {
+                process.StandardInput.WriteLine("RELEASE");
+                process.StandardInput.Flush();
+                return process.WaitForExit(12000) && process.ExitCode == 0;
+            } catch (IOException) { return false; }
+            catch (InvalidOperationException) { return false; }
+        }
+        public void Dispose() {
+            if (process == null) return;
+            try { process.StandardInput.Close(); }
+            catch (IOException) { }
+            finally { process.Dispose(); process = null; }
+        }
+    }
+
+    private static bool ValidProfileName(string name) {
+        string prefix = name.StartsWith("NexaLease", StringComparison.Ordinal) ? "NexaLease" : "NexaPiShell";
+        Guid id;
+        return name.StartsWith(prefix, StringComparison.Ordinal) &&
+            Guid.TryParseExact(name.Substring(prefix.Length), "N", out id) &&
+            prefix + id.ToString("N") == name;
+    }
+
+    private static int RunProfileGuardian(string[] args) {
+        int parentId;
+        long parentTicks;
+        if (args.Length != 4 || !ValidProfileName(args[1]) ||
+            !Int32.TryParse(args[2], out parentId) || parentId <= 0 ||
+            !Int64.TryParse(args[3], out parentTicks) || parentTicks <= 0) return 64;
+        IntPtr token = IntPtr.Zero;
+        try {
+            using (var self = Process.GetCurrentProcess())
+            using (var parent = Process.GetProcessById(parentId)) {
+                Require(OpenProcessToken(self.Handle, 8, out token));
+                int isContainer, needed;
+                Require(GetTokenInformation(token, 29, out isContainer, sizeof(int), out needed));
+                if (isContainer != 0 || parent.StartTime.ToUniversalTime().Ticks != parentTicks ||
+                    !String.Equals(parent.MainModule.FileName, self.MainModule.FileName, StringComparison.OrdinalIgnoreCase) ||
+                    parent.SessionId != self.SessionId) return 64;
+                // Acquire the exact process handle before creating any profile.
+                IntPtr parentHandle = parent.Handle;
+                if (WaitForSingleObject(parentHandle, 0) != WaitTimeout) return 64;
+                string directory = Path.GetDirectoryName(self.MainModule.FileName);
+                string started = Path.Combine(directory, "profile-guardian.started");
+                string finished = Path.Combine(directory, "profile-guardian.finished");
+                string name = args[1];
+                bool owned = false, deleted = false;
+                IntPtr sid = IntPtr.Zero;
+                // Hold this marker open without delete sharing while the profile
+                // exists; the host cannot discard the evidence directory early.
+                using (var marker = new FileStream(started, FileMode.CreateNew, FileAccess.Write, FileShare.Read)) {
+                    byte[] identity = Encoding.ASCII.GetBytes(name);
+                    marker.Write(identity, 0, identity.Length);
+                    marker.Flush(true);
+                    try {
+                        int result = CreateAppContainerProfile(name, name, "Nexa engineering shell", IntPtr.Zero, 0, out sid);
+                        if (result != 0) return 2; // Never delete a profile we did not create.
+                        owned = true;
+                        Console.WriteLine("READY");
+                        Console.Out.Flush();
+                        var release = new ManualResetEvent(false);
+                        var reader = new Thread(delegate() {
+                            try { if (Console.ReadLine() == "RELEASE") release.Set(); }
+                            catch (IOException) { }
+                        });
+                        reader.IsBackground = true;
+                        reader.Start();
+                        // EOF without RELEASE is not sufficient: observe the
+                        // exact native parent exit, which closes its guest Job.
+                        while (!release.WaitOne(0)) {
+                            uint state = WaitForSingleObject(parentHandle, 100);
+                            if (state == 0) break;
+                            if (state != WaitTimeout) throw new Win32Exception(Marshal.GetLastWin32Error());
+                        }
+                        // The normal parent closes its Job before RELEASE;
+                        // forced parent exit closes the kill-on-close Job.
+                    } finally {
+                        if (sid != IntPtr.Zero) FreeSid(sid);
+                        if (owned) {
+                            var deadline = Stopwatch.StartNew();
+                            do {
+                                deleted = DeleteAppContainerProfile(name) == 0;
+                                if (deleted) break;
+                                Thread.Sleep(100);
+                            } while (deadline.ElapsedMilliseconds < 8000);
+                        }
+                        // Only an actual successful deletion certifies an owned
+                        // profile. Failure leaves the started marker intact.
+                        if (deleted) {
+                            using (var receipt = new FileStream(finished, FileMode.CreateNew, FileAccess.Write, FileShare.Read)) {
+                                byte[] value = Encoding.ASCII.GetBytes("name=" + name + "; cleaned=True");
+                                receipt.Write(value, 0, value.Length);
+                                receipt.Flush(true);
+                            }
+                        }
+                    }
+                }
+                return deleted ? 0 : 3;
+            }
+        } catch (Exception error) {
+            Console.Error.WriteLine("Profile guardian: " + error.Message);
+            return 2;
+        } finally { Close(ref token); }
+    }
 
     // Session 0 requires a dedicated station lease; absence fails closed.
     private sealed class StationLease : IDisposable {
@@ -225,6 +361,7 @@ internal static class PowerShellAppContainer {
     }
 
     public static int Main(string[] args) {
+        if (args.Length > 0 && args[0] == "--profile-guardian") return RunProfileGuardian(args);
         uint timeout;
         if ((args.Length != 3 && args.Length != 4) || !UInt32.TryParse(args[2], out timeout) || timeout < 1000 || timeout > 120000) return 64;
         bool fixedHermeticCore = args.Length == 4;
@@ -250,6 +387,7 @@ internal static class PowerShellAppContainer {
         ProcessInfo child = new ProcessInfo();
         bool initialized = false;
         StationLease lease = null;
+        ProfileGuardian guardian = null;
         bool profileDeleted = false;
         bool leaseCleanupVerified = false;
         string completedResult = null;
@@ -258,7 +396,8 @@ internal static class PowerShellAppContainer {
                 lease = new StationLease();
                 name = "NexaLease" + lease.Id;
             }
-            Marshal.ThrowExceptionForHR(CreateAppContainerProfile(name, name, "Nexa engineering shell", IntPtr.Zero, 0, out sid));
+            guardian = new ProfileGuardian(name);
+            Marshal.ThrowExceptionForHR(DeriveAppContainerSidFromAppContainerName(name, out sid));
             var package = new SecurityIdentifier(sid);
             AllowDirectory(root, package, FileSystemRights.Modify);
             bool hasTools = Directory.Exists(tools);
@@ -317,6 +456,7 @@ internal static class PowerShellAppContainer {
             var command = new StringBuilder(fixedHermeticCore
                 ? "\"" + executable + "\" \"" + fixedEntrypoint + "\""
                 : "\"" + executable + "\" -NoLogo -NoProfile -NonInteractive -EncodedCommand " + Convert.ToBase64String(Encoding.Unicode.GetBytes(loader)));
+            if (!guardian.Alive) throw new InvalidOperationException("Profile guardian exited before guest launch");
             Require(CreateProcess(executable, command, IntPtr.Zero, IntPtr.Zero, true, Suspended | UnicodeEnvironment | ExtendedStartup | NoWindow, env, cwd, ref startup, out child));
             Require(AssignProcessToJobObject(job, child.Process));
             Require(OpenProcessToken(child.Process, 8, out token));
@@ -335,6 +475,7 @@ internal static class PowerShellAppContainer {
                 uint state = WaitForSingleObject(child.Process, 150);
                 if (state == 0) break;
                 if (state != WaitTimeout) throw new Win32Exception(Marshal.GetLastWin32Error());
+                if (!guardian.Alive) throw new InvalidOperationException("Profile guardian exited while guest was running");
                 if (clock.ElapsedMilliseconds >= timeout) { reason = "timeout"; break; }
                 if (!WithinStageBudget(root)) { reason = "stage_limit"; break; }
             }
@@ -366,9 +507,10 @@ internal static class PowerShellAppContainer {
             if (security != IntPtr.Zero) Marshal.FreeHGlobal(security);
             if (env != IntPtr.Zero) Marshal.FreeHGlobal(env);
             if (handles != IntPtr.Zero) Marshal.FreeHGlobal(handles);
-            if (sid != IntPtr.Zero) {
-                FreeSid(sid);
-                profileDeleted = DeleteAppContainerProfile(name) == 0;
+            if (sid != IntPtr.Zero) FreeSid(sid);
+            if (guardian != null) {
+                try { profileDeleted = guardian.Finish(); }
+                finally { guardian.Dispose(); }
                 if (!profileDeleted) Console.Error.WriteLine("AppContainer profile cleanup failed");
             }
             if (lease != null) {
@@ -384,7 +526,7 @@ internal static class PowerShellAppContainer {
         }
         // Never publish a successful result before profile deletion and the
         // provider cleanup acknowledgement have both been observed.
-        if (requiresStationLease && !leaseCleanupVerified) return 3;
+        if (!profileDeleted || (requiresStationLease && !leaseCleanupVerified)) return 3;
         if (completedResult == null) return 3;
         Console.WriteLine(completedResult);
         return 0;
