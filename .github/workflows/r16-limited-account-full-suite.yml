@@ -1,0 +1,72 @@
+name: R16 limited-account full suite pilot
+# Feasibility on disposable hosted runners, NOT a trusted verifier or release gate.
+# Candidate code runs with no production credentials, OIDC or attestation permission.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/r16-limited-account-full-suite.yml'
+permissions:
+  contents: read
+concurrency:
+  group: r16-limited-suite-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          package-manager-cache: false
+      - name: Run unchanged mandatory suites in a disposable non-admin account
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$EXPECTED_HEAD" ]]
+          account="nexapilot$(openssl rand -hex 6)"
+          root="$(sudo mktemp -d /opt/nexa-pilot.XXXXXXXX)"
+          sudo chmod 0755 "$root"
+          sudo useradd --user-group --no-create-home --shell /bin/bash "$account"
+          cleanup() {
+            sudo pkill -KILL -u "$account" || true
+            sudo userdel "$account"
+            sudo rm -rf -- "$root"
+          }
+          trap cleanup EXIT
+          sudo install -d -m 0700 -o "$account" -g "$account" "$root/home" "$root/work" "$root/tmp"
+          sudo install -d -m 0700 "$root/observer"
+          # Source bundle and copied toolchain are prepared without executing repository scripts.
+          git -c core.hooksPath=/dev/null bundle create "$RUNNER_TEMP/nexa-$account.bundle" HEAD
+          sudo install -m 0444 "$RUNNER_TEMP/nexa-$account.bundle" "$root/source.bundle"
+          rm -f "$RUNNER_TEMP/nexa-$account.bundle"
+          node_dir="$(dirname "$(readlink -f "$(command -v node)")")"
+          # Node distribution includes its npm installation. Copy out of runner-owned tree.
+          sudo cp -a "$node_dir/.." "$root/toolchain"
+          sudo chown -R root:root "$root/toolchain"
+          sudo chmod -R go-w "$root/toolchain"
+          guest() {
+            sudo -u "$account" -- env -i HOME="$root/home" USER="$account" LOGNAME="$account" TMPDIR="$root/tmp" PATH="$root/toolchain/bin:/usr/bin:/bin" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 "$@"
+          }
+          guest bash -c 'test "$(id -u)" -ne 0 && ! sudo -n true >/dev/null 2>&1 && ! test -w "$1" && ! test -r "$2"' _ "$root/toolchain/bin/node" "$root/observer"
+          guest git -c core.hooksPath=/dev/null -c init.templateDir= clone --no-checkout "$root/source.bundle" "$root/work"
+          guest git -C "$root/work" -c core.hooksPath=/dev/null checkout --detach "$EXPECTED_HEAD"
+          [[ "$(guest git -C "$root/work" rev-parse HEAD)" == "$EXPECTED_HEAD" ]]
+          guest git -C "$root/work" remote remove origin
+          guest bash -c 'cd "$1"; npm ci --no-audit --no-fund' _ "$root/work"
+          # Capture actual outer process status. This is feasibility evidence only.
+          set +e
+          guest timeout --kill-after=15s 2400s bash -c 'cd "$1"; exec node tests/tools/mcp-contract.test.mjs' _ "$root/work"
+          mcp_exit=$?
+          guest timeout --kill-after=15s 600s bash -c 'cd "$1"; exec node tests/mcp-tunnel-launcher.test.mjs' _ "$root/work"
+          tunnel_exit=$?
+          set -e
+          printf 'R16_LIMITED_LINUX_RESULT mcp=%s tunnel=%s\n' "$mcp_exit" "$tunnel_exit"
+          [[ "$mcp_exit" == 0 && "$tunnel_exit" == 0 ]]
