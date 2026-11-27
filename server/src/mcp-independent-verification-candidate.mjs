@@ -106,6 +106,7 @@ export function createIndependentCandidateEvidenceGate({ policy, pinnedPublicKey
         return deny("INDEPENDENT_EVIDENCE_RECEIPT_CHANGED");
       return Object.freeze({ ...proof, policy_sha256: policyHash, evidence_source: "independent_signed",
         required_suites: Object.freeze([...plan.required_suites]),
+        verified_results: Object.freeze(JSON.parse(envelope.payload).results.map(Object.freeze)),
         evidence_reference: Object.freeze({ candidate_revision: proof.candidate_revision,
           receipt_sha256: proof.receipt_sha256, policy_sha256: policyHash }) });
     } catch { return deny("INDEPENDENT_EVIDENCE_UNAVAILABLE"); }
