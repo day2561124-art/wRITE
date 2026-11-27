@@ -80,6 +80,8 @@ const reviewedIntegrationPreflightSources = new Set([
   "ad06ee4efb8fa62e3c4ac7131c0cc4ca7ad75e1d8f7e90df6448bda73fdc8212",
   // Independent interruption recovery only; original preflight guard unchanged.
   "0c00c1fa46317c9b616a1764c159bc269413688dd7a55092664adbd41d53a06e",
+  // Reviewed #147: worktree recovery registration matching only; preflight guard unchanged.
+  "eb80eaee0f8597e74910a9f252fc3c569fadb7c4eece1efcac3d1c5394dc4ef9",
 ]);
 export const DEV_JOURNAL_SCHEMA_VERSION = 1;
 export const DEV_JOURNAL_HEALTH = Object.freeze(["healthy", "recovering", "degraded", "corrupt"]);
