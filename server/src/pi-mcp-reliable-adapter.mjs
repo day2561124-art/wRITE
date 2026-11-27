@@ -35,12 +35,17 @@ function verifiedIntegration(capability, value, context, args) {
       && (value.state === "preflight_passed" || (value.state === "integrated" && value.strategy === "already_integrated"));
   }
   if (capability === "git.integration_validate") {
-    const report = value.validation_report;
+    const report = value.validation_report ?? {
+      passed: value.candidate_validation_passed, execution_ok: value.candidate_validation_execution_ok,
+      timed_out: value.candidate_validation_timed_out, integration_commit: value.candidate_validation_commit,
+    };
+    const workspace = value.integration_workspace ?? {
+      cleanup_pending: value.candidate_cleanup_pending, state: value.candidate_workspace_state,
+    };
     return value.integration_candidate_id === args.integration_candidate_id
       && value.revision > args.expected_revision && value.state === "ready"
-      && value.integration_workspace?.cleanup_pending === false
-      && value.integration_workspace?.state === "removed"
-      && report?.passed === true && report.execution_ok === true && report.timed_out === false
+      && workspace.cleanup_pending === false && workspace.state === "removed"
+      && report.passed === true && report.execution_ok === true && report.timed_out === false
       && report.integration_commit === value.integration_commit;
   }
   return false;
