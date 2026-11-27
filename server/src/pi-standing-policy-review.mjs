@@ -16,7 +16,7 @@ const classes = Object.freeze({
   independent_lifecycle_boundary: Object.freeze([
     "workspace.begin_workstream", "workspace.create", "workspace.create_isolated",
     "workspace.update_workstream", "workspace.end_workstream", "verification.full",
-    "git.integrate", "git.push",
+    "git.integration_preflight", "git.integration_validate", "git.integrate", "git.push",
   ]),
   independent_sandbox_boundary: Object.freeze(["workspace.powershell_isolated"]),
   independent_protected_boundary: Object.freeze([

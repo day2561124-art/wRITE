@@ -22,6 +22,35 @@ function verifiedCommit(value, reconciled = false) {
       : (value.execution_ok === true && value.commit_created === true && value.exit_code === 0))
     && value.execution_ok !== false && value.timed_out !== true && value.commit_created !== false;
 }
+// Candidate preparation must positively identify the exact registered
+// candidate, not merely indicate a successful registry mutation.
+function verifiedIntegration(capability, value, context, args) {
+  if (!value || value.workstream_id !== context.workstream_id
+    || value.workspace_id !== context.workspace_id
+    || !/^dev_integration_[0-9]{8}-[0-9]{6}_[a-f0-9]{12}$/u.test(value.integration_candidate_id ?? "")
+    || !Number.isSafeInteger(value.revision) || value.revision < 1
+    || !/^[a-f0-9]{40}$/u.test(value.integration_commit ?? "")) return false;
+  if (capability === "git.integration_preflight") {
+    return args.workstream_id === value.workstream_id
+      && (value.state === "preflight_passed" || (value.state === "integrated" && value.strategy === "already_integrated"));
+  }
+  if (capability === "git.integration_validate") {
+    const report = value.validation_report ?? {
+      passed: value.candidate_validation_passed, execution_ok: value.candidate_validation_execution_ok,
+      timed_out: value.candidate_validation_timed_out, integration_commit: value.candidate_validation_commit,
+    };
+    const workspace = value.integration_workspace ?? {
+      cleanup_pending: value.candidate_cleanup_pending, state: value.candidate_workspace_state,
+    };
+    return value.integration_candidate_id === args.integration_candidate_id
+      && value.revision > args.expected_revision && value.state === "ready"
+      && workspace.cleanup_pending === false && workspace.state === "removed"
+      && report.passed === true && report.execution_ok === true && report.timed_out === false
+      && report.integration_commit === value.integration_commit;
+  }
+  return false;
+}
+const integrationPreparation = capability => ["git.integration_preflight", "git.integration_validate"].includes(capability);
 function timedRequest(callback,timeoutMs) {
   let timer;
   const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>{
@@ -76,7 +105,7 @@ export function createPiReliableMcpAdapter({callTool,queryOperation,resolveWorks
       return callTool({name:step.tool,arguments:step.arguments,
         ...(step.effect?{_meta:{reconciliation_key:step.idempotency_key}}:{})},
         {authorizeDispatch:options.authorizeDispatch,action});
-    },step.tool==='dev_run_tests'?longRequestTimeoutMs:requestTimeoutMs));
+    },['dev_run_tests','dev_workspace_validate_integration'].includes(step.tool)?longRequestTimeoutMs:requestTimeoutMs));
     const facts=observations(evidence);
     const deduped=facts.find(x=>x?.reconciled===true);
     if(deduped&&(deduped.reconciliation_key!==step.idempotency_key
@@ -89,7 +118,10 @@ export function createPiReliableMcpAdapter({callTool,queryOperation,resolveWorks
       : !facts.some(value => verifiedCommit(value)) || facts.some(value =>
         value?.committed === false || value?.commit_created === false
         || (value?.committed === true && value.exit_code != null && value.exit_code !== 0)));
-    return {receipt:r,failed:failed||commitFailed||(deduped&&deduped.reconciliation_state!=="completed")
+    const integrationFailed = integrationPreparation(step.capability) &&
+      !(deduped ? verifiedIntegration(step.capability, deduped.original_result, step.execution_context ?? intent.context, step.arguments)
+        : facts.some(value => verifiedIntegration(step.capability, value, step.execution_context ?? intent.context, step.arguments)));
+    return {receipt:r,failed:failed||commitFailed||integrationFailed||(deduped&&deduped.reconciliation_state!=="completed")
       ||(verification&&!(deduped?deduped.original_result?.passed===true:facts.some(x=>x?.passed===true))),
       error_code:failed||commitFailed?"TOOL_REPORTED_FAILURE":"VALIDATION_EVIDENCE_REQUIRED"};
   }
@@ -118,6 +150,8 @@ export function createPiReliableMcpAdapter({callTool,queryOperation,resolveWorks
       const receipt = receiptOf(action, raw, "reconciled_facts");
       if (observedRecoveryFailure(action, receipt)) return { verdict: "recoverable_failure", receipt };
       if(step.capability === "git.commit" && !verifiedCommit(raw.original_result, true))
+        return {verdict:"unknown",code:"VALIDATION_EVIDENCE_REQUIRED",receipt};
+      if(integrationPreparation(step.capability) && !verifiedIntegration(step.capability, raw.original_result, step.execution_context ?? intent.context, step.arguments))
         return {verdict:"unknown",code:"VALIDATION_EVIDENCE_REQUIRED",receipt};
       if(step.capability.startsWith("verification.")&&raw.original_result?.passed!==true)
         return {verdict:"unknown",code:"VALIDATION_EVIDENCE_REQUIRED"};

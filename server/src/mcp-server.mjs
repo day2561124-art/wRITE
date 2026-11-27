@@ -190,6 +190,7 @@ import {
   powershell_admin_run,
   powershell_run,
   powershell_isolated_run,
+  usesScopedAdminDispatcherRoot,
 } from "./mcp-powershell-maintenance-tools.mjs";
 import {
   DEV_WORKSTREAM_ID_PATTERN_SOURCE,
@@ -1837,7 +1838,7 @@ import {CAPABILITY_DEFINITIONS, verifyPiWorkspaceShellScope, WINDOWS_APPROVED_SC
 import {beginPiWorkstreamBootstrap} from "./mcp-development-workstream-tools.mjs";
 import {isPiManagedMcpCall,assertPiManagedMcpCall} from "./pi-production-execution-controller.mjs";
 import {getMcpOperationReconciliationContext as getPiBootstrapReconciliation} from "./mcp-operation-reconciliation-context.mjs";
-import {createPiRuntimeCapabilityMetadata} from "./pi-runtime-capability-metadata.mjs";
+import {createPiRuntimeCapabilityMetadata,piRuntimeCapabilityAvailability} from "./pi-runtime-capability-metadata.mjs";
 const toolDefinitions = [
   {name:"dev_capability_get_schema",description:"Read bounded server-owned capability schema/version/hash metadata; no source-file access or dispatch.",risk:"read",annotations:{readOnlyHint:true},inputSchema:baseSchema({capability_name:{type:"string",maxLength:128},expected_schema_version:{type:"string",maxLength:16}},["capability_name"]),handler:async args=>jsonContent(piCapabilityMetadata.getSchema(args))},
   {name:"dev_capability_list",description:"Read bounded registered capability metadata. Does not select replacement tools or execute effects.",risk:"read",annotations:{readOnlyHint:true},inputSchema:baseSchema({capability_names:{type:"array",maxItems:64,uniqueItems:true,items:{type:"string",maxLength:128}},offset:{type:"integer",minimum:0,maximum:128},limit:{type:"integer",minimum:1,maximum:64}}),handler:async args=>jsonContent(piCapabilityMetadata.list(args))},
@@ -5929,7 +5930,8 @@ function writeMessage(message, framing = "line") {
 }
 
 const piCapabilityMetadata=createPiRuntimeCapabilityMetadata({tools:toolDefinitions,availability:name=>{
-  const definition=CAPABILITY_DEFINITIONS.find(c=>c.capability===name);return definition&&isToolAllowed(definition.tool)?"available":"unavailable";
+  const definition=CAPABILITY_DEFINITIONS.find(c=>c.capability===name);
+  return piRuntimeCapabilityAvailability({capability:name,toolAllowed:!!definition&&isToolAllowed(definition.tool),scopedDispatcher:usesScopedAdminDispatcherRoot()});
 }});
 const piProductionRoute = createPiProductionRouteStore();
 async function auditPiFallback(record) {
@@ -5941,6 +5943,11 @@ const piLifecycleScopeVerifier = createPiLifecycleScopeVerifier({
   getWorkstream: args => dev_workspace_get_workstream(args),
   getCheckpoint: args => dev_workspace_get_checkpoint(args),
   getOperation: args => dev_workspace_get_operation(args),
+  getIntegrationCandidate: args => dev_workspace_get_integration_candidate(args),
+  validationAllowed: async () => {
+    // Host-dependent integration suites have no protected-dispatcher route yet.
+    return !usesScopedAdminDispatcherRoot();
+  },
 });
 // The controller's default route is backed by the same authoritative Journal.
 // Retain piProductionRoute for guardPiDirectExecution below; do not substitute
@@ -6008,7 +6015,7 @@ const piProductionController = createPiProductionExecutionController({ transport
 async function callTool(params, authentication) {
   const name = params?.name;
   if(!workbenchTransportBoundary.isToolAllowed(name))throw new Error("GM_CONNECTION_TOOL_DENIED");
-  if (workspaceRoutingEnabledForProfile && (workspaceAwareDeveloperToolNames.has(name) || ["dev_workspace_begin_workstream","dev_workspace_update_workstream","dev_workspace_end_workstream","dev_workspace_create_isolated","dev_workspace_create_checkpoint","dev_workspace_integrate","dev_git_push","dev_pi_execute_readonly"].includes(name))) {
+  if (workspaceRoutingEnabledForProfile && (workspaceAwareDeveloperToolNames.has(name) || ["dev_workspace_begin_workstream","dev_workspace_update_workstream","dev_workspace_end_workstream","dev_workspace_create_isolated","dev_workspace_create_checkpoint","dev_workspace_integration_preflight","dev_workspace_validate_integration","dev_workspace_integrate","dev_git_push","dev_pi_execute_readonly"].includes(name))) {
     await guardPiDirectExecution({ route: piProductionRoute, tool: name, mutation: toolRegistry.get(name)?.risk !== "read", params, auditFallback: auditPiFallback, resolveWorkspace: resolveDevWorkspaceExecutionContext });
   }
   if (name === "dev_pi_execute_intent" && params?._meta?.reconciliation_key !== undefined) throw new Error("PI_INTENT_OWNS_IDEMPOTENCY");
@@ -6066,7 +6073,11 @@ async function callToolDirect(params, authentication) {
       admission_details: journalMutationDetails(tool.name, effectiveArgs, isPiManagedMcpCall()),
     resolve_workspace_scope: async () => {
         if (!mutationArgs.workspace_id) {
-          if(["dev_workspace_create_isolated","dev_workspace_update_workstream","dev_workspace_end_workstream"].includes(tool.name)) {
+          if (tool.name === "dev_workspace_validate_integration") {
+            const record = await dev_workspace_get_integration_candidate({integration_candidate_id: mutationArgs.integration_candidate_id});
+            return {workspace_id:record.workspace_id,workstream_id:record.workstream_id};
+          }
+          if(["dev_workspace_create_isolated","dev_workspace_update_workstream","dev_workspace_end_workstream","dev_workspace_integration_preflight"].includes(tool.name)) {
             const record=await dev_workspace_get_workstream({workstream_id:mutationArgs.workstream_id});
             return {workspace_id:record.workspace_id,workstream_id:record.workstream_id};
           }

@@ -2751,8 +2751,32 @@ function verifiedMcpTestResult(events,started,terminal) {
         const binding=lifecycle?{workstream_id:payload.workstream_id,workspace_id:payload.workspace_id,
           workstream_revision:payload.workstream_revision??payload.revision,base_head:payload.base_head,
           ...(payload.state?{state:payload.state}:{})}:{};
-        await complete(admission.operation_id, {result:{outcome:"intended_effect_observed",...binding},
-          links:lifecycle?[{relation:"produced",workstream_id:payload.workstream_id,workspace_id:payload.workspace_id}]:[]});
+        // Persist only bounded candidate facts for the managed lifecycle route.
+        // A blocked/stale/failed candidate may be a completed registry effect,
+        // but the Pi adapter independently requires positive success evidence.
+        // begin() returns a receipt, not the authoritative started event.
+        const admittedEvent = verification.events.find(event => event.operation_id === admission.operation_id
+          && event.stage === "operation_started");
+        const integrationPreparation = ["dev_workspace_integration_preflight", "dev_workspace_validate_integration"].includes(context.tool_name)
+          && workstreamIdPattern.test(payload.workstream_id ?? "") && workspaceIdPattern.test(payload.workspace_id ?? "")
+          && payload.workstream_id === admittedEvent?.workstream_id && payload.workspace_id === admittedEvent?.workspace_id
+          && /^dev_integration_[0-9]{8}-[0-9]{6}_[a-f0-9]{12}$/u.test(payload.integration_candidate_id ?? "")
+          && Number.isSafeInteger(payload.revision) && payload.revision > 0;
+        const candidateBinding = integrationPreparation ? {
+          workstream_id: payload.workstream_id, workspace_id: payload.workspace_id,
+          integration_candidate_id: payload.integration_candidate_id, revision: payload.revision,
+          state: payload.state, strategy: payload.strategy,
+          integration_commit: payload.integration_commit,
+          candidate_cleanup_pending: payload.integration_workspace?.cleanup_pending,
+          candidate_workspace_state: payload.integration_workspace?.state,
+          candidate_validation_passed: payload.validation_report?.passed,
+          candidate_validation_execution_ok: payload.validation_report?.execution_ok,
+          candidate_validation_timed_out: payload.validation_report?.timed_out,
+          candidate_validation_commit: payload.validation_report?.integration_commit,
+        } : {};
+        await complete(admission.operation_id, {result:{outcome:"intended_effect_observed",...binding,...candidateBinding},
+          links:lifecycle?[{relation:"produced",workstream_id:payload.workstream_id,workspace_id:payload.workspace_id}]
+            :integrationPreparation?[{relation:"related_to",integration_candidate_id:payload.integration_candidate_id}]:[]});
       }
       return { reconciled: false, value, operation: await getOperation({ operation_id: admission.operation_id }) };
     });

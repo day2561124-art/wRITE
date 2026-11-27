@@ -240,11 +240,20 @@ jobs:
             while (!(Test-Path -LiteralPath $resultPath)) {
               $info = Get-ScheduledTaskInfo -TaskName $task
               $state = (Get-ScheduledTask -TaskName $task).State
+              # Do not treat a redirection-created empty marker as exit.
+              $exitMarker = Join-Path $run 'wrapper-exit.txt'
+              $wrapperExited = $false
+              if (Test-Path -LiteralPath $exitMarker -PathType Leaf) {
+                $exitText = Get-Content -LiteralPath $exitMarker -Raw -ErrorAction SilentlyContinue
+                $wrapperExited = $null -ne $exitText -and $exitText.Trim() -match '^-?\d+$'
+              }
+              if (Test-Path -LiteralPath $resultPath -PathType Leaf) { break }
               if (($info.LastRunTime -ne $prior -and $state -eq 'Ready') -or
-                  (Test-Path -LiteralPath (Join-Path $run 'wrapper-exit.txt')) -or
-                  [datetime]::UtcNow -gt $deadline) {
+                  $wrapperExited -or [datetime]::UtcNow -gt $deadline) {
+                Start-Sleep -Milliseconds 250
+                if (Test-Path -LiteralPath $resultPath -PathType Leaf) { break }
                 Write-Output "TASK_STATE=$state; LAST_RUN_RESULT=$($info.LastTaskResult); LAST_RUN_TIME=$($info.LastRunTime)"
-                foreach ($name in @('wrapper-entered.txt','probe-entered.txt','wrapper-exit.txt','bootstrap.log','test.log')) {
+                foreach ($name in @('wrapper-entered.txt','probe-entered.txt','wrapper-exit.txt','bootstrap.log','test.log','forced.log','forced-stderr.log','result.tmp')) {
                   $file = Join-Path $run $name
                   Write-Output "DIAGNOSTIC_FILE=$name; EXISTS=$(Test-Path -LiteralPath $file)"
                   if (Test-Path -LiteralPath $file) { Get-Content -LiteralPath $file -Tail 40 }

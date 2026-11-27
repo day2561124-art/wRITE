@@ -58,6 +58,10 @@ export const CAPABILITY_DEFINITIONS = Object.freeze([
     Object.freeze({ script_id: Object.freeze({ type: "string", pattern: WINDOWS_APPROVED_SCRIPT_ID.source, maxLength: 64 }),
       script_sha256: Object.freeze({ type: "string", pattern: "^[a-f0-9]{64}$" }) })),
   descriptor("git.commit", "dev_git_commit", "commit", true, ["message", "paths", "expectedHead"]),
+  descriptor("git.integration_preflight", "dev_workspace_integration_preflight", "integrate", true,
+    ["workstream_id", "expected_workstream_revision"], [], "integration_preflight"),
+  descriptor("git.integration_validate", "dev_workspace_validate_integration", "integrate", true,
+    ["integration_candidate_id", "expected_revision"], [], "integration_validation"),
   descriptor("git.integrate", "dev_workspace_integrate", "integrate", true,
     ["integration_candidate_id", "expected_revision"], [], "candidate"),
   descriptor("git.push", "dev_git_push", "push", true, ["expectedHead"], [], "main"),
@@ -317,6 +321,8 @@ export function createExecutionIntent(input) {
       // Its actual workstream_id remains context-bound by validateInput above.
       if (["workspace.create_isolated", "workspace.update_workstream", "workspace.end_workstream"].includes(action.capability)
         && plan.target !== (bootstrap?"bootstrap_workstream":intent.context.workstream_id)) fail("MUTATION_TARGET_MISMATCH");
+      if (action.capability === "git.integration_preflight" && plan.target !== intent.context.workstream_id) fail("MUTATION_TARGET_MISMATCH");
+      if (action.capability === "git.integration_validate" && plan.target !== action.input.integration_candidate_id) fail("MUTATION_TARGET_MISMATCH");
       if(action.capability==="workspace.begin_workstream" && plan.target!=="bootstrap_workstream") fail("MUTATION_TARGET_MISMATCH");
       plans.delete(action.step_id);
     } else if (plan || action.idempotency_key !== undefined) fail("UNEXPECTED_MUTATION_PLAN");

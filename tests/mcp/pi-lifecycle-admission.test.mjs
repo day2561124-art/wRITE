@@ -338,3 +338,121 @@ test('blocked recovery requires a later durable passing result in the same works
   const duplicate=await createPiReliableExecutionEngine({store:reopened,adapter:a}).execute(source);
   assert.equal(duplicate.projection_hash,first.projection_hash);assert.equal(dispatches,1);
 });
+
+test("R16 preflight and validation use strict independent lifecycle scopes", async () => {
+  const candidateId = "dev_integration_20261127-010000_" + "a".repeat(12);
+  const completed = { ...workstream, state: "completed" };
+  const candidate = { ...context, integration_candidate_id: candidateId, revision: 3, state: "preflight_passed" };
+  const preInput = { workstream_id: context.workstream_id, expected_workstream_revision: 5 };
+  const valInput = { integration_candidate_id: candidateId, expected_revision: 3 };
+  const make = (capability, input, target) => {
+    const source = intent(capability, input, true);
+    return { ...source, permissions: { ...source.permissions, integrate: true },
+      mutation_plan: [{ ...source.mutation_plan[0], target }] };
+  };
+  const pre = make("git.integration_preflight", preInput, context.workstream_id);
+  const val = make("git.integration_validate", valInput, candidateId);
+  const planner = createMcpCapabilityAdapter();
+  const preStep = planner.describe(pre, "lifecycle");
+  const valStep = planner.describe(val, "lifecycle");
+  assert.equal(preStep.tool, "dev_workspace_integration_preflight");
+  assert.equal(valStep.tool, "dev_workspace_validate_integration");
+  assert.deepEqual(preStep.arguments, preInput);
+  assert.deepEqual(valStep.arguments, valInput);
+  const verifier = await scope({ getWorkstream: async () => completed,
+    getIntegrationCandidate: async () => candidate, validationAllowed: async () => true });
+  assert.equal(await verifier({ context, step: preStep }), true);
+  assert.equal(await verifier({ context, step: valStep }), true);
+  assert.equal(await verifier({ context, step: { ...preStep, arguments: { ...preInput, expected_workstream_revision: 4 } } }), false);
+  assert.equal(await verifier({ context, step: { ...valStep, arguments: { ...valInput, expected_revision: 2 } } }), false);
+  assert.equal(await verifier({ context: { ...context, workspace_id: "dev_workspace_" + "f".repeat(24) }, step: valStep }), false);
+  assert.equal(await (await scope())({ context, step: preStep }), false);
+  const blocked = await scope({ getWorkstream: async () => completed, getIntegrationCandidate: async () => candidate,
+    validationAllowed: async () => false });
+  assert.equal(await blocked({ context, step: valStep }), false);
+  const wrongCandidate = await scope({ getWorkstream: async () => completed,
+    getIntegrationCandidate: async () => ({ ...candidate, workspace_id: "dev_workspace_" + "f".repeat(24) }),
+    validationAllowed: async () => true });
+  assert.equal(await wrongCandidate({ context, step: valStep }), false);
+  assert.throws(() => createExecutionIntent({ ...pre, permissions: { ...pre.permissions, integrate: false } }), /PERMISSION_DENIED/);
+  assert.throws(() => createExecutionIntent({ ...val, mutation_plan: [{ ...val.mutation_plan[0], target: context.workspace_id }] }), /MUTATION_TARGET_MISMATCH/);
+  assert.throws(() => createExecutionIntent({ ...val, standing_authorization: {
+    policy_id: "pi_standing_" + "a".repeat(32), policy_sha256: "b".repeat(64), principal: "fixture"
+  } }), /INVALID_STANDING_AUTHORIZATION/);
+  assert.throws(() => createExecutionIntent(make("git.integration_preflight", { ...preInput, branch: "main" }, context.workstream_id)), /INVALID_CONTRACT_FIELDS/);
+});
+
+test("R16 integration receipts reject stale, blocked, mismatched and incomplete candidates", async () => {
+  const id = "dev_integration_20261127-010000_" + "a".repeat(12);
+  const preInput = { workstream_id: context.workstream_id, expected_workstream_revision: 5 };
+  const valInput = { integration_candidate_id: id, expected_revision: 3 };
+  const make = (capability, input, target) => {
+    const source = intent(capability, input, true);
+    return { ...source, permissions: { ...source.permissions, integrate: true },
+      mutation_plan: [{ ...source.mutation_plan[0], target }] };
+  };
+  const pre = make("git.integration_preflight", preInput, context.workstream_id);
+  const val = make("git.integration_validate", valInput, id);
+  const candidate = { ...context, integration_candidate_id: id, revision: 3,
+    state: "preflight_passed", integration_commit: base, strategy: "fast_forward" };
+  const ready = { ...candidate, revision: 4, state: "ready",
+    integration_workspace: { state: "removed", cleanup_pending: false },
+    validation_report: { passed: true, execution_ok: true, timed_out: false, integration_commit: base } };
+  const execute = (source, payload) => createPiReliableMcpAdapter({
+    callTool: async () => ({ content: [{ type: "text", text: JSON.stringify(payload) }] }),
+    queryOperation: async () => ({}), resolveWorkspace: async () => ({}), verifyScope: async () => true,
+  }).execute(source, "lifecycle");
+  assert.equal(Boolean((await execute(pre, candidate)).failed), false);
+  assert.equal(Boolean((await execute(val, ready)).failed), false);
+  for (const payload of [{ ok: true }, { ...candidate, state: "blocked" },
+    { ...candidate, workspace_id: "dev_workspace_" + "f".repeat(24) }, { ...candidate, integration_commit: null }])
+    assert.equal(Boolean((await execute(pre, payload)).failed), true);
+  for (const payload of [{ ...ready, state: "failed" }, { ...ready, revision: 3 },
+    { ...ready, integration_workspace: { state: "cleanup_pending", cleanup_pending: true } },
+    { ...ready, validation_report: { ...ready.validation_report, passed: false } },
+    { ...ready, validation_report: { ...ready.validation_report, integration_commit: "f".repeat(40) } }])
+    assert.equal(Boolean((await execute(val, payload)).failed), true);
+  const facts = { ...candidate, revision: 4, state: "ready", candidate_cleanup_pending: false,
+    candidate_workspace_state: "removed", candidate_validation_passed: true,
+    candidate_validation_execution_ok: true, candidate_validation_timed_out: false, candidate_validation_commit: base };
+  const reconcile = original_result => createPiReliableMcpAdapter({
+    callTool: async () => assert.fail("reconciliation must not dispatch"),
+    resolveWorkspace: async () => ({}), verifyScope: async () => true,
+    queryOperation: async params => ({ ...params, reconciliation_state: "completed",
+      operation_id: operationId, original_result }),
+  }).reconcile(val, "lifecycle");
+  assert.equal((await reconcile(facts)).verdict, "completed");
+  assert.equal((await reconcile({ ...facts, candidate_cleanup_pending: true })).verdict, "unknown");
+  assert.equal((await reconcile({ outcome: "intended_effect_observed" })).verdict, "unknown");
+});
+
+test("R16 capability availability never substitutes hermetic tests for an unavailable full gate", async () => {
+  const { piRuntimeCapabilityAvailability } = await import("../../server/src/pi-runtime-capability-metadata.mjs");
+  const { createPiReliableMcpAdapter } = await import("../../server/src/pi-mcp-reliable-adapter.mjs");
+  const observe = (capability, scopedDispatcher, toolAllowed = true) =>
+    piRuntimeCapabilityAvailability({ capability, scopedDispatcher, toolAllowed });
+  for (const capability of ["verification.affected", "verification.full", "git.integration_validate"]) {
+    assert.equal(observe(capability, true), "unavailable");
+    assert.equal(observe(capability, false), "available");
+    assert.equal(observe(capability, undefined), "unknown");
+  }
+  assert.equal(observe("verification.focused", true), "available");
+  assert.equal(observe("git.integration_preflight", true), "available");
+  assert.equal(observe("verification.focused", true, false), "unavailable");
+  const input = { suite: "all" };
+  const source = intent("verification.full", input, true, {
+    permissions: { ...intent("verification.full", input, true).permissions, tests: true },
+    verification: { focused: [], affected: [], full: ["lifecycle"] },
+  });
+  let sends = 0;
+  const guarded = createPiReliableMcpAdapter({
+    resolveWorkspace: async () => assert.fail("unavailable capability must not resolve a mutation scope"),
+    queryOperation: async () => assert.fail("unavailable capability must not reconcile"),
+    callTool: async () => { sends++; assert.fail("unavailable capability must not dispatch"); },
+    validateCapabilityExpectation: async ({ capability_name }) => ({
+      ok: false, code: observe(capability_name, true) === "unavailable" ? "CAPABILITY_UNAVAILABLE" : "CAPABILITY_EXPECTATION_REQUIRED",
+    }),
+  });
+  await assert.rejects(guarded.execute(source, "lifecycle"), { code: "CAPABILITY_UNAVAILABLE" });
+  assert.equal(sends, 0);
+});

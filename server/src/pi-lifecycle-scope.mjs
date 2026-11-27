@@ -24,13 +24,38 @@ export async function verifyPiBlockerResolution({workstream, context, resolution
     && typeof proof.original_result?.suite==="string" && proof.original_result.suite===blocker.original_result?.suite
     && (proof.events?.at(-1)?.sequence??0)>(blocker.events?.at(-1)?.sequence??Infinity);
 }
-export function createPiLifecycleScopeVerifier({ getWorkstream, getCheckpoint, getOperation } = {}) {
+export function createPiLifecycleScopeVerifier({ getWorkstream, getCheckpoint, getOperation, getIntegrationCandidate, validationAllowed } = {}) {
   if (typeof getWorkstream !== "function" || typeof getCheckpoint !== "function"
     || typeof getOperation !== "function") {
     failure("HOST_LIFECYCLE_SCOPE_UNBOUND");
   }
   return async ({ context, step } = {}) => {
     if (!context || !step || typeof step !== "object" || !step.arguments) return false;
+    if (step.scope === "integration_preflight" || step.scope === "integration_validation") {
+      // Lifecycle operations keep the independent integrate permission. No
+      // ordinary standing grant, caller-supplied target ref or shell is used.
+      if (step.effect !== true || step.permission !== "integrate"
+        || !/^dev_workspace_[a-f0-9]{24}$/u.test(context.workspace_id ?? "")) return false;
+      const workstream = await getWorkstream({ workstream_id: context.workstream_id });
+      if (!identity(workstream, context) || workstream.mode !== "isolated"
+        || workstream.state !== "completed") return false;
+      if (step.scope === "integration_preflight") {
+        return step.capability === "git.integration_preflight"
+          && step.tool === "dev_workspace_integration_preflight"
+          && step.arguments.workstream_id === context.workstream_id
+          && step.arguments.expected_workstream_revision === workstream.revision;
+      }
+      if (step.capability !== "git.integration_validate"
+        || step.tool !== "dev_workspace_validate_integration"
+        || typeof validationAllowed !== "function" || await validationAllowed() !== true
+        || typeof getIntegrationCandidate !== "function") return false;
+      const candidate = await getIntegrationCandidate({ integration_candidate_id: step.arguments.integration_candidate_id });
+      return candidate?.integration_candidate_id === step.arguments.integration_candidate_id
+        && candidate.workstream_id === context.workstream_id
+        && candidate.workspace_id === context.workspace_id
+        && candidate.revision === step.arguments.expected_revision
+        && candidate.state === "preflight_passed";
+    }
     if (step.scope === "workstream") {
       if (step.tool !== "dev_workspace_get_workstream") return false;
       const workstream = await getWorkstream({ workstream_id: context.workstream_id });
