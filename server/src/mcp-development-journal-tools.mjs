@@ -76,6 +76,8 @@ const reviewedIntegrationPreflightSources = new Set([
   // Reviewed #139: read-only candidate context and exact Git risk-plan query;
   // preflight's before-write guard and recovery checks are unchanged.
   "eaee85a399d88db017e159f4a371ba8def9e0188a3dc7d809116af9fbec47efe",
+  // Independent adoption changes validation/apply only; preflight guard unchanged.
+  "ad06ee4efb8fa62e3c4ac7131c0cc4ca7ad75e1d8f7e90df6448bda73fdc8212",
 ]);
 export const DEV_JOURNAL_SCHEMA_VERSION = 1;
 export const DEV_JOURNAL_HEALTH = Object.freeze(["healthy", "recovering", "degraded", "corrupt"]);
