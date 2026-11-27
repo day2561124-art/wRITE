@@ -9,6 +9,7 @@ import path from "node:path";
 import test from "node:test";
 import { FIXED_ISOLATED_SUITE, FIXED_ISOLATED_SOURCE_PATHS, fixedIsolatedVerificationPlan, runFixedIsolatedVerification } from "../../server/src/mcp-fixed-isolated-verification.mjs";
 import { createDevTestRunner } from "../../server/src/mcp-development-test-tools.mjs";
+import { prepareAppContainerPowerShell } from "../../server/src/mcp-powershell-appcontainer.mjs";
 import { createDevOperationJournalService } from "../../server/src/mcp-development-journal-tools.mjs";
 import { createPowerShellMaintenanceTool } from "../../server/src/mcp-powershell-maintenance-tools.mjs";
 import { fingerprintMcpMutationRequest } from "../../server/src/mcp-operation-reconciliation-context.mjs";
@@ -334,6 +335,88 @@ test("fixed hermetic suite executes its real five-file closure in Windows AppCon
   assert.equal(failure.passed, false, JSON.stringify(failure));
   assert.notEqual(failure.exit_code, 0);
   assert.equal(failure.workspace_writes, false);
+});
+
+test("fixed hermetic suite denies host files, toolchain writes and host loopback in Windows AppContainer", { ...platform, timeout: 180_000 }, async t => {
+  const f = await fixture(t);
+  const outside = path.join(f.root, "host-only.txt");
+  await writeFile(outside, "host-fixture");
+  const protectedEnv = "NEXA_FIXED_ISOLATION_TEST_HOST_ONLY";
+  process.env[protectedEnv] = "host-fixture";
+  t.after(() => { delete process.env[protectedEnv]; });
+  let connected = false;
+  const listener = createServer(socket => { connected = true; socket.destroy(); });
+  listener.listen(0, "127.0.0.1");
+  await once(listener, "listening");
+  t.after(() => new Promise(resolve => listener.close(resolve)));
+  for (const file of FIXED_ISOLATED_SOURCE_PATHS) {
+    const target = path.join(f.context.root, file);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, await readFile(new URL("../../" + file, import.meta.url)));
+  }
+  const entry = path.join(f.context.root, FIXED_ISOLATED_SOURCE_PATHS[0]);
+  // Only synthetic fixture inputs are used. Exercise the real fixed Node
+  // route; successful access to any protected resource makes the test fail.
+  const probe = [
+    'import assert from "node:assert/strict";',
+    'import { readFile, writeFile } from "node:fs/promises";',
+    'import { createConnection } from "node:net";',
+    'import path from "node:path";',
+    `const host = ${JSON.stringify(outside)};`,
+    `assert.equal(process.env[${JSON.stringify(protectedEnv)}], undefined);`,
+    'const denied = error => ["EACCES", "EPERM", "ENOENT"].includes(error?.code);',
+    'await assert.rejects(readFile(host, "utf8"), denied);',
+    'await assert.rejects(writeFile(host, "unexpected"), denied);',
+    'await assert.rejects(writeFile(path.join(path.dirname(process.execPath), "fixture-forbidden.txt"), "unexpected", { flag: "wx" }), denied);',
+    // Windows can redirect TEMP to an uncreated package-specific directory.
+    // Use the explicit staged workspace for the positive write control instead.
+    'const guestFile = path.join(process.env.NEXA_SANDBOX_WORK, "guest-only.txt");',
+    'await writeFile(guestFile, "allowed", { flag: "wx" });',
+    'assert.equal(await readFile(guestFile, "utf8"), "allowed");',
+    `await new Promise((resolve, reject) => { const socket = createConnection({ host: "127.0.0.1", port: ${listener.address().port} }); socket.once("connect", () => { socket.destroy(); reject(new Error("host loopback allowed")); }); socket.once("error", resolve); socket.setTimeout(5000, () => { socket.destroy(); resolve(); }); });`,
+    'console.log("FIXED_ISOLATION_NEGATIVE_PROBE_PASS");',
+  ].join("\n");
+  await writeFile(entry, probe);
+  const result = await runFixedIsolatedVerification({ suite: FIXED_ISOLATED_SUITE, context: f.context });
+  assert.equal(result.passed, true, JSON.stringify(result));
+  assert.match(result.stdout, /FIXED_ISOLATION_NEGATIVE_PROBE_PASS/u);
+  assert.equal(result.exit_code, 0);
+  assert.equal(result.input_file_count, 5);
+  assert.equal(result.workspace_writes, false);
+  assert.equal(result.cleanup_pending, false);
+  assert.equal(result.job_terminated, true);
+  assert.equal(connected, false);
+  assert.equal(await readFile(outside, "utf8"), "host-fixture");
+  assert.equal(await readFile(entry, "utf8"), probe);
+});
+
+test("fixed hermetic suite times out a running guest and verifies resource cleanup", { ...platform, timeout: 120_000 }, async t => {
+  const f = await fixture(t);
+  for (const file of FIXED_ISOLATED_SOURCE_PATHS) {
+    const target = path.join(f.context.root, file);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, await readFile(new URL("../../" + file, import.meta.url)));
+  }
+  const entry = path.join(f.context.root, FIXED_ISOLATED_SOURCE_PATHS[0]);
+  const source = 'console.log("GUEST_ENTERED_TIMEOUT_FIXTURE"); setInterval(() => {}, 1000);';
+  await writeFile(entry, source);
+  const prepared = await prepareAppContainerPowerShell({
+    context: f.context, cwd: f.context.root, command: "fixed-verification-timeout-fixture",
+    timeoutMs: 5000, sandbox_paths: FIXED_ISOLATED_SOURCE_PATHS,
+    sandbox_directories: [], output_paths: [], toolchain: "node", fixedHermeticCore: true,
+  });
+  try {
+    const result = await prepared.run();
+    assert.equal(result.timed_out, true, JSON.stringify(result));
+    assert.equal(result.execution_ok, false);
+    assert.equal(result.job_terminated, true);
+    assert.equal(result.workspace_writes, false);
+    assert.equal(result.exit_code, null);
+    assert.match(result.stdout, /GUEST_ENTERED_TIMEOUT_FIXTURE/u);
+    assert.equal(await readFile(entry, "utf8"), source);
+  } finally {
+    await prepared.cleanup();
+  }
 });
 
 test("fixed isolated verification rejects incomplete or changed evidence and always cleans staging", async t => {

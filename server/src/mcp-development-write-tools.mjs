@@ -1268,8 +1268,16 @@ async function assertCommitFilesystemPathSafety(repositoryRoot, relativePath, la
   return resolved;
 }
 
-function fixedCommitEnvironment() {
+function fixedCommitEnvironment(automationIdentity = false) {
   return controlledProcessEnvironment({
+    // A protected dispatcher is an automation identity, not the operator's
+    // personal Git identity. Keep this fixed and out of requester input.
+    ...(automationIdentity ? {
+      GIT_AUTHOR_NAME: "Writer Workbench Engineering",
+      GIT_AUTHOR_EMAIL: "writer-workbench@local.invalid",
+      GIT_COMMITTER_NAME: "Writer Workbench Engineering",
+      GIT_COMMITTER_EMAIL: "writer-workbench@local.invalid",
+    } : {}),
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_EDITOR: process.platform === "win32" ? "cmd.exe /d /c exit 0" : "true",
     GIT_SEQUENCE_EDITOR: process.platform === "win32" ? "cmd.exe /d /c exit 0" : "true",
@@ -1299,6 +1307,7 @@ async function runCommitGit({
   outputMaxCharacters,
   timeoutMs,
   hashStdout = false,
+  automationIdentity = false,
 }) {
   const stdout = createBoundedOutputCollector(outputMaxCharacters);
   const stderr = createBoundedOutputCollector(outputMaxCharacters);
@@ -1312,7 +1321,7 @@ async function runCommitGit({
   try {
     child = spawn(executable, argv, {
       cwd: repositoryRoot,
-      env: fixedCommitEnvironment(),
+      env: fixedCommitEnvironment(automationIdentity),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
       shell: false,
@@ -1591,6 +1600,7 @@ export function createDevGitCommitTool({
   executable = fixedCommitGitExecutable,
   outputMaxCharacters = DEV_GIT_COMMIT_OUTPUT_MAX_CHARACTERS,
   timeoutMs = devGitCommitTimeoutMs,
+  automationIdentity = false,
 } = {}) {
   const gitTools = createDevGitTools({
     repositoryRoot,
@@ -1607,6 +1617,7 @@ export function createDevGitCommitTool({
       outputMaxCharacters,
       timeoutMs,
       ...options,
+      automationIdentity: automationIdentity === true && args[0] === "commit",
     });
   }
 
@@ -2012,7 +2023,10 @@ export async function dev_git_commit(input = {}, options = {}) {
     }), context);
   }
 
-  const commitTool = createDevGitCommitTool({ repositoryRoot: context.root });
+  const commitTool = createDevGitCommitTool({
+    repositoryRoot: context.root,
+    automationIdentity: process.env.NEXA_PI_REQUIRE_TASK_AUTHORIZATION === "1",
+  });
   let normalizedCommitInput;
   try {
     normalizedCommitInput = validateCommitInput({ paths: input.paths, message: input.message });
