@@ -254,3 +254,48 @@ test("GitHub read transport binds exact repository, immutable blob bytes and rea
   await assert.rejects(unauthorized.readRun({ repository: repo, run_id: 111 }), e =>
     e.message === "GITHUB_READ_ONLY_EVIDENCE_UNAVAILABLE" && !String(e).includes(credential));
 });
+
+test("independent issuer signs only exact provider and separately observed test outcomes", async () => {
+  const { generateKeyPairSync, sign } = await import("node:crypto");
+  const { createIndependentVerificationIssuer } = await import("../../server/src/mcp-independent-verification-issuer.mjs");
+  const { reviewIndependentVerification } = await import("../../server/src/mcp-independent-verification-evidence.mjs");
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const now = Date.now();
+  const candidate = { integration_candidate_id: "dev_integration_20261127-010000_aabbccddeeff", revision: 2,
+    integration_commit: "1".repeat(40), source_head: "1".repeat(40), target_head: "2".repeat(40) };
+  const row = { suite: "all", platform: "linux", workflow_sha256: "3".repeat(64) };
+  const required = [row];
+  const policy = { repository: "owner/disposable", issuer: "fixture-issuer", required, max_age_ms: 60000, receipt_ttl_ms: 30000 };
+  const context = { candidate, plan: { required_suites: ["all"] }, observation_only: true, execution_authorized: false };
+  const request = { integration_candidate_id: candidate.integration_candidate_id, expected_revision: 2 };
+  const binding = { ...row, commit: candidate.integration_commit, run_id: 10, job_id: 20, run_attempt: 1, completed_at_ms: now - 50000 };
+  const observation = { observed: true, execution_authorized: false, commit: candidate.integration_commit,
+    observations: [{ ...binding, provider_job_conclusion: "success" }] };
+  let signs = 0;
+  const make = overrides => createIndependentVerificationIssuer({
+    readContext: async () => context, resolvePolicy: async () => policy,
+    collectProviderObservation: async () => observation,
+    observeTestOutcome: async b => ({ ...b, execution_ok: true, passed: true, timed_out: false, skipped: false, exit_code: 0 }),
+    signPayload: async payload => { signs++; return sign(null, payload, privateKey); },
+    pinnedPublicKey: publicKey, clock: () => now, ...overrides,
+  });
+  const result = await make()(request);
+  assert.equal(result.issued, true);
+  assert.equal(result.execution_authorized, false);
+  assert.equal(result.expires_at_ms, now + 10000);
+  assert.equal(signs, 1);
+  const { receipt_ttl_ms, ...expected } = policy;
+  assert.equal(reviewIndependentVerification({ envelope: result.envelope,
+    expected: { ...expected, candidate }, pinnedPublicKey: publicKey, nowMs: now }).verified, true);
+  assert.equal((await make()({ ...request, required: [] })).issued, false);
+  assert.equal((await make({ collectProviderObservation: async () => ({ ...observation, observations: [] }) })(request)).issued, false);
+  assert.equal((await make({ observeTestOutcome: async () => ({ ...binding, provider_job_conclusion: "success" }) })(request)).issued, false);
+  assert.equal((await make({ observeTestOutcome: async b => ({ ...b, execution_ok: true, passed: true, timed_out: false, skipped: false, exit_code: 0, job_id: 99 }) })(request)).issued, false);
+  assert.equal((await make({ resolvePolicy: async () => ({ ...policy, required: [{ ...row, suite: "mcp_hermetic_core" }] }) })(request)).issued, false);
+  let calls = 0;
+  assert.equal((await make({ readContext: async () => ++calls === 1 ? context : { ...context, candidate: { ...candidate, revision: 3 } } })(request)).issued, false);
+  assert.equal((await make({ clock: () => now + 10001 })(request)).issued, false);
+  assert.equal(signs, 1, "No invalid observation reaches signing");
+  const wrong = generateKeyPairSync("ed25519");
+  assert.equal((await make({ signPayload: async payload => sign(null, payload, wrong.privateKey) })(request)).issued, false);
+});
