@@ -104,11 +104,15 @@ export function createPiReliableExecutionStore({journal={
     return reduceReliableProjection(prior,args.command,clock());
   }
   async function command(args) {
-    if(typeof journal.transitionExecutionProjection!=="function") {
+    // Preserve legacy context, conflict and isolation error precedence for
+    // malformed revision requests. deriveCommand still requires a positive
+    // exact revision before any publication; only valid revisions use the
+    // consolidated transition path.
+    if(typeof journal.transitionExecutionProjection!=="function"
+      ||!Number.isSafeInteger(args.expected_revision)||args.expected_revision<1) {
       const snapshot=await current(args);
       return publish(await deriveCommand(args,snapshot),snapshot.event.execution_projection.revision,snapshot.events);
     }
-    if(!Number.isSafeInteger(args.expected_revision)||args.expected_revision<1)reliableFailure("STATE_REVISION_REQUIRED");
     let observedEvents,derivedHash;
     const published=await journal.transitionExecutionProjection(async snapshot=>{
       const next=await deriveCommand(args,currentFromHistory(args,snapshot));
