@@ -1341,15 +1341,20 @@ export function createDevOperationJournalService({
     return structuredClone(await verifyShared());
   }
 
-  async function append(input, {beforeAppend} = {}) {
+  async function append(input, {beforeAppend, initialVerification} = {}) {
     if (runtimeHealth === "corrupt") throw new Error(`JOURNAL_CORRUPT: ${lastHealthError ?? "journal integrity failure"}`);
     const { eventsPath } = await ensureStorageRoot(storageRoot);
     // Reuse the verified immutable snapshot and the same head-CAS contract as
     // Pi projection publication. No event-body I/O runs under the append lock.
     for (let pass = 0; pass < DEV_JOURNAL_VERIFY_MAX_CATCHUP_PASSES; pass += 1) {
-      const verification = await verify();
+      // begin()/terminal() already obtained a fresh, detached physical
+      // verification for this very append. Consume it only for the first CAS
+      // attempt; never cache it for a later operation or accept it from MCP.
+      // On head drift, repeat full physical verification as before.
+      const verification = pass === 0 && initialVerification ? initialVerification : await verify();
       const lockHandle = await acquireJournalLock(lockPath, { timeoutMs: lockAcquireTimeoutMs });
       try {
+        if (runtimeHealth === "corrupt") throw new Error(`JOURNAL_CORRUPT: ${lastHealthError ?? "journal integrity failure"}`);
         const head = await readHead(headPath);
         if (canonicalJson(head) !== canonicalJson(verification.head)) continue;
         await beforeAppend?.(verification);
@@ -2056,7 +2061,7 @@ export function createDevOperationJournalService({
   }
 
   async function begin(input = {}) {
-    await assertMutationAllowed();
+    const verification = await verifyMutationAllowed();
     const operationId = operationIdGenerator();
     if (!operationIdPattern.test(operationId)) throw new Error("Operation ID generator returned an invalid ID.");
     const context = getMcpOperationReconciliationContext();
@@ -2071,7 +2076,7 @@ export function createDevOperationJournalService({
       ...identity,
       operation_id: operationId,
       stage: "operation_started",
-    });
+    }, {initialVerification:verification});
     if (context?.reconciliation_key && !context.operation_id) context.operation_id = operationId;
     noteMutationStarted(event);
     await invalidateParentWorkspaceSnapshotAuthority(event);
@@ -2100,7 +2105,7 @@ export function createDevOperationJournalService({
       targets: input.targets ?? started.targets,
       links: input.links ?? started.links,
       result: input.result ?? {},
-    }, {beforeAppend:input.beforeAppend});
+    }, {beforeAppend:input.beforeAppend, initialVerification:verification});
     noteMutationTerminal(event);
     return event;
   }

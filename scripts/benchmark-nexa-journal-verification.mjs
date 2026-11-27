@@ -130,8 +130,34 @@ try {
       state: completed.state.status, added_events: after.head.latest_sequence - before.head.latest_sequence,
       verification_count: verification.length, verification, traces };
   }
+  // Unlike the read-only Pi fixture above, directly exercise the changed
+  // begin/terminal append path against the same 66k physical event files.
+  const beforeAppend = await service.verify();
+  observations.length = 0;
+  const startBegin = performance.now();
+  const operation = await service.begin({ operation_type: "fixture", tool_name: "dev_fixture" });
+  const begin_ms = performance.now() - startBegin;
+  const begin_verification = observations.splice(0);
+  const startComplete = performance.now();
+  await service.complete(operation.operation_id);
+  const complete_ms = performance.now() - startComplete;
+  const complete_verification = observations.splice(0);
+  assert.equal(begin_verification.length, 1);
+  assert.equal(complete_verification.length, 1);
+  for (const sample of [...begin_verification, ...complete_verification]) {
+    assert.equal(sample.completed, true);
+    assert.ok(sample.prefix_files_checked >= count);
+  }
+  const afterAppend = await service.verify();
+  assert.equal(afterAppend.head.latest_sequence, beforeAppend.head.latest_sequence + 2);
+  assert.equal(afterAppend.events[beforeAppend.head.latest_sequence].previous_event_hash, beforeAppend.head.latest_event_hash);
+  assert.equal(afterAppend.events.at(-1).operation_id, operation.operation_id);
+  assert.equal(afterAppend.events.at(-1).stage, "operation_completed");
+  assert.equal(afterAppend.active_operations.length, 0);
+  assert.equal(afterAppend.dangling_operations.length, 0);
+  const append_fixture = { begin_ms, complete_ms, begin_verification, complete_verification };
   console.log(JSON.stringify({ schema_version: 1, platform: process.platform,
-    node: process.version, event_count: count, generation_ms, measurements, pi_fixture }, null, 2));
+    node: process.version, event_count: count, generation_ms, measurements, pi_fixture, append_fixture }, null, 2));
 } finally {
   await rm(root, { recursive: true, force: true });
 }
