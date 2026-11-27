@@ -20,6 +20,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version: '24.18.0'
@@ -60,6 +61,8 @@ jobs:
           guest git -C "$root/work" -c core.hooksPath=/dev/null checkout --detach "$EXPECTED_HEAD"
           [[ "$(guest git -C "$root/work" rev-parse HEAD)" == "$EXPECTED_HEAD" ]]
           guest git -C "$root/work" remote remove origin
+          marker="$(openssl rand -hex 32)"
+          echo "::stop-commands::$marker"
           guest bash -c 'cd "$1"; npm ci --no-audit --no-fund' _ "$root/work"
           # Capture actual outer process status. This is feasibility evidence only.
           set +e
@@ -68,6 +71,7 @@ jobs:
           guest timeout --kill-after=15s 600s bash -c 'cd "$1"; exec node tests/mcp-tunnel-launcher.test.mjs' _ "$root/work"
           tunnel_exit=$?
           set -e
+          echo "::$marker::"
           printf 'R16_LIMITED_LINUX_RESULT mcp=%s tunnel=%s\n' "$mcp_exit" "$tunnel_exit"
           [[ "$mcp_exit" == 0 && "$tunnel_exit" == 0 ]]
   windows:
@@ -195,6 +199,8 @@ jobs:
               'set "GIT_CONFIG_NOSYSTEM=1"'
               'set "GIT_CONFIG_GLOBAL=NUL"'
               'set "GIT_TERMINAL_PROMPT=0"'
+              ('"' + $exe + '" -NoProfile -NonInteractive -Command "if ((Get-Process -Id $PID).SessionId -ne 0 -or ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { exit 1 }; Write-Output ''R16_LIMITED_IDENTITY_PASS''" > identity.log 2>&1')
+              'if errorlevel 1 exit /b 9'
               ('cd /d "' + $run + '"')
               ('"' + $gitExe + '" -c core.hooksPath=NUL -c init.templateDir= clone --no-checkout "' + $bundle + '" work > setup.log 2>&1')
               'if errorlevel 1 exit /b 10'
@@ -233,13 +239,16 @@ jobs:
               $info = Get-ScheduledTaskInfo -TaskName $task
               $state = (Get-ScheduledTask -TaskName $task).State
             } while (($info.LastRunTime -eq $prior -or $state -ne 'Ready') -and [datetime]::UtcNow -lt $deadline)
-            foreach ($name in @('setup.log','mcp.log','tunnel.log','outcome.txt')) {
+            $marker = [guid]::NewGuid().ToString('N')
+            Write-Output "::stop-commands::$marker"
+            foreach ($name in @('identity.log','setup.log','mcp.log','tunnel.log','outcome.txt')) {
               $log = Join-Path $run $name
               if (Test-Path -LiteralPath $log -PathType Leaf) {
                 $item = Get-Item -LiteralPath $log -Force
                 if (!($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { Get-Content -LiteralPath $log -Tail 120 }
               }
             }
+            Write-Output "::${marker}::"
             if ($info.LastRunTime -eq $prior -or $state -ne 'Ready') { throw 'Limited suite task did not terminate' }
             Write-Output "R16_LIMITED_WINDOWS_SCHEDULER_EXIT=$($info.LastTaskResult)"
             if ($info.LastTaskResult -ne 0) { throw 'Limited mandatory suite compatibility failed' }
