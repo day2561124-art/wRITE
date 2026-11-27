@@ -152,6 +152,14 @@ try {
   await observe(async () => (await optionalText(providerLog)).split(/\r?\n/u)
     .includes("closed=" + lease.id + "; released=False; cleaned=True"), "provider disconnect cleanup");
   evidence.provider_handles_closed = true;
+  const guardianStarted = path.join(stageRoot, "profile-guardian.started");
+  const guardianFinished = path.join(stageRoot, "profile-guardian.finished");
+  assert.equal(await readFile(guardianStarted, "ascii"), "NexaLease" + lease.id);
+  await observe(async () => (await optionalText(guardianFinished)) ===
+    "name=NexaLease" + lease.id + "; cleaned=True", "independent guardian cleanup receipt", 15000);
+  evidence.guardian_cleanup_observed = true;
+  // The same-user API independently checks absence AFTER the production
+  // guardian's receipt, not as a substitute for the guardian itself.
   evidence.profile_probe = probeProfile(lease.id);
   evidence.profile_orphaned = evidence.profile_probe.create_hresult === "800700B7";
   assert.ok(["00000000", "800700B7"].includes(evidence.profile_probe.create_hresult), "profile observation indeterminate");
