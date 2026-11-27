@@ -120,6 +120,7 @@ internal static class PowerShellAppContainer {
             if (process == null) return;
             try { process.StandardInput.Close(); }
             catch (IOException) { }
+            catch (InvalidOperationException) { }
             finally { process.Dispose(); process = null; }
         }
     }
@@ -154,8 +155,9 @@ internal static class PowerShellAppContainer {
                 string directory = Path.GetDirectoryName(self.MainModule.FileName);
                 string started = Path.Combine(directory, "profile-guardian.started");
                 string finished = Path.Combine(directory, "profile-guardian.finished");
+                string pending = Path.Combine(directory, "profile-guardian.receipt.tmp");
                 string name = args[1];
-                bool owned = false, deleted = false;
+                bool owned = false, deleted = false, collision = false;
                 IntPtr sid = IntPtr.Zero;
                 // Hold this marker open without delete sharing while the profile
                 // exists; the host cannot discard the evidence directory early.
@@ -165,6 +167,9 @@ internal static class PowerShellAppContainer {
                     marker.Flush(true);
                     try {
                         int result = CreateAppContainerProfile(name, name, "Nexa engineering shell", IntPtr.Zero, 0, out sid);
+                        // ERROR_ALREADY_EXISTS means the profile was never ours.
+                        // Other failures remain ambiguous, not a cleanup receipt.
+                        collision = unchecked((uint)result) == 0x800700B7U;
                         if (result != 0) return 2; // Never delete a profile we did not create.
                         owned = true;
                         Console.WriteLine("READY");
@@ -197,12 +202,16 @@ internal static class PowerShellAppContainer {
                         }
                         // Only an actual successful deletion certifies an owned
                         // profile. Failure leaves the started marker intact.
-                        if (deleted) {
-                            using (var receipt = new FileStream(finished, FileMode.CreateNew, FileAccess.Write, FileShare.Read)) {
-                                byte[] value = Encoding.ASCII.GetBytes("name=" + name + "; cleaned=True");
+                        if (deleted || collision) {
+                            // Publish complete evidence atomically; readers cannot
+                            // confuse a partially written receipt with mismatch.
+                            using (var receipt = new FileStream(pending, FileMode.CreateNew, FileAccess.Write, FileShare.None)) {
+                                byte[] value = Encoding.ASCII.GetBytes("name=" + name +
+                                    (deleted ? "; cleaned=True" : "; owned=False"));
                                 receipt.Write(value, 0, value.Length);
                                 receipt.Flush(true);
                             }
+                            File.Move(pending, finished);
                         }
                     }
                 }
