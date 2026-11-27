@@ -9,6 +9,16 @@ function publicSchema(value) {
  return Object.fromEntries(Object.entries(value).filter(([key])=>!['description','title','default','$schema'].includes(key))
   .map(([key,item])=>[key,key==='properties'?Object.fromEntries(Object.entries(item).map(([name,schema])=>[name,publicSchema(schema)])):publicSchema(item)]));
 }
+// Capability registration and execution availability are distinct. The
+// protected dispatcher has only the fixed hermetic test route; a complete
+// suite cannot be represented as a successful focused test or run outside it.
+export function piRuntimeCapabilityAvailability({ capability, toolAllowed, scopedDispatcher }) {
+ if (toolAllowed !== true) return "unavailable";
+ if (scopedDispatcher !== true && scopedDispatcher !== false) return "unknown";
+ if (scopedDispatcher && ["verification.affected", "verification.full", "git.integration_validate"].includes(capability))
+  return "unavailable";
+ return "available";
+}
 export function createPiRuntimeCapabilityMetadata({tools,availability}={}) {
  if(!Array.isArray(tools))throw Error('INVALID_CAPABILITY_HOST_BINDING');
  const registry=new Map(tools.map(t=>[t.name,t]));
