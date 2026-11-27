@@ -1284,6 +1284,25 @@ try {
     /server\/src\/requested\.mjs/u,
   );
 
+  // The protected dispatcher has no personal Git identity. Retain the
+  // ordinary failure case above; the trusted automation option must succeed
+  // with that same empty repository config and previously staged exact file.
+  const automationCommitTool = createDevGitCommitTool({
+    repositoryRoot: commitFailureRoot, automationIdentity: true,
+  });
+  const automationCommit = await automationCommitTool({
+    paths: ["server/src/requested.mjs"],
+    message: "test: fixed protected dispatcher identity",
+  });
+  assert.equal(automationCommit.committed, true, JSON.stringify(automationCommit));
+  assert.equal(automationCommit.commit_created, true);
+  assert.equal(automationCommit.exit_code, 0);
+  assert.notEqual(automationCommit.commit, failureHeadBefore);
+  assert.match(runFixtureGit(commitFailureRoot, ["log", "-1", "--format=%an|%ae|%cn|%ce"]).stdout,
+    /^Writer Workbench Engineering\|writer-workbench@local\.invalid\|Writer Workbench Engineering\|writer-workbench@local\.invalid\s*$/u);
+  assert.equal(runFixtureGit(commitFailureRoot, ["config", "--local", "user.name"]).stdout.trim(), "");
+  assert.equal(runFixtureGit(commitFailureRoot, ["config", "--local", "user.email"]).stdout.trim(), "");
+
   const remoteStatusFixture = await createPushFixture(tempRoot, "remote-status");
   const remoteStatusTool = createDevGitRemoteStatusTool({
     repositoryRoot: remoteStatusFixture.repositoryRoot,
