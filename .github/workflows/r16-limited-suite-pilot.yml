@@ -73,14 +73,28 @@ jobs:
             Native-OK 'Fixture root protection'
             $null = New-Item -ItemType Directory -Path $tools,$run
             # Full clone, not a synthetic fixture commit. No persisted remote credentials.
+            # Use identical Git configuration in the provisioner and limited user.
+            # Honor explicit tracked .gitattributes, without machine/user CRLF defaults.
+            $env:GIT_CONFIG_NOSYSTEM = '1'
+            $env:GIT_CONFIG_GLOBAL = 'NUL'
             git clone --no-local --no-hardlinks --no-checkout -- "$env:GITHUB_WORKSPACE" "$source"
             Native-OK 'Local clone'
+            git -C $source config --local core.autocrlf false
+            Native-OK 'Pin checkout line ending policy'
+            git -C $source config --local core.filemode false
+            Native-OK 'Pin Windows filemode policy'
             git -C $source checkout --detach $actual
             Native-OK 'Exact checkout'
             git -C $source remote remove origin
             Native-OK 'Remove origin'
             if ((git -C $source rev-parse HEAD).Trim() -cne $actual) { throw 'Guest Git identity mismatch' }
             Native-OK 'Guest Git identity'
+            $initialStatus = @(git -C $source status --porcelain=v1 --untracked-files=all)
+            Native-OK 'Provisioner checkout status'
+            if ($initialStatus.Count -ne 0) {
+              $initialStatus | Select-Object -First 30 | ForEach-Object { Write-Output ("CHECKOUT_STATUS: " + $_) }
+              throw 'Provisioner checkout is not clean'
+            }
             $nodeDir = Split-Path (Get-Command node.exe -ErrorAction Stop).Source
             $gitDir = Split-Path (Get-Command git.exe -ErrorAction Stop).Source
             robocopy $nodeDir $tools /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
@@ -136,8 +150,13 @@ jobs:
           Write-Output "LIMITED_IDENTITY=$([Security.Principal.WindowsIdentity]::GetCurrent().User.Value); SESSION=$session; ADMIN=$admin"
           if ($session -ne 0 -or $admin) { exit 60 }
           if ((git rev-parse HEAD).Trim() -cne $Expected -or $LASTEXITCODE -ne 0) { exit 61 }
-          if (git status --porcelain) { exit 62 }
+          $dirty = @(git status --porcelain=v1 --untracked-files=all)
           if ($LASTEXITCODE -ne 0) { exit 63 }
+          if ($dirty.Count -ne 0) {
+            $dirty | Select-Object -First 30 | ForEach-Object { Write-Output ("GUEST_CHECKOUT_STATUS: " + $_) }
+            exit 62
+          }
+          Write-Output 'LIMITED_CHECKOUT_CLEAN'
           # Dependency installation runs under the same disposable user, never supervisor.
           & $node $npm ci --ignore-scripts --no-audit --no-fund
           if ($LASTEXITCODE -ne 0) { exit 64 }
@@ -175,7 +194,7 @@ jobs:
             # Diagnostic output is not an independently trusted process attestation.
             $log = Join-Path $root 'suite.log'
             $item = Get-Item -LiteralPath $log -Force
-            if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Invalid limited suite diagnostic log' }
+            if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.Length -gt 16MB) { throw 'Invalid limited suite diagnostic log' }
             if (!(Select-String -LiteralPath $log -Pattern '^LIMITED_SUITE_EXIT=0$' -Quiet)) { throw 'Suite completion marker missing' }
             Write-Output 'LIMITED_SUITE_COMPATIBILITY_PASS'
           } finally {
