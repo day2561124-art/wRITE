@@ -405,3 +405,112 @@ test("independent issuer publishes immutable exact receipts and the restarted co
   assert.equal((await makeGate().reviewForValidation({...candidate,state:"preflight_passed"},plan)).code,"VERIFICATION_RECEIPT_EXPIRED");
   await assert.rejects(publish(candidate,issued.envelope),{code:"INDEPENDENT_RECEIPT_PROOF_INVALID"});
 });
+
+
+test("host verifier service composes exact provider reads, independent outcomes and protected receipt publication", async t => {
+  const { createHash } = await import("node:crypto");
+  const { mkdtemp, realpath, readdir, readFile, rm } = await import("node:fs/promises");
+  const { default: os } = await import("node:os");
+  const { default: path } = await import("node:path");
+  const { createIndependentVerifierService } = await import("../../server/src/mcp-independent-verification-service.mjs");
+  const { createIndependentReceiptReader } = await import("../../server/src/mcp-independent-verification-receipt-store.mjs");
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "r16-composed-verifier-")));
+  t.after(() => rm(root,{recursive:true,force:true}));
+  const {publicKey:key, privateKey:signer} = generateKeyPairSync("ed25519");
+  const now = Date.now();
+  const c = {...candidate};
+  const repository = {id:123,full_name:"owner/disposable"};
+  const bytes = Buffer.from("reviewed fixture workflow\n");
+  const digest = createHash("sha256").update(bytes).digest("hex");
+  const blob = createHash("sha1").update("blob "+bytes.length+"\0").update(bytes).digest("hex");
+  const rootTree="4".repeat(40), githubTree="5".repeat(40), workflowsTree="6".repeat(40);
+  const workflows = [
+    {suite:"all",platform:"linux",workflow_id:77,workflow_path:".github/workflows/fixture.yml",
+      workflow_sha256:digest,job_name:"full",runner_label:"ubuntu-latest",runner_group_name:"GitHub Actions",
+      required_steps:["Exact checkout","Full gate"]},
+    {suite:"mcp_pi_postseal",platform:"windows",workflow_id:77,workflow_path:".github/workflows/fixture.yml",
+      workflow_sha256:digest,job_name:"postseal",runner_label:"windows-latest",runner_group_name:"GitHub Actions",
+      required_steps:["Exact checkout","Postseal gate"]}
+  ];
+  const policy = {repository:repository.full_name,repository_id:repository.id,issuer:"fixture-verifier",
+    max_age_ms:60000,receipt_ttl_ms:30000,workflows,additional_required:["mcp_pi_postseal"]};
+  let context = {candidate:c,plan:{required_suites:["all"]},observation_only:true,execution_authorized:false};
+  let providerPass = true, outcomePass = true, allowed = true, mutateDuringSigning = false;
+  let signs = 0, outcomes = 0, selections = 0;
+  const run = {id:111,repository,head_repository:repository,head_sha:c.integration_commit,workflow_id:77,
+    path:workflows[0].workflow_path+"@fixture",event:"push",status:"completed",conclusion:"success",run_attempt:1,
+    run_started_at:new Date(now-4000).toISOString(),updated_at:new Date(now-1000).toISOString()};
+  const jobs = workflows.map((w,i)=>({id:222+i,run_id:111,head_sha:c.integration_commit,name:w.job_name,
+    labels:[w.runner_label],runner_group_name:w.runner_group_name,status:"completed",conclusion:"success",
+    started_at:new Date(now-3000).toISOString(),completed_at:new Date(now-2000).toISOString(),
+    steps:w.required_steps.map((name,j)=>({name,number:j+1,status:"completed",conclusion:"success"}))}));
+  const tree=(sha,path,type,mode,child)=>({sha,truncated:false,tree:[{path,type,mode,sha:child}]});
+  const fixtures={
+    "/actions/runs/111":run,
+    "/actions/runs/111/attempts/1/jobs?per_page=100":{total_count:2,jobs},
+    ["/git/commits/"+c.integration_commit]:{sha:c.integration_commit,tree:{sha:rootTree}},
+    ["/git/trees/"+rootTree]:tree(rootTree,".github","tree","040000",githubTree),
+    ["/git/trees/"+githubTree]:tree(githubTree,"workflows","tree","040000",workflowsTree),
+    ["/git/trees/"+workflowsTree]:tree(workflowsTree,"fixture.yml","blob","100644",blob),
+    ["/git/blobs/"+blob]:{sha:blob,size:bytes.length,encoding:"base64",content:bytes.toString("base64")}
+  };
+  const base="https://api.github.com/repos/"+repository.full_name;
+  const assertProtectedDirectory=async({directory,role})=>allowed&&directory===root&&["issuer","consumer"].includes(role);
+  const options={policy,readContext:async()=>structuredClone(context),
+    readRunSelection:async(identity,required)=>{
+      selections++;assert.deepEqual(identity,c);assert.equal(required.length,2);
+      return required.map(({suite,platform})=>({suite,platform,run_id:111}));
+    },
+    observeTestOutcome:async binding=>{
+      outcomes++;return {...binding,execution_ok:outcomePass,passed:outcomePass,timed_out:false,skipped:false,exit_code:outcomePass?0:1};
+    },
+    signPayload:async payload=>{
+      signs++;
+      if(mutateDuringSigning) context={...context,candidate:{...c,revision:c.revision+1}};
+      return sign(null,payload,signer);
+    },
+    pinnedPublicKey:key,readCredential:async()=>"fixture_readonly_token_12345",
+    fetchImpl:async(url,opts)=>{
+      assert.equal(opts.method,"GET");assert.equal(opts.redirect,"error");
+      assert.ok(url.startsWith(base+"/"));
+      const endpoint=url.slice(base.length);assert.ok(Object.hasOwn(fixtures,endpoint));
+      const value=structuredClone(fixtures[endpoint]);
+      if(endpoint==="/actions/runs/111"&&!providerPass)value.conclusion="failure";
+      return new Response(JSON.stringify(value),{status:200});
+    },
+    receiptRoot:root,assertProtectedDirectory,clock:()=>now};
+  assert.throws(()=>createIndependentVerifierService({...options,observeTestOutcome:undefined}),/INDEPENDENT_VERIFIER_HOST_UNBOUND/);
+  const service=createIndependentVerifierService(options);
+  const request={integration_candidate_id:c.integration_candidate_id,expected_revision:c.revision};
+  assert.equal((await service.verifyAndPublish({...request,runs:[]})).published,false);
+  assert.equal(selections,0);
+  providerPass=false;
+  assert.equal((await service.verifyAndPublish(request)).published,false);
+  assert.equal(outcomes,0);assert.equal(signs,0);
+  providerPass=true;outcomePass=false;
+  assert.equal((await service.verifyAndPublish(request)).published,false);
+  assert.equal(signs,0);assert.deepEqual(await readdir(root),[]);
+  outcomePass=true;mutateDuringSigning=true;
+  assert.equal((await service.verifyAndPublish(request)).published,false);
+  assert.deepEqual(await readdir(root),[]);
+  mutateDuringSigning=false;context={...context,candidate:c};
+  allowed=false;
+  const denied=await service.verifyAndPublish(request);
+  assert.equal(denied.published,false);assert.equal(denied.publication_unconfirmed,true);
+  assert.deepEqual(await readdir(root),[]);
+  allowed=true;
+  const accepted=await service.verifyAndPublish(request);
+  assert.equal(accepted.published,true);assert.equal(accepted.created,true);
+  assert.equal(accepted.execution_authorized,false);
+  const reader=createIndependentReceiptReader({root,assertProtectedDirectory});
+  const envelope=await reader(c);
+  const proof=reviewIndependentVerification({envelope,pinnedPublicKey:key,nowMs:now,
+    expected:{candidate:c,repository:policy.repository,issuer:policy.issuer,max_age_ms:policy.max_age_ms,
+      required:workflows.map(({suite,platform,workflow_sha256})=>({suite,platform,workflow_sha256}))}});
+  assert.equal(proof.verified,true);assert.equal(proof.receipt_sha256,accepted.receipt_sha256);
+  assert.equal(proof.suite_count,2);
+  const [name]=await readdir(root), original=await readFile(path.join(root,name));
+  const replay=await service.verifyAndPublish(request);
+  assert.equal(replay.published,true);assert.equal(replay.created,false);
+  assert.deepEqual(await readFile(path.join(root,name)),original);
+});
