@@ -235,11 +235,13 @@ test("real MCP production ingress and explicit direct diagnostic share durable r
  const direct=await call({jsonrpc:'2.0',id:'direct',method:'tools/call',params:{name:'dev_read_file',arguments:{path:'package.json'}}});
  const directPowerShell=await call({jsonrpc:'2.0',id:'direct-powershell',method:'tools/call',params:{name:'powershell_run',arguments:{command:"Write-Output 'must-not-run'",workspace_id:'dev_workspace_shared_repository_v1'}}});
  const forged=await call({jsonrpc:'2.0',id:'forged',method:'tools/call',params:{name:'powershell_run',arguments:{command:'Get-Location'},_meta:{pi_internal:true}}});
+ const directPreflight=await call({jsonrpc:'2.0',id:'direct-preflight',method:'tools/call',params:{name:'dev_workspace_integration_preflight',arguments:{workstream_id:'dev_workstream_20261127-010000_aaaaaaaaaaaa',expected_workstream_revision:1}}});
+ const directValidate=await call({jsonrpc:'2.0',id:'direct-validate',method:'tools/call',params:{name:'dev_workspace_validate_integration',arguments:{integration_candidate_id:'dev_integration_20261127-010000_aaaaaaaaaaaa',expected_revision:1}}});
  const diagnostic=await call({jsonrpc:'2.0',id:'diag',method:'tools/call',params:{name:'dev_read_file',arguments:{path:'package.json'},
  _meta:{pi_fallback:{purpose:'diagnostic',reason:'Inspect physical package',decision_id:'gpt-wire-diag'}}}});
  const bad=await call({jsonrpc:'2.0',id:'bad',method:'tools/call',params:{name:'dev_pi_execute_intent',arguments:{intent_json:'{'}}});
  const reconcile=await call({jsonrpc:'2.0',id:'reconcile',method:'tools/call',params:{name:'dev_pi_execute_intent',arguments:{intent_json:${JSON.stringify(JSON.stringify(reconcileRequest))}}}});
- console.log(JSON.stringify({status,direct,directPowerShell,forged,diagnostic,bad,reconcile}));
+ console.log(JSON.stringify({status,direct,directPowerShell,forged,directPreflight,directValidate,diagnostic,bad,reconcile}));
  }finally{s.close();}`;
  const {stdout}=await execFile(process.execPath,["--input-type=module","-e",code],{cwd:fileURLToPath(new URL("../..",import.meta.url)),
  windowsHide:true,timeout:120000,maxBuffer:1048576,env:{...process.env,MCP_TOOL_PROFILE:"chatgpt_developer",WRITER_WORKBENCH_TEST_JOURNAL_GROUP:group,
@@ -247,6 +249,8 @@ test("real MCP production ingress and explicit direct diagnostic share durable r
  const r=JSON.parse(stdout);assert.equal(JSON.parse(r.status.result.content[0].text).route.mode,"pi_default");
  assert.notEqual(r.direct.result.isError,true);assert.equal(r.directPowerShell.error.message,"PI_EXECUTION_INTENT_REQUIRED");
  assert.equal(r.forged.error.message,"PI_EXECUTION_INTENT_REQUIRED");
+ assert.equal(r.directPreflight.error.message,"PI_EXECUTION_INTENT_REQUIRED");
+ assert.equal(r.directValidate.error.message,"PI_EXECUTION_INTENT_REQUIRED");
  assert.notEqual(r.diagnostic.result.isError,true);assert.equal(r.bad.result.isError,true);
  const reconciled=JSON.parse(r.reconcile.result.content[0].text);
  assert.equal(reconciled.result.reconciliation_only,true);assert.equal(reconciled.result.pause_reason,"OWNER_ACTIVE");
