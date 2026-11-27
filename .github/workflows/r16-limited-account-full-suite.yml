@@ -54,9 +54,10 @@ jobs:
           sudo chown -R root:root "$root/toolchain"
           sudo chmod -R go-w "$root/toolchain"
           guest() {
-            sudo -u "$account" -- env -i HOME="$root/home" USER="$account" LOGNAME="$account" TMPDIR="$root/tmp" PATH="$root/toolchain/bin:/usr/bin:/bin" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 "$@"
+            sudo -u "$account" -- env -i HOME="$root/home" USER="$account" LOGNAME="$account" TMPDIR="$root/tmp" PATH="$root/toolchain/bin:/usr/bin:/bin" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 /bin/bash -c 'cd "$1" || exit 125; shift; exec "$@"' _ "$root/work" "$@"
           }
           guest bash -c 'test "$(id -u)" -ne 0 && ! sudo -n true >/dev/null 2>&1 && ! test -w "$1" && ! test -r "$2"' _ "$root/toolchain/bin/node" "$root/observer"
+          # The limited user must not inherit the inaccessible runner checkout cwd.
           guest git -c core.hooksPath=/dev/null -c init.templateDir= clone --no-checkout "$root/source.bundle" "$root/work"
           guest git -C "$root/work" -c core.hooksPath=/dev/null checkout --detach "$EXPECTED_HEAD"
           [[ "$(guest git -C "$root/work" rev-parse HEAD)" == "$EXPECTED_HEAD" ]]
@@ -193,6 +194,7 @@ jobs:
             @(
               '@echo off'
               'setlocal'
+              'set ERRORLEVEL='
               ('set "PATH=' + $env:Path + '"')
               ('set "TEMP=' + $run + '"')
               ('set "TMP=' + $run + '"')
@@ -216,7 +218,7 @@ jobs:
               'set "mcp_exit=%ERRORLEVEL%"'
               ('"' + (Join-Path $tools 'node.exe') + '" tests/mcp-tunnel-launcher.test.mjs > ..\tunnel.log 2>&1')
               'set "tunnel_exit=%ERRORLEVEL%"'
-              'echo R16_LIMITED_WINDOWS_RESULT mcp=%mcp_exit% tunnel=%tunnel_exit%> ..\outcome.txt'
+              'echo R16_LIMITED_WINDOWS_RESULT mcp=%mcp_exit% tunnel=%tunnel_exit% > ..\outcome.txt'
               'if not "%mcp_exit%"=="0" exit /b 20'
               'if not "%tunnel_exit%"=="0" exit /b 21'
               'exit /b 0'
