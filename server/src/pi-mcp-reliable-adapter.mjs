@@ -14,6 +14,13 @@ function observations(evidence) {
   }
   return facts;
 }
+// Strictly check new dispatch/reconciliation outcomes here, not in historical
+// projection replay. Old Journal records must remain byte-for-byte verifiable.
+function verifiedCommit(value, reconciled = false) {
+  return value?.committed === true && /^[a-f0-9]{40}$/iu.test(value.commit ?? "")
+    && (reconciled || (value.execution_ok === true && value.commit_created === true && value.exit_code === 0))
+    && value.execution_ok !== false && value.timed_out !== true && value.commit_created !== false;
+}
 function timedRequest(callback,timeoutMs) {
   let timer;
   const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>{
@@ -76,9 +83,12 @@ export function createPiReliableMcpAdapter({callTool,queryOperation,resolveWorks
     const r=receiptOf(action,deduped??evidence,deduped?"reconciled_facts":"tool_response");
     const failed=facts.some(x=>x?.isError===true||x?.ok===false||x?.execution_ok===false||x?.passed===false);
     const verification=step.capability.startsWith("verification.");
-    return {receipt:r,failed:failed||(deduped&&deduped.reconciliation_state!=="completed")
+    const commitFailed = step.capability === "git.commit" && !(deduped
+      ? verifiedCommit(deduped.original_result, true)
+      : facts.some(value => verifiedCommit(value))) ;
+    return {receipt:r,failed:failed||commitFailed||(deduped&&deduped.reconciliation_state!=="completed")
       ||(verification&&!(deduped?deduped.original_result?.passed===true:facts.some(x=>x?.passed===true))),
-      error_code:failed?"TOOL_REPORTED_FAILURE":"VALIDATION_EVIDENCE_REQUIRED"};
+      error_code:failed||commitFailed?"TOOL_REPORTED_FAILURE":"VALIDATION_EVIDENCE_REQUIRED"};
   }
   async function reconcile(source,stepId,options={}) {
     const intent=createExecutionIntent(source),step=describe(intent,stepId,options);
@@ -104,6 +114,8 @@ export function createPiReliableMcpAdapter({callTool,queryOperation,resolveWorks
       const action = intent.requested_actions.find(x => x.step_id === stepId);
       const receipt = receiptOf(action, raw, "reconciled_facts");
       if (observedRecoveryFailure(action, receipt)) return { verdict: "recoverable_failure", receipt };
+      if(step.capability === "git.commit" && !verifiedCommit(raw.original_result, true))
+        return {verdict:"unknown",code:"VALIDATION_EVIDENCE_REQUIRED",receipt};
       if(step.capability.startsWith("verification.")&&raw.original_result?.passed!==true)
         return {verdict:"unknown",code:"VALIDATION_EVIDENCE_REQUIRED"};
       return {verdict:"completed",receipt};
