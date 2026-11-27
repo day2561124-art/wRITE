@@ -6014,7 +6014,7 @@ const piProductionController = createPiProductionExecutionController({ transport
 async function callTool(params, authentication) {
   const name = params?.name;
   if(!workbenchTransportBoundary.isToolAllowed(name))throw new Error("GM_CONNECTION_TOOL_DENIED");
-  if (workspaceRoutingEnabledForProfile && (workspaceAwareDeveloperToolNames.has(name) || ["dev_workspace_begin_workstream","dev_workspace_update_workstream","dev_workspace_end_workstream","dev_workspace_create_isolated","dev_workspace_create_checkpoint","dev_workspace_integrate","dev_git_push","dev_pi_execute_readonly"].includes(name))) {
+  if (workspaceRoutingEnabledForProfile && (workspaceAwareDeveloperToolNames.has(name) || ["dev_workspace_begin_workstream","dev_workspace_update_workstream","dev_workspace_end_workstream","dev_workspace_create_isolated","dev_workspace_create_checkpoint","dev_workspace_integration_preflight","dev_workspace_validate_integration","dev_workspace_integrate","dev_git_push","dev_pi_execute_readonly"].includes(name))) {
     await guardPiDirectExecution({ route: piProductionRoute, tool: name, mutation: toolRegistry.get(name)?.risk !== "read", params, auditFallback: auditPiFallback, resolveWorkspace: resolveDevWorkspaceExecutionContext });
   }
   if (name === "dev_pi_execute_intent" && params?._meta?.reconciliation_key !== undefined) throw new Error("PI_INTENT_OWNS_IDEMPOTENCY");
