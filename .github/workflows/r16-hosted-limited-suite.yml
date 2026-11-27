@@ -1,0 +1,167 @@
+name: R16 hosted limited suite feasibility
+# Research fixture only. No attestation, OIDC, signing, production authority,
+# or candidate-controlled administrative installation.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/r16-hosted-limited-suite.yml'
+permissions:
+  contents: read
+concurrency:
+  group: r16-limited-suite-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  windows-limited-tunnel:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          package-manager-cache: false
+      - name: Test unchanged tunnel suite under disposable limited user
+        shell: pwsh
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $head = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $head -cne $env:EXPECTED_HEAD) { throw 'Candidate HEAD mismatch' }
+          $suffix = [guid]::NewGuid().ToString('N').Substring(0,12)
+          $root = Join-Path $env:SystemDrive "NexaSuite-$suffix"
+          $account = "NexaSuite$suffix"
+          $task = "NexaSuitePilot-$suffix"
+          $createdUser = $false
+          $createdTask = $false
+          $batchChanged = $false
+          $secure = $null
+          try {
+            $null = New-Item -ItemType Directory -Path $root
+            icacls $root /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)(F)' '*S-1-5-32-544:(OI)(CI)(F)' | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Protected supervisor root ACL failed' }
+            $work = Join-Path $root 'work'
+            $tools = Join-Path $root 'tools'
+            $scratch = Join-Path $root 'scratch'
+            $null = New-Item -ItemType Directory -Path $work,$tools,$scratch
+            $archive = Join-Path $root 'source.zip'
+            git archive --format=zip --output=$archive $head
+            if ($LASTEXITCODE -ne 0) { throw 'Exact source archive failed' }
+            Write-Output "PILOT_HEAD=$head; ARCHIVE_SHA256=$((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash)"
+            Expand-Archive -LiteralPath $archive -DestinationPath $work
+            $nodeDir = Split-Path (Get-Command node.exe -ErrorAction Stop).Source
+            robocopy $nodeDir $tools /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+            if ($LASTEXITCODE -ge 8) { throw 'Toolchain copy failed' }
+            $node = Join-Path $tools 'node.exe'
+            $npm = Join-Path $tools 'node_modules\npm\bin\npm-cli.js'
+            $password = 'Nexa!9a-' + [guid]::NewGuid().ToString('N')
+            $secure = ConvertTo-SecureString -String $password -AsPlainText -Force
+            $user = New-LocalUser -Name $account -Password $secure -Description 'Disposable R16 suite compatibility pilot'
+            $createdUser = $true
+            $sid = $user.SID.Value
+            $policy = Join-Path $root 'original-rights.inf'
+            secedit /export /cfg $policy /areas USER_RIGHTS /quiet
+            if ($LASTEXITCODE -ne 0) { throw 'Fixture rights export failed' }
+            $line = @(Get-Content -LiteralPath $policy | Where-Object { $_ -match '^SeBatchLogonRight\s*=' })
+            if ($line.Count -gt 1) { throw 'Ambiguous batch logon policy' }
+            $original = if ($line.Count -eq 1) { ($line[0] -split '=',2)[1].Trim() } else { '' }
+            function Set-BatchRight([string]$Value,[string]$Label) {
+              $inf = Join-Path $root "$Label.inf"
+              $db = Join-Path $root "$Label.sdb"
+              @('[Unicode]', 'Unicode=yes', '[Version]', 'signature="$CHICAGO$"', 'Revision=1', '[Privilege Rights]', "SeBatchLogonRight = $Value") |
+                Set-Content -LiteralPath $inf -Encoding Unicode
+              secedit /configure /db $db /cfg $inf /areas USER_RIGHTS /quiet
+              if ($LASTEXITCODE -ne 0) { throw "Disposable batch right $Label failed" }
+            }
+            $batchChanged = $true
+            $entries = @($original -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+            Set-BatchRight ((@($entries) + "*$sid") -join ',') 'grant'
+            icacls $root /grant:r "*${sid}:(OI)(CI)(RX)" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Limited user read ACL failed' }
+            foreach ($dir in @($work,$scratch)) {
+              icacls $dir /grant:r "*${sid}:(OI)(CI)(M)" | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw 'Limited fixture write ACL failed' }
+            }
+            # Wrapper is supervisor-owned and read-only to the limited user.
+            # Candidate npm install and test execute only inside that user.
+            $launcher = Join-Path $root 'limited.ps1'
+            @'
+          param([string]$Root,[string]$ExpectedSid)
+          $ErrorActionPreference = 'Stop'
+          $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+          $admin = ([Security.Principal.WindowsPrincipal]$identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+          if ($admin -or $identity.User.Value -ne $ExpectedSid -or (Get-Process -Id $PID).SessionId -ne 0) { exit 64 }
+          $work = Join-Path $Root 'work'
+          $tools = Join-Path $Root 'tools'
+          $scratch = Join-Path $Root 'scratch'
+          $env:Path = "$tools;$env:SystemRoot\System32;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
+          $env:TEMP = $scratch
+          $env:TMP = $scratch
+          $env:NPM_CONFIG_CACHE = Join-Path $scratch 'npm-cache'
+          Remove-Item Env:WRITER_WORKBENCH_PROBE_CREDENTIAL_FILE -ErrorAction SilentlyContinue
+          $node = Join-Path $tools 'node.exe'
+          $npm = Join-Path $tools 'node_modules\npm\bin\npm-cli.js'
+          Set-Location -LiteralPath $work
+          & $node $npm ci --ignore-scripts --no-audit --no-fund *> (Join-Path $scratch 'npm.log')
+          if ($LASTEXITCODE -ne 0) { exit 65 }
+          $p = Start-Process -FilePath $node -ArgumentList 'tests/mcp-tunnel-launcher.test.mjs' -WorkingDirectory $work -RedirectStandardOutput (Join-Path $scratch 'test.log') -RedirectStandardError (Join-Path $scratch 'test-stderr.log') -Wait -PassThru -NoNewWindow
+          exit $p.ExitCode
+          '@ | Set-Content -LiteralPath $launcher -Encoding UTF8
+            $exe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+            $arguments = '-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "' + $launcher + '" -Root "' + $root + '" -ExpectedSid "' + $sid + '"'
+            $action = New-ScheduledTaskAction -Execute $exe -Argument $arguments -WorkingDirectory $work
+            $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 18)
+            $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddHours(1)
+            $null = Register-ScheduledTask -TaskName $task -Action $action -Trigger $trigger -Settings $settings -User "$env:COMPUTERNAME\$account" -Password $password -RunLevel Limited
+            $createdTask = $true
+            $password = $null
+            $secure.Dispose()
+            $secure = $null
+            $principal = (Get-ScheduledTask -TaskName $task).Principal
+            if ([string]$principal.LogonType -ne 'Password' -or [string]$principal.RunLevel -ne 'Limited') { throw 'Limited task principal mismatch' }
+            $previous = (Get-ScheduledTaskInfo -TaskName $task).LastRunTime
+            Start-ScheduledTask -TaskName $task
+            $deadline = [datetime]::UtcNow.AddMinutes(19)
+            do {
+              Start-Sleep -Seconds 2
+              $info = Get-ScheduledTaskInfo -TaskName $task
+              $state = (Get-ScheduledTask -TaskName $task).State
+              if ([datetime]::UtcNow -gt $deadline) { throw 'Limited suite task timed out' }
+            } until ($info.LastRunTime -ne $previous -and $state -eq 'Ready')
+            $result = $info.LastTaskResult
+            Write-Output "PILOT_TASK_RESULT=$result; LAST_RUN_TIME=$($info.LastRunTime); STATE=$state"
+            # Logs are untrusted diagnostics. They cannot establish authority or pass.
+            foreach ($name in @('npm.log','test.log','test-stderr.log')) {
+              $log = Join-Path $scratch $name
+              if (Test-Path -LiteralPath $log -PathType Leaf) {
+                $item = Get-Item -LiteralPath $log -Force
+                if (!($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                  Write-Output "DIAGNOSTIC_LOG=$name"
+                  Get-Content -LiteralPath $log -Tail 35 | ForEach-Object { 'guest: ' + $_ }
+                }
+              }
+            }
+            if ($result -ne 0) { throw "Unchanged limited tunnel suite failed: task result $result" }
+            Write-Output 'R16_LIMITED_TUNNEL_COMPATIBILITY_PASS (fixture only; not certification)'
+          } finally {
+            if ($secure) { $secure.Dispose() }
+            try {
+              if ($createdTask) {
+                Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
+                Unregister-ScheduledTask -TaskName $task -Confirm:$false
+              }
+            } finally {
+              try {
+                if ($batchChanged) { Set-BatchRight $original 'restore' }
+              } finally {
+                if ($createdUser) { Remove-LocalUser -Name $account }
+              }
+            }
+            # Runner VM is disposable. No recursive admin deletion of guest-
+            # writable trees, which could contain attacker-created junctions.
+          }
