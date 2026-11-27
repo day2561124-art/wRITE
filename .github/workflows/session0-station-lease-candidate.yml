@@ -249,7 +249,13 @@ jobs:
               $wrapperExited = $false
               if (Test-Path -LiteralPath $exitMarker -PathType Leaf) {
                 $exitText = (Get-Content -LiteralPath $exitMarker -Raw -ErrorAction SilentlyContinue)
-                $wrapperExited = $null -ne $exitText -and $exitText.Trim() -match '^-?\d+
+                $wrapperExited = $null -ne $exitText -and $exitText.Trim() -match '^-?\d+$'
+              }
+              if (Test-Path -LiteralPath $resultPath -PathType Leaf) { break }
+              if (($info.LastRunTime -ne $prior -and $state -eq 'Ready') -or
+                  $wrapperExited -or [datetime]::UtcNow -gt $deadline) {
+                Start-Sleep -Milliseconds 250
+                if (Test-Path -LiteralPath $resultPath -PathType Leaf) { break }
                 Write-Output "TASK_STATE=$state; LAST_RUN_RESULT=$($info.LastTaskResult); LAST_RUN_TIME=$($info.LastRunTime)"
                 foreach ($name in @('wrapper-entered.txt','probe-entered.txt','wrapper-exit.txt','bootstrap.log','test.log','forced.log','forced-stderr.log','result.tmp')) {
                   $file = Join-Path $run $name
