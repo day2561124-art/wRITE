@@ -3,10 +3,12 @@ name: R16 independent verification evidence
 # Fixture verification only; no production signer, secret or deployment.
 on:
   pull_request:
-    branches: [nexa/r16-lifecycle-contract, main]
+    branches: [nexa/r16-lifecycle-contract, nexa/r16-independent-verification, main]
     paths:
       - 'server/src/mcp-independent-verification-*.mjs'
       - 'tests/mcp/mcp-independent-verification-evidence.test.mjs'
+      - 'server/src/mcp-development-integration-tools.mjs'
+      - 'tests/mcp/mcp-development-integration-tools.test.mjs'
       - '.github/workflows/r16-independent-verification.yml'
 permissions:
   contents: read
@@ -36,3 +38,4 @@ jobs:
           EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
         run: node -e "const a=require('node:child_process').execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();if(a!==process.env.EXPECTED_HEAD)process.exit(1);console.log(a)"
       - run: node --test tests/mcp/mcp-independent-verification-evidence.test.mjs
+      - run: node --test --test-name-pattern="R16 independent candidate evidence" tests/mcp/mcp-development-integration-tools.test.mjs

@@ -935,6 +935,43 @@ export function createDevIntegrationService({
     return { fresh: reasons.length === 0, reasons, current_main: currentMain, current_source: currentSource };
   }
 
+  // Host-only read: derive required suites from the actual immutable Git
+  // delta and current registry. This does not materialize a worktree, run
+  // candidate code, mark ready, or expand the MCP capability catalogue.
+  async function getIndependentVerificationContext(input = {}) {
+    assertObject(input, "independent verification context input", new Set([
+      "integration_candidate_id", "expected_revision",
+    ]));
+    const id = assertCandidateId(input.integration_candidate_id);
+    if (!Number.isSafeInteger(input.expected_revision) || input.expected_revision < 1) {
+      throw Object.assign(new Error("INDEPENDENT_VERIFICATION_REVISION_REQUIRED"), { code: "INDEPENDENT_VERIFICATION_REVISION_REQUIRED" });
+    }
+    const check = async () => {
+      const record = await getCandidate({ integration_candidate_id: id });
+      if (record.revision !== input.expected_revision || record.state !== "preflight_passed"
+        || record.integration_workspace.state !== "not_materialized"
+        || record.integration_workspace.cleanup_pending !== false || record.validation_report !== null
+        || !(await candidateFreshness(record)).fresh) {
+        throw Object.assign(new Error("INDEPENDENT_VERIFICATION_CANDIDATE_STALE"), { code: "INDEPENDENT_VERIFICATION_CANDIDATE_STALE" });
+      }
+      return record;
+    };
+    const candidate = await check();
+    const plan = await selectCandidateVerificationPlan(repoRoot, candidate, gitRunner);
+    const checked = await check();
+    const keys = ["integration_candidate_id", "revision", "workspace_id", "workstream_id",
+      "integration_commit", "source_head", "target_head"];
+    if (keys.some(key => candidate[key] !== checked[key])) {
+      throw Object.assign(new Error("INDEPENDENT_VERIFICATION_CANDIDATE_STALE"), { code: "INDEPENDENT_VERIFICATION_CANDIDATE_STALE" });
+    }
+    return {
+      candidate: Object.fromEntries(keys.map(key => [key, checked[key]])),
+      plan: structuredClone(plan),
+      observation_only: true,
+      execution_authorized: false,
+    };
+  }
+
   async function ensureIntegrationRoot() {
     const parentInfo = await lstat(path.dirname(integrationRoot));
     if (parentInfo.isSymbolicLink()) throw new Error("Integration worktree parent cannot be a symbolic link.");
@@ -1674,6 +1711,7 @@ export function createDevIntegrationService({
     preflight,
     getCandidate,
     listCandidates,
+    getIndependentVerificationContext,
     validateIntegration,
     recoverInterruptedValidation,
     integrate,
