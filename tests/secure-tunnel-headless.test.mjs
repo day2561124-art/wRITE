@@ -16,6 +16,21 @@ if (process.platform === 'win32') {
     assert.equal(result.status, 0, result.stderr || result.stdout || result.error?.message);
     return result.stdout.trim();
   };
+  // Stop the fixture's own child and wait on the same process handle.
+  // Windows releases a child's working directory and file handles on exit,
+  // not necessarily when the termination request returns.
+  const stopFixture = pid => {
+    assert(Number.isSafeInteger(pid) && pid > 0, 'Invalid fixture child PID');
+    ps(`$ErrorActionPreference='Stop';
+      Microsoft.PowerShell.Core\\Import-Module ([IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Management','Microsoft.PowerShell.Management.psd1')) -ErrorAction Stop;
+      $p=Get-Process -Id ${pid} -ErrorAction SilentlyContinue;
+      if ($null -ne $p) { try {
+        $null=$p.Handle;
+        if (-not $p.HasExited) { $p.Kill() }
+        if (-not $p.WaitForExit(5000)) { throw 'Fixture child did not terminate' }
+      } finally { $p.Dispose() } }`);
+  };
+  let primaryError;
   try {
     // Use the actual builder, not a separate test-only compilation path.
     const manager = path.join(root, 'scripts/manage-secure-tunnel.ps1');
@@ -50,12 +65,14 @@ if (process.platform === 'win32') {
       exit 8`);
     try {
       const inherited = spawnSync(host, [fixture, temp], { timeout: 8000 });
-      assert.equal(inherited.status, 8, 'Detached descendants retaining a pipe must not keep the task running');
+      assert.equal(inherited.status, 8, inherited.error?.message || 'Detached descendants retaining a pipe must not keep the task running');
     } finally {
-      const pid = Number(await readFile(path.join(temp, 'descendant.pid'), 'utf8'));
-      if (Number.isSafeInteger(pid) && pid > 0) {
-        ps(`Stop-Process -Id ${pid} -ErrorAction SilentlyContinue`);
-      }
+      // Missing PID must not obscure an earlier launch failure.
+      const pidText = await readFile(path.join(temp, 'descendant.pid'), 'utf8').catch(error => {
+        if (error.code === 'ENOENT') return '';
+        throw error;
+      });
+      if (pidText) stopFixture(Number(pidText));
     }
     assert.equal(spawnSync(host, [], { timeout: 10000 }).status, 2, 'Invalid args fail silently');
     const listener = path.join(temp, 'listener.mjs');
@@ -83,7 +100,17 @@ if (process.platform === 'win32') {
           return error == 6 ? 0 : 100 + error;
         } }';
         exit [ListenerConsoleProbe]::Check(${listenerPid})`);
-    } finally { process.kill(listenerPid); }
+    } finally { stopFixture(listenerPid); }
     console.log('Headless host passed: GUI PE, actual console absence, exact argv, pipe draining, exit propagation.');
-  } finally { await rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+  } catch (error) {
+    primaryError = error;
+    throw error;
+  } finally {
+    try {
+      await rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } catch (cleanupError) {
+      if (primaryError) throw new AggregateError([primaryError, cleanupError], 'Headless assertion and fixture cleanup both failed');
+      throw cleanupError;
+    }
+  }
 }
