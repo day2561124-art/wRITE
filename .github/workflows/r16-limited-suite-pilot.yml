@@ -160,6 +160,17 @@ jobs:
           # Dependency installation runs under the same disposable user, never supervisor.
           & $node $npm ci --ignore-scripts --no-audit --no-fund
           if ($LASTEXITCODE -ne 0) { exit 64 }
+          # Cold startup is separate from the existing 5s production-path test.
+          # Exercise the same controlled environment and pipe-based runner once,
+          # record the real latency, and still require the unchanged suite.
+          if ($Entry -eq 'tests\tools\mcp-contract.test.mjs') {
+            $preflight = 'import {runPowerShellProcess} from "./server/src/mcp-powershell-maintenance-tools.mjs"; const result = await runPowerShellProcess({command:"Write-Output ''limited-cold-start-ok''",cwd:process.cwd(),timeoutMs:20000}); console.log("LIMITED_PS_COLD_START="+JSON.stringify({execution_ok:result.execution_ok,ok:result.ok,exit_code:result.exit_code,timed_out:result.timed_out,duration_ms:result.duration_ms,stdout:result.stdout,stderr:result.stderr})); if (!result.ok || !result.stdout.includes("limited-cold-start-ok")) process.exitCode=1;'
+            # Node reads the exact diagnostic from stdin, not a generated source file.
+            $preflight | & $node --input-type=module -
+            $preflightExit = $LASTEXITCODE
+            Write-Output "LIMITED_PS_PREFLIGHT_EXIT=$preflightExit"
+            # A failed diagnostic does not replace or skip the mandatory suite.
+          }
           Write-Output "LIMITED_SUITE_BEGIN=$Entry; HEAD=$Expected"
           & $node $Entry
           $code = $LASTEXITCODE
