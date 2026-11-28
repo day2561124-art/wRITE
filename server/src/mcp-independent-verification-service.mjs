@@ -23,8 +23,9 @@ export function createIndependentVerifierService({ policy, readContext, readRunS
   if ([readContext, readRunSelection, observeTestOutcome, signPayload, readCredential,
     assertProtectedDirectory, clock].some(f => typeof f !== "function") || !pinnedPublicKey)
     fail("INDEPENDENT_VERIFIER_HOST_UNBOUND");
-  if (!exact(policy, ["repository", "repository_id", "issuer", "max_age_ms", "receipt_ttl_ms",
-    "workflows", "additional_required"]) || !label.test(policy.issuer ?? "")
+  const policyFields = ["repository", "repository_id", "issuer", "max_age_ms", "receipt_ttl_ms", "workflows", "additional_required"];
+  const separateSupervisor = exact(policy, [...policyFields, "supervisor_commit"]);
+  if ((!separateSupervisor && !exact(policy, policyFields)) || !label.test(policy.issuer ?? "")
     || !positive(policy.receipt_ttl_ms) || policy.receipt_ttl_ms > policy.max_age_ms
     || !Array.isArray(policy.additional_required) || policy.additional_required.length > 64
     || !policy.additional_required.every(s => typeof s === "string" && label.test(s))
@@ -34,7 +35,8 @@ export function createIndependentVerifierService({ policy, readContext, readRunS
   const reader = createGitHubVerificationReadClient({repository:trusted.repository, readCredential,
     ...(fetchImpl === undefined ? {} : {fetchImpl})});
   const collector = required => createGitHubVerificationCollector({policy:{repository:trusted.repository,
-    repository_id:trusted.repository_id, required, max_age_ms:trusted.max_age_ms}, ...reader, clock});
+    repository_id:trusted.repository_id, required, max_age_ms:trusted.max_age_ms,
+    ...(separateSupervisor ? {supervisor_commit:trusted.supervisor_commit} : {})}, ...reader, clock});
   // Validate the complete host-owned definition before serving any requests.
   collector(trusted.workflows);
   const rows = workflows => workflows.map(({suite,platform,workflow_sha256}) => ({suite,platform,workflow_sha256}));
@@ -65,7 +67,13 @@ export function createIndependentVerifierService({ policy, readContext, readRunS
       // Only the independent host selects observed provider run IDs. The
       // caller cannot choose run, attempt, suite, workflow or outcome.
       const runs = await readRunSelection(Object.freeze({...candidate}), structuredClone(required));
-      return collector(workflows)({commit:candidate.integration_commit,runs});
+      const observed = await collector(workflows)({commit:candidate.integration_commit,runs});
+      if (separateSupervisor && observed.observed === true
+        && (observed.code !== "GITHUB_SUPERVISOR_RUN_OBSERVED" || observed.supervisor_commit !== trusted.supervisor_commit
+          || observed.candidate_binding_pending !== true)) fail("INDEPENDENT_SUPERVISOR_PROVENANCE_UNVERIFIED");
+      // The issuer still requires independently signed raw outcomes for each
+      // exact candidate/suite/run/attempt binding. Provider success is not proof.
+      return observed;
     },
     observeTestOutcome, signPayload, pinnedPublicKey, clock});
   const publish = createIndependentReceiptPublisher({root:receiptRoot, assertProtectedDirectory, pinnedPublicKey, clock,
