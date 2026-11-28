@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   mkdtemp,
   mkdir,
@@ -121,11 +121,25 @@ try {
   );
 
   if (process.platform === "win32") {
-    const normal = await runPowerShellProcess({
-      command: "Write-Output 'normal-powershell-ok'",
-      cwd: rootDir,
-      timeoutMs: 5_000,
-    });
+    let normal, observedModulePath;
+    const oldModulePath = process.env.PSModulePath;
+    try {
+      process.env.PSModulePath = path.join(tempRoot, "untrusted-module-path");
+      normal = await runPowerShellProcess({
+        command: "Write-Output 'normal-powershell-ok'",
+        cwd: rootDir,
+        timeoutMs: 5_000,
+        spawnImpl: (file, args, options) => {
+          observedModulePath = options.env.PSModulePath;
+          return spawn(file, args, options);
+        },
+      });
+    } finally {
+      if (oldModulePath === undefined) delete process.env.PSModulePath;
+      else process.env.PSModulePath = oldModulePath;
+    }
+    assert.equal(observedModulePath, path.join(process.env.SystemRoot ?? process.env.WINDIR,
+      "System32", "WindowsPowerShell", "v1.0", "Modules"));
     assert.equal(normal.execution_ok, true, normal.stderr);
     assert.equal(normal.ok, true, JSON.stringify({ execution_ok: normal.execution_ok, exit_code: normal.exit_code, timed_out: normal.timed_out, duration_ms: normal.duration_ms, stdout: normal.stdout, stderr: normal.stderr }));
     assert.match(normal.stdout, /normal-powershell-ok/u);
