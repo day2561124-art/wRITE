@@ -138,7 +138,7 @@ jobs:
             if ($env:OBSERVER_MODE -eq 'tunnel') { $args += ' tunnel' }
             $action = New-ScheduledTaskAction -Execute $exe -Argument $args -WorkingDirectory $root
             $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-            $taskMinutes = if ($env:OBSERVER_MODE -eq 'tunnel') { 32 } else { 3 }
+            $taskMinutes = if ($env:OBSERVER_MODE -eq 'tunnel') { 34 } else { 3 }
             $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes $taskMinutes) -MultipleInstances IgnoreNew
             $null = Register-ScheduledTask -TaskName $task -Action $action -Principal $principal -Settings $settings
             $createdTask = $true
@@ -207,7 +207,7 @@ jobs:
             if ($env:OBSERVER_MODE -eq 'tunnel') {
               # Guest text is diagnostic only; prevent workflow commands/control
               # sequences and bound output even on an unsuccessful suite.
-              foreach ($name in @('npm_prepare.stdout','npm_prepare.stderr','mcp_tunnel.stdout','mcp_tunnel.stderr')) {
+              foreach ($name in @('guest_profile_prepare.stdout','guest_profile_prepare.stderr','npm_prepare.stdout','npm_prepare.stderr','mcp_tunnel.stdout','mcp_tunnel.stderr')) {
                 $file = Join-Path $root ($name + '.b64')
                 $capture = Get-Item -LiteralPath $file -ErrorAction SilentlyContinue
                 if (!$capture) { continue }
@@ -220,6 +220,7 @@ jobs:
                 }
               }
               foreach ($pattern in @(
+                '^RAW_OBSERVER guest_profile_prepare outcome=completed exit=0 active=0 total=[1-9][0-9]*$',
                 '^RAW_OBSERVER npm_prepare outcome=completed exit=0 active=0 total=[1-9][0-9]*$',
                 '^RAW_OBSERVER mcp_tunnel outcome=completed exit=0 active=0 total=[1-9][0-9]*$',
                 '^RAW_OBSERVER_TUNNEL_PILOT_PASS$'
