@@ -6,7 +6,8 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { createDevIntegrationService } from "../server/src/mcp-development-integration-tools.mjs";
 import { fingerprintMcpMutationRequest } from "../server/src/mcp-operation-reconciliation-context.mjs";
-import { projectRoot } from "../server/src/project-paths.mjs";
+import { projectRoot, releaseRoot } from "../server/src/project-paths.mjs";
+import { loadProductionIndependentConsumerGate } from "../server/src/mcp-independent-verification-consumer-binding.mjs";
 
 // Direct host entry to the existing integration service and test runner. It
 // starts no listener, changes no production route, and imposes no RPC deadline.
@@ -47,6 +48,7 @@ const service = createDevIntegrationService({
   workstreamReader: readers.dev_workspace_get_workstream,
   workspaceReader: readers.dev_workspace_get_workspace,
   journal, dependencyRoot: root,
+  independentEvidenceGate: loadProductionIndependentConsumerGate({ releaseRoot }),
 });
 const id = flags.get("--candidate");
 const revision = Number(flags.get("--revision"));
