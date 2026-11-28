@@ -133,6 +133,7 @@ jobs:
               icacls $tools /grant:r ("*" + $sid + ":(OI)(CI)(RX)") | Out-Null
               Native-OK 'Guest readonly toolchain'
               [IO.File]::WriteAllText((Join-Path $root 'git-dir.txt'),$gitDir)
+              [IO.File]::WriteAllText((Join-Path $root 'candidate-sha.txt'),$candidate)
               Write-Output "RAW_OBSERVER_CANDIDATE=$candidate; SUITE=mcp_tunnel"
             }
             $export = Join-Path $root 'original.inf'
@@ -224,7 +225,7 @@ jobs:
             if ($env:OBSERVER_MODE -eq 'tunnel') {
               # Guest text is diagnostic only; prevent workflow commands/control
               # sequences and bound output even on an unsuccessful suite.
-              foreach ($name in @('guest_profile_prepare.stdout','guest_profile_prepare.stderr','npm_prepare.stdout','npm_prepare.stderr','protected_source_probe.stdout','protected_source_probe.stderr','mcp_tunnel.stdout','mcp_tunnel.stderr')) {
+              foreach ($name in @('guest_profile_prepare.stdout','guest_profile_prepare.stderr','protected_git_config.stdout','protected_git_config.stderr','protected_git_identity.stdout','protected_git_identity.stderr','npm_prepare.stdout','npm_prepare.stderr','protected_source_probe.stdout','protected_source_probe.stderr','mcp_tunnel.stdout','mcp_tunnel.stderr')) {
                 $file = Join-Path $root ($name + '.b64')
                 $capture = Get-Item -LiteralPath $file -ErrorAction SilentlyContinue
                 if (!$capture) { continue }
@@ -239,6 +240,9 @@ jobs:
               foreach ($pattern in @(
                 '^RAW_OBSERVER guest_profile_prepare outcome=completed exit=0 active=0 total=[1-9][0-9]*$',
                 '^RAW_OBSERVER npm_prepare outcome=completed exit=0 active=0 total=[1-9][0-9]*$',
+                '^RAW_OBSERVER protected_git_config outcome=completed exit=0 active=0 total=[1-9][0-9]*$',
+                '^RAW_OBSERVER protected_git_identity outcome=completed exit=0 active=0 total=[1-9][0-9]*$',
+                '^PROTECTED_GIT_IDENTITY_PASS$',
                 '^RAW_OBSERVER protected_source_probe outcome=completed exit=0 active=0 total=[1-9][0-9]*$',
                 '^RAW_OBSERVER mcp_tunnel outcome=completed exit=0 active=0 total=[1-9][0-9]*$',
                 '^RAW_OBSERVER_TUNNEL_PILOT_PASS$'
