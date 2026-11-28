@@ -150,7 +150,7 @@ internal static class Program {
                 Run(token,sid,root,"isolation",check,0,10000,false,log);
                 Run(token,sid,root,"success","exit 0",0,10000,false,log);
                 Run(token,sid,root,"failure","exit 7",7,10000,false,log);
-                string descendant="$p=[Diagnostics.ProcessStartInfo]::new([IO.Path]::Combine($PSHOME,'powershell.exe'),'-NoProfile -NonInteractive -Command [Threading.Thread]::Sleep(90000)'); $p.UseShellExecute=$false; $p.CreateNoWindow=$true; [void][Diagnostics.Process]::Start($p); exit 7";
+                string descendant="$ErrorActionPreference='Stop'; $p=[Diagnostics.ProcessStartInfo]::new([IO.Path]::Combine($PSHOME,'powershell.exe'),'-NoProfile -NonInteractive -Command [Threading.Thread]::Sleep(90000)'); $p.UseShellExecute=$false; $p.CreateNoWindow=$true; $child=[Diagnostics.Process]::Start($p); if ($null -eq $child -or $child.HasExited) { exit 93 }; exit 7";
                 Run(token,sid,root,"descendant",descendant,7,10000,false,log);
                 Run(token,sid,root,"timeout","[Threading.Thread]::Sleep(90000)",0,1000,false,log);
                 Run(token,sid,root,"cancel","[Threading.Thread]::Sleep(90000)",0,1000,true,log);
