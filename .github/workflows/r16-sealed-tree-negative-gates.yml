@@ -3,7 +3,7 @@ name: R16 sealed dependency tree negative gates
 # Disposable synthetic fixtures only. No credentials, signing or authority.
 on:
   pull_request:
-    branches: [nexa/r16-sealed-dependency-tree-pilot, main]
+    branches: [nexa/r16-sealed-dependency-tree-pilot, nexa/r16-sealed-tree-stream-gate, main]
     paths:
       - 'scripts/r16-raw-process-observer-pilot.cs'
       - '.github/workflows/r16-sealed-tree-negative-gates.yml'
@@ -77,8 +77,32 @@ jobs:
           $alias = Join-Path $source 'hardlink.txt'
           $null = New-Item -ItemType HardLink -Path $alias -Target $file
           Must-Reject $source 'DEPENDENCY_UNSUPPORTED_FILE_IDENTITY'
+          $copyInstalled = $type.GetMethod('CopyInstalledGitTree',$flags)
+          if ($null -eq $copyInstalled) { throw 'Installed Git tree copy missing' }
+          $gitCopy = Join-Path $root 'installed-copy'
+          $gitDigest = $copyInstalled.Invoke($null,[object[]]@([string]$source,[string]$gitCopy))
+          if ($gitDigest -cne (Digest $gitCopy)) { throw 'Normalized hardlink digest mismatch' }
+          $gitAlias = Join-Path $gitCopy 'hardlink.txt'
+          $gitFile = Join-Path $gitCopy 'nested\fixture.txt'
+          [IO.File]::WriteAllText($gitAlias,'changed-copy')
+          if ([IO.File]::ReadAllText($gitFile) -cne 'first' -or [IO.File]::ReadAllText($file) -cne 'first') { throw 'Copy retained hardlink identity' }
           [IO.File]::Delete($alias)
           if ((Digest $source) -cne $original) { throw 'Hardlink removal changed original' }
+          $externalAlias = Join-Path $root 'outside-hardlink.txt'
+          $null = New-Item -ItemType HardLink -Path $externalAlias -Target $file
+          $externalCopy = Join-Path $root 'external-copy'
+          try {
+            $null = $copyInstalled.Invoke($null,[object[]]@([string]$source,[string]$externalCopy))
+            throw 'Unexpected external hardlink acceptance'
+          } catch {
+            $e = $_.Exception
+            while ($null -ne $e.InnerException) { $e = $e.InnerException }
+            if ($e.Message -cne 'GIT_INSTALLED_EXTERNAL_HARDLINK') { throw }
+            Write-Output 'REJECTED GIT_INSTALLED_EXTERNAL_HARDLINK'
+          }
+          [IO.File]::Delete($externalAlias)
+          if ((Digest $source) -cne $original) { throw 'External hardlink removal changed original' }
+          Write-Output 'INSTALLED_GIT_HARDLINK_NORMALIZATION_PASS'
           # PowerShell Remove-Item -Stream fails on directory streams on this
           # runner. Use the native API on these exact synthetic fixture paths.
           Add-Type -TypeDefinition @'
