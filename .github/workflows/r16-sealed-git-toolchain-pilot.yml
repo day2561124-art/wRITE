@@ -166,15 +166,23 @@ jobs:
               # Git for Windows exposes both cmd and bin entry points. Accept
               # only a complete installation root; always execute the copied bin.
               Write-Output "GIT_INSTALL_DISCOVERY launcher=$gitDir; root=$gitInstall"
-              if ($launcherDir -notin @('cmd','bin') -or
-                  !(Test-Path -LiteralPath (Join-Path $gitInstall 'bin\git.exe') -PathType Leaf) -or
-                  !(Test-Path -LiteralPath (Join-Path $gitInstall 'mingw64\bin\git.exe') -PathType Leaf) -or
-                  !(Test-Path -LiteralPath (Join-Path $gitInstall 'mingw64\libexec\git-core') -PathType Container)) { throw 'Unsupported Git installation layout' }
+              $installedLauncher = Join-Path $gitInstall 'bin\git.exe'
+              if ($launcherDir -notin @('cmd','bin') -or !(Test-Path -LiteralPath $installedLauncher -PathType Leaf)) { throw 'Unsupported Git installation layout' }
+              if (Test-Path Env:GIT_EXEC_PATH) { throw 'Unexpected Git exec-path override' }
+              $execOutput = @(& $installedLauncher --exec-path)
+              Native-OK 'Installed Git exec path'
+              if ($execOutput.Count -ne 1 -or ![IO.Path]::IsPathFullyQualified($execOutput[0])) { throw 'Invalid Git exec path' }
+              $installedExec = [IO.Path]::GetFullPath($execOutput[0])
+              $rootPrefix = [IO.Path]::GetFullPath($gitInstall).TrimEnd('\') + '\'
+              if (!$installedExec.StartsWith($rootPrefix,[StringComparison]::OrdinalIgnoreCase) -or !(Test-Path -LiteralPath $installedExec -PathType Container)) { throw 'Git exec path outside installed tree' }
+              $relativeExec = $installedExec.Substring($rootPrefix.Length)
+              Write-Output "GIT_INSTALL_EXEC_PATH=$relativeExec"
               $gitParent = Join-Path $root 'git-tools-parent'
               $null = New-Item -ItemType Directory -Path $gitParent
               icacls $gitParent /grant:r ("*" + $sid + ":(OI)(CI)(RX)") ("*" + $prepSid + ":(OI)(CI)(RX)") | Out-Null
               Native-OK 'Guest and preparation readonly Git tree'
               [IO.File]::WriteAllText((Join-Path $root 'git-install-root.txt'),$gitInstall)
+              [IO.File]::WriteAllText((Join-Path $root 'git-exec-relative.txt'),$relativeExec)
               [IO.File]::WriteAllText((Join-Path $root 'git-dir.txt'),(Join-Path $gitParent 'git\bin'))
               [IO.File]::WriteAllText((Join-Path $root 'candidate-sha.txt'),$candidate)
               Write-Output "RAW_OBSERVER_CANDIDATE=$candidate; SUITE=mcp_tunnel"
