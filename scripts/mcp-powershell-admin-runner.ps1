@@ -5,6 +5,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+# Use the inbox modules by absolute path before any implicit discovery.
+Microsoft.PowerShell.Core\Import-Module ([IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Management','Microsoft.PowerShell.Management.psd1')) -ErrorAction Stop
+Microsoft.PowerShell.Core\Import-Module ([IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Utility.psd1')) -ErrorAction Stop
 Set-StrictMode -Version Latest
 $MaxOutputBytes = 65536
 
@@ -145,7 +148,7 @@ try {
     $command = [string]$request.command
     Assert-MaintenanceCommand -Command $command
 
-    $prefix = '$ProgressPreference = ''SilentlyContinue''; [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [Console]::OutputEncoding;'
+    $prefix = '$ProgressPreference = ''SilentlyContinue''; [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [Console]::OutputEncoding; Microsoft.PowerShell.Core\Import-Module ([IO.Path]::Combine($PSHOME,''Modules'',''Microsoft.PowerShell.Management'',''Microsoft.PowerShell.Management.psd1'')) -ErrorAction Stop; Microsoft.PowerShell.Core\Import-Module ([IO.Path]::Combine($PSHOME,''Modules'',''Microsoft.PowerShell.Utility'',''Microsoft.PowerShell.Utility.psd1'')) -ErrorAction Stop;'
     $wrappedCommand = $prefix + [Environment]::NewLine + $command
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($wrappedCommand))
     $powershellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
