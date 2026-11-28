@@ -361,7 +361,13 @@ internal static class Program {
             using(var input=new FileStream(p,FileMode.Open,FileAccess.Read,FileShare.Read)) {
                 FileIdentity info;
                 Require(GetFileInformationByHandle(input.SafeFileHandle,out info),"dependency_file_identity");
-                if(info.links!=1 || (info.attributes&0x400)!=0) throw new InvalidOperationException("DEPENDENCY_UNSUPPORTED_FILE_IDENTITY");
+                if(info.links!=1 || (info.attributes&0x400)!=0) {
+                    var error=new InvalidOperationException("DEPENDENCY_UNSUPPORTED_FILE_IDENTITY");
+                    // Relative path encoded so that it cannot inject log lines.
+                    error.Data["tree_identity_detail"]="relative_base64="+Convert.ToBase64String(Encoding.UTF8.GetBytes(rel))
+                        +" links="+info.links+" attributes="+info.attributes.ToString("X8");
+                    throw error;
+                }
                 CheckDataStreams(p,false);
                 budget.bytes=checked(budget.bytes+input.Length);
                 if(budget.bytes>4L*1024*1024*1024) throw new InvalidOperationException("DEPENDENCY_BYTE_BUDGET");
@@ -621,7 +627,10 @@ internal static class Program {
                 if(File.ReadAllText(Path.Combine(root,"sentinel.txt"))!="synthetic-protected-sentinel") throw new InvalidOperationException("SENTINEL_CHANGED");
                 log.WriteLine("RAW_OBSERVER_PILOT_PASS");
                 return 0;
-            } catch(Exception e) { log.WriteLine("RAW_OBSERVER_PILOT_FAIL stage="+stage+" type="+e.GetType().Name+" hresult="+e.HResult.ToString("X8")+" message="+e.Message); return 1; }
+            } catch(Exception e) {
+                if(e.Data.Contains("tree_identity_detail")) log.WriteLine("TREE_IDENTITY_REJECT "+e.Data["tree_identity_detail"]);
+                log.WriteLine("RAW_OBSERVER_PILOT_FAIL stage="+stage+" type="+e.GetType().Name+" hresult="+e.HResult.ToString("X8")+" message="+e.Message); return 1;
+            }
             finally { Close(token); }
         }
     }
