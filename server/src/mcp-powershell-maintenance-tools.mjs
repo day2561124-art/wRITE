@@ -314,12 +314,19 @@ async function runPowerShellProcessObserved({
   let timedOut = false;
 
   try {
+    // Match the fixed Windows PowerShell module root already used by the
+    // native AppContainer, scoped admin and probe launchers. A stripped
+    // environment must not rely on discovery of caller/user PSModulePath.
+    const windows = process.env.SystemRoot ?? process.env.WINDIR;
+    const psEnvironment = process.platform === "win32" && windows && path.isAbsolute(windows)
+      ? { PSModulePath: path.join(windows, "System32", "WindowsPowerShell", "v1.0", "Modules") }
+      : {};
     child = spawnImpl(
       "powershell.exe",
       ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
       {
         cwd,
-        env: controlledProcessEnvironment(),
+        env: controlledProcessEnvironment(psEnvironment),
         shell: false,
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
