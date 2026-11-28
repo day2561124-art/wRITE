@@ -328,11 +328,10 @@ internal static class Program {
                         {"WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL","1"},{"WRITER_WORKBENCH_ISOLATED_TEST_CHECKPOINT","1"},{"WRITER_WORKBENCH_ISOLATED_TEST_TRANSACTION","1"}
                     };
                     if(protectedSource) {
-                        // Read-only checkout is owned by the supervisor, not the guest.
-                        // Trust this exact Git path only; never a wildcard.
-                        env["GIT_CONFIG_COUNT"]="1";
-                        env["GIT_CONFIG_KEY_0"]="safe.directory";
-                        env["GIT_CONFIG_VALUE_0"]=source;
+                        // A controlled child deliberately drops GIT_CONFIG_*.
+                        // Use only the fresh disposable account's global config,
+                        // not a process-wide override or a shared trust exception.
+                        env.Remove("GIT_CONFIG_GLOBAL");
                     }
                     var block=new StringBuilder(); foreach(var item in env) block.Append(item.Key+"="+item.Value+"\0"); block.Append("\0");
                     var environment=block.ToString();
@@ -345,6 +344,20 @@ internal static class Program {
                         + "if (-not [IO.File]::Exists($cache)) { [Console]::WriteLine('GUEST_CACHE_NOT_WRITTEN') }";
                     var warmArgs="-NoLogo -NoProfile -NonInteractive -EncodedCommand "+Convert.ToBase64String(Encoding.Unicode.GetBytes(warm));
                     if(!Run(token,sid,root,"guest_profile_prepare","",0,120000,false,log,powershell,warmArgs,source,environment)) return 1;
+                    if(protectedSource) {
+                        var guestGit=Path.Combine(git,"git.exe");
+                        var globalConfig=Path.Combine(profile,".gitconfig");
+                        if(File.Exists(globalConfig)) throw new InvalidOperationException("DISPOSABLE_GIT_CONFIG_EXISTS");
+                        string configure="config --global --add safe.directory \""+source.Replace('\\','/')+"\"";
+                        if(!Run(token,sid,root,"protected_git_config","",0,10000,false,log,guestGit,configure,source,environment)) return 1;
+                        // This is the same controlled environment boundary as the
+                        // shared-workspace resolver: no caller Git config overrides.
+                        if(!Run(token,sid,root,"protected_git_identity","",0,10000,false,log,guestGit,"--no-pager -c core.fsmonitor=false rev-parse --verify HEAD",source,environment)) return 1;
+                        var observed=Encoding.UTF8.GetString(Convert.FromBase64String(File.ReadAllText(Path.Combine(root,"protected_git_identity.stdout.b64")))).Trim();
+                        var expected=File.ReadAllText(Path.Combine(root,"candidate-sha.txt")).Trim();
+                        if(expected.Length!=40 || observed!=expected) throw new InvalidOperationException("PROTECTED_GIT_HEAD_MISMATCH");
+                        log.WriteLine("PROTECTED_GIT_IDENTITY_PASS");
+                    }
                     if(!Run(token,sid,root,"npm_prepare","",0,600000,false,log,node,"\""+npm+"\" ci --ignore-scripts --no-audit --no-fund",source,environment)) return 1;
                     if(protectedSource) {
                         // Test the actual guest token, including directory delete-child rights.
