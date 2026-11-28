@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Collections.Generic;
@@ -271,8 +272,97 @@ internal static class Program {
             Marshal.FreeHGlobal(environment);
         }
     }
+
+    // Disposable pilot only. Copy regular single-link file bytes from the
+    // drained preparation job into new supervisor-owned objects. Never
+    // apply ACLs recursively to an account-controlled directory tree.
+    [StructLayout(LayoutKind.Sequential)]
+    struct FileIdentity {
+        public uint attributes;
+        public System.Runtime.InteropServices.ComTypes.FILETIME creation,access,write;
+        public uint volume,sizeHigh,sizeLow,links,indexHigh,indexLow;
+    }
+    [DllImport("kernel32.dll",SetLastError=true)]
+    static extern bool GetFileInformationByHandle(SafeFileHandle file,out FileIdentity identity);
+    sealed class TreeBudget {
+        public int count;
+        public long bytes;
+    }
+    static void CheckRegular(string p,bool directory) {
+        var a=File.GetAttributes(p);
+        if((a&FileAttributes.ReparsePoint)!=0 || ((a&FileAttributes.Directory)!=0)!=directory)
+            throw new InvalidOperationException("DEPENDENCY_UNSUPPORTED_OBJECT");
+    }
+    static string HashBytes(byte[] data) {
+        using(var h=SHA256.Create()) return BitConverter.ToString(h.ComputeHash(data)).Replace("-","").ToLowerInvariant();
+    }
+    static void ReadTree(string from,string to,string relative,StringBuilder manifest,TreeBudget budget,int depth) {
+        if(depth>100 || ++budget.count>200000) throw new InvalidOperationException("DEPENDENCY_TREE_BUDGET");
+        CheckRegular(from,true);
+        if(to!=null) {
+            if(Directory.Exists(to)||File.Exists(to)) throw new InvalidOperationException("DEPENDENCY_COPY_COLLISION");
+            Directory.CreateDirectory(to);
+            CheckRegular(to,true);
+        }
+        manifest.Append("D ").Append(Convert.ToBase64String(Encoding.UTF8.GetBytes(relative))).Append('\n');
+        var entries=Directory.GetFileSystemEntries(from);
+        Array.Sort(entries,StringComparer.Ordinal);
+        foreach(var p in entries) {
+            var name=Path.GetFileName(p);
+            if(name.Length==0 || name.IndexOf(':')>=0) throw new InvalidOperationException("DEPENDENCY_INVALID_NAME");
+            var rel=relative.Length==0?name:relative+"/"+name;
+            var dst=to==null?null:Path.Combine(to,name);
+            var attr=File.GetAttributes(p);
+            if((attr&FileAttributes.ReparsePoint)!=0) throw new InvalidOperationException("DEPENDENCY_REPARSE_POINT");
+            if((attr&FileAttributes.Directory)!=0) { ReadTree(p,dst,rel,manifest,budget,depth+1); continue; }
+            if(++budget.count>200000) throw new InvalidOperationException("DEPENDENCY_TREE_BUDGET");
+            CheckRegular(p,false);
+            using(var input=new FileStream(p,FileMode.Open,FileAccess.Read,FileShare.Read)) {
+                FileIdentity info;
+                Require(GetFileInformationByHandle(input.SafeFileHandle,out info),"dependency_file_identity");
+                if(info.links!=1 || (info.attributes&0x400)!=0) throw new InvalidOperationException("DEPENDENCY_UNSUPPORTED_FILE_IDENTITY");
+                budget.bytes=checked(budget.bytes+input.Length);
+                if(budget.bytes>4L*1024*1024*1024) throw new InvalidOperationException("DEPENDENCY_BYTE_BUDGET");
+                string hash;
+                using(var h=SHA256.Create()) hash=BitConverter.ToString(h.ComputeHash(input)).Replace("-","").ToLowerInvariant();
+                if(dst!=null) {
+                    input.Position=0;
+                    using(var output=new FileStream(dst,FileMode.CreateNew,FileAccess.Write,FileShare.None)) input.CopyTo(output);
+                }
+                manifest.Append("F ").Append(Convert.ToBase64String(Encoding.UTF8.GetBytes(rel))).Append(' ').Append(hash).Append('\n');
+            }
+        }
+    }
+    static string TreeDigest(string from,string to) {
+        var m=new StringBuilder(); var budget=new TreeBudget();
+        ReadTree(from,to,"",m,budget,0);
+        if(budget.count<2 || budget.bytes<1) throw new InvalidOperationException("DEPENDENCY_EMPTY_TREE");
+        return HashBytes(Encoding.UTF8.GetBytes(m.ToString()));
+    }
+    static string SealPreparedTree(string root,string source) {
+        var deps=Path.Combine(source,"node_modules");
+        var quarantine=Path.Combine(root,"prepared-dependency-quarantine");
+        CheckRegular(deps,true);
+        if(Directory.Exists(quarantine)||File.Exists(quarantine)) throw new InvalidOperationException("DEPENDENCY_QUARANTINE_COLLISION");
+        // Preparation Run has returned with its native job drained. The old
+        // objects are not used by the test guest; the new tree inherits RX
+        // for both ordinary accounts from the supervisor-owned source root.
+        Directory.Move(deps,quarantine);
+        var original=TreeDigest(quarantine,deps);
+        var sealedDigest=TreeDigest(deps,null);
+        if(original!=sealedDigest) throw new InvalidOperationException("DEPENDENCY_COPY_MISMATCH");
+        return sealedDigest;
+    }
+    static string DependencyDenialScript(string source) {
+        return "$ErrorActionPreference='Stop'; $dependency="+QuotePs(Path.Combine(source,@"node_modules\@modelcontextprotocol\sdk\package.json"))+"; $dir="+QuotePs(Path.Combine(source,"node_modules"))+"; "
+            +"if([IO.File]::ReadAllBytes($dependency).Length -lt 1){exit 95}; "
+            +"try { $h=[IO.File]::Open($dependency,[IO.FileMode]::Open,[IO.FileAccess]::Write,[IO.FileShare]::ReadWrite); $h.Dispose(); exit 96 } catch [UnauthorizedAccessException] {}; "
+            +"try { [IO.File]::WriteAllText([IO.Path]::Combine($dir,'.r16-seal-forbidden'),'bad'); exit 97 } catch [UnauthorizedAccessException] {}; "
+            +"try { [IO.File]::Delete($dependency); exit 98 } catch [UnauthorizedAccessException] {}; if(-not [IO.File]::Exists($dependency)){exit 99}; exit 0";
+    }
+
     static int Main(string[] args) {
-        if(args.Length!=3 && (args.Length!=4 || (args[3]!="loss" && args[3]!="tunnel" && args[3]!="mcp" && args[3]!="tunnel_protected")) && (args.Length!=6 || args[3]!="tunnel_protected")) return 2;
+        if(args.Length!=3 && (args.Length!=4 || (args[3]!="loss" && args[3]!="tunnel" && args[3]!="mcp" && args[3]!="tunnel_protected")) && (args.Length!=6 || (args[3]!="tunnel_protected" && args[3]!="tunnel_sealed"))) return 2;
         var root=Path.GetFullPath(args[0]);
         var user=args[1]; var sid=args[2];
         if(!WindowsIdentity.GetCurrent().User.IsWellKnown(WellKnownSidType.LocalSystemSid) || Process.GetCurrentProcess().SessionId!=0) return 3;
@@ -287,9 +377,11 @@ internal static class Program {
                 stage="batch_logon";
                 Require(LogonUser(user,Environment.MachineName,password,4,0,out token),"batch_logon");
                 password=null; stage="batch_token_check"; CheckToken(token,sid);
-                if(args.Length>=4 && (args[3]=="tunnel" || args[3]=="mcp" || args[3]=="tunnel_protected")) {
+                if(args.Length>=4 && (args[3]=="tunnel" || args[3]=="mcp" || args[3]=="tunnel_protected" || args[3]=="tunnel_sealed")) {
                     bool separatePrep=args.Length==6;
-                    bool protectedSource=args[3]=="tunnel_protected";
+                    bool sealDependencies=args[3]=="tunnel_sealed";
+                    bool protectedSource=args[3]=="tunnel_protected" || sealDependencies;
+                    string sealedDependencies=null, sealedTools=null;
                     bool fullMcp=args[3]=="mcp";
                     string suite=fullMcp?"mcp":"mcp_tunnel";
                     // Fixed native Node entry only; no candidate-defined command or supervisor credential.
@@ -391,6 +483,15 @@ internal static class Program {
                                 prepEnv["GIT_CONFIG_GLOBAL"]="NUL";
                                 var prepBlock=new StringBuilder(); foreach(var item in prepEnv) prepBlock.Append(item.Key+"="+item.Value+"\0"); prepBlock.Append("\0");
                                 if(!Run(prepToken,prepSid,root,"npm_prepare","",0,600000,false,log,node,npmArgs,source,prepBlock.ToString())) return 1;
+                                if(sealDependencies) {
+                                    stage="seal_prepared_dependencies";
+                                    sealedDependencies=SealPreparedTree(root,source);
+                                    sealedTools=TreeDigest(tools,null);
+                                    log.WriteLine("SEALED_DEPENDENCY_TREE_SHA256="+sealedDependencies);
+                                    log.WriteLine("COPIED_NODE_TOOLCHAIN_SHA256="+sealedTools);
+                                    var denialArgs="-NoLogo -NoProfile -NonInteractive -EncodedCommand "+Convert.ToBase64String(Encoding.Unicode.GetBytes(DependencyDenialScript(source)));
+                                    if(!Run(prepToken,prepSid,root,"sealed_prep_denial","",0,10000,false,log,powershell,denialArgs,source,prepBlock.ToString())) return 1;
+                                }
                             } finally { Require(UnloadUserProfile(prepToken,prepProfile.handle),"dependency_profile_unload"); }
                         } finally { Close(prepToken); }
                     } else if(!Run(token,sid,root,"npm_prepare","",0,600000,false,log,node,npmArgs,source,environment)) return 1;
@@ -413,6 +514,12 @@ internal static class Program {
                         if(!Run(token,sid,root,"protected_source_probe","",0,10000,false,log,powershell,probeArgs,source,environment)) return 1;
                     }
                     if(!Run(token,sid,root,suite,"",0,fullMcp?2700000:1200000,false,log,node,"\""+entry+"\"",source,environment)) return 1;
+                    if(sealDependencies) {
+                        stage="sealed_tree_postcheck";
+                        if(TreeDigest(Path.Combine(source,"node_modules"),null)!=sealedDependencies || TreeDigest(tools,null)!=sealedTools)
+                            throw new InvalidOperationException("SEALED_TREE_CHANGED");
+                        log.WriteLine("SEALED_DEPENDENCY_POSTCHECK_PASS");
+                    }
                     } finally {
                         stage="guest_profile_unload";
                         Require(UnloadUserProfile(token,loaded.handle),"unload_guest_profile");
