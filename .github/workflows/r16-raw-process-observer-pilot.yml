@@ -17,6 +17,10 @@ jobs:
   observe:
     runs-on: windows-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [normal, loss]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -24,6 +28,8 @@ jobs:
           persist-credentials: false
       - name: Exercise actual Session 0 process handles and protected observer
         shell: pwsh
+        env:
+          OBSERVER_MODE: ${{ matrix.mode }}
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $false
@@ -80,13 +86,63 @@ jobs:
             $compiler = Join-Path $env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
             & $compiler /nologo /target:exe /platform:x64 "/out:$exe" $src
             Native-OK 'Compile native observer'
-            $action = New-ScheduledTaskAction -Execute $exe -Argument ('"' + $root + '" ' + $user + ' ' + $sid) -WorkingDirectory $root
+            $args = '"' + $root + '" ' + $user + ' ' + $sid
+            if ($env:OBSERVER_MODE -eq 'loss') { $args += ' loss' }
+            $action = New-ScheduledTaskAction -Execute $exe -Argument $args -WorkingDirectory $root
             $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
             $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 3) -MultipleInstances IgnoreNew
             $null = Register-ScheduledTask -TaskName $task -Action $action -Principal $principal -Settings $settings
             $createdTask = $true
             $prior = (Get-ScheduledTaskInfo -TaskName $task).LastRunTime
             Start-ScheduledTask -TaskName $task
+            if ($env:OBSERVER_MODE -eq 'loss') {
+              $log = Join-Path $root 'observer.log'
+              $lossDeadline = [datetime]::UtcNow.AddSeconds(25)
+              $ready = $null
+              do {
+                Start-Sleep -Milliseconds 100
+                $item = Get-Item -LiteralPath $log -ErrorAction SilentlyContinue
+                if ($item) {
+                  if ($item.Length -gt 16384 -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Invalid observer loss log' }
+                  $ready = @(Get-Content -LiteralPath $log | Where-Object { $_ -match '^RAW_OBSERVER_LOSS_READY supervisor=[0-9]+; members=[0-9]+(?:,[0-9]+)+$' })
+                  if ($ready.Count -gt 1) { throw 'Duplicate loss readiness' }
+                  if ($ready.Count -eq 1) { break }
+                }
+                if ([datetime]::UtcNow -ge $lossDeadline) { throw 'Observer loss readiness deadline' }
+              } while ($true)
+              if ($ready[0] -notmatch '^RAW_OBSERVER_LOSS_READY supervisor=([0-9]+); members=([0-9]+(?:,[0-9]+)+)$') { throw 'Invalid readiness' }
+              $supervisorId = [int]$Matches[1]
+              $memberIds = @($Matches[2].Split(',') | ForEach-Object { [int]$_ })
+              if ($memberIds.Count -lt 3 -or $memberIds.Count -gt 64 -or @($memberIds | Sort-Object -Unique).Count -ne $memberIds.Count -or $memberIds -contains $supervisorId) { throw 'Invalid job members' }
+              $supervisor = Get-Process -Id $supervisorId -ErrorAction Stop
+              $members = @()
+              try {
+                if ($supervisor.Path -ine $exe -or $supervisor.SessionId -ne 0 -or $supervisor.HasExited) { throw 'Unexpected supervisor process' }
+                # Open and retain real process handles before causing observer loss.
+                $null = $supervisor.Handle
+                foreach ($memberId in $memberIds) {
+                  $member = Get-Process -Id $memberId -ErrorAction Stop
+                  $members += $member
+                  $null = $member.Handle
+                  if ($member.HasExited -or $member.SessionId -ne 0) { throw 'Job member was not alive in Session 0' }
+                }
+                # Kill only the supervisor, not its tree or scheduled task.
+                # The private, non-inherited job handle must enforce cleanup.
+                $supervisor.Kill()
+                if (!$supervisor.WaitForExit(5000)) { throw 'Supervisor did not terminate' }
+                foreach ($member in $members) {
+                  if (!$member.WaitForExit(5000)) { throw 'Job member survived observer loss' }
+                }
+                if ([IO.File]::ReadAllText((Join-Path $root 'sentinel.txt')) -cne 'synthetic-protected-sentinel') { throw 'Sentinel changed' }
+                if (Test-Path -LiteralPath (Join-Path $root 'password.txt')) { throw 'Temporary logon material remains' }
+                Write-Output "RAW_OBSERVER_LOSS_PASS; observed=$($members.Count); survivors=0; certification=none"
+              } finally {
+                foreach ($member in $members) { $member.Dispose() }
+                $supervisor.Dispose()
+              }
+              # Abrupt loss is never interpreted as a successful suite outcome.
+              return
+            }
             $deadline = [datetime]::UtcNow.AddMinutes(4)
             do {
               Start-Sleep -Seconds 1
