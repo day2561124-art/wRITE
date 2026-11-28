@@ -263,12 +263,26 @@ try {
     );
 
     const runnerPath = path.join(rootDir, "scripts", "mcp-powershell-admin-runner.ps1");
+    const runnerStarted = Date.now();
     const runner = spawnSync(
       "powershell.exe",
       ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", runnerPath, "-ConfigPath", configPath],
       { cwd: rootDir, encoding: "utf8", windowsHide: true, timeout: 15_000 },
     );
-    assert.equal(runner.status, 0, runner.stderr);
+    // Keep the original process deadline and success assertion. A null status
+    // alone cannot distinguish an OS spawn failure, signal, or outer timeout.
+    const runnerDiagnostic = {
+      status: runner.status,
+      signal: runner.signal,
+      error_code: runner.error?.code ?? null,
+      error_message: runner.error?.message ?? null,
+      elapsed_ms: Date.now() - runnerStarted,
+      stdout: String(runner.stdout ?? "").slice(-2048),
+      stderr: String(runner.stderr ?? "").slice(-2048),
+      result_files: readdirSync(path.join(runnerStateRoot, "results")).sort(),
+      request_files: readdirSync(path.join(runnerStateRoot, "requests")).sort(),
+    };
+    assert.equal(runner.status, 0, JSON.stringify(runnerDiagnostic));
     const runnerResult = JSON.parse(await readFile(
       path.join(runnerStateRoot, "results", `${requestId}.result.json`),
       "utf8",
