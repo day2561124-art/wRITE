@@ -29,7 +29,7 @@ jobs:
       - uses: actions/checkout@v7
         if: matrix.mode == 'mcp'
         with:
-          ref: c160bb2bc0a492d967255cfca33d3baaa47ff0b6
+          ref: 2ccb2d8aacb3a439a5d109abd1246cd77f2ae1e0
           path: candidate-mcp
           persist-credentials: false
       # Exact committed candidate includes the isolated reconciliation fixture;
@@ -113,7 +113,7 @@ jobs:
             Native-OK 'Guest directory ACL'
             [IO.File]::WriteAllText((Join-Path $root 'sentinel.txt'),'synthetic-protected-sentinel')
             if ($env:OBSERVER_MODE -eq 'mcp') {
-              $candidate = 'c160bb2bc0a492d967255cfca33d3baaa47ff0b6'
+              $candidate = '2ccb2d8aacb3a439a5d109abd1246cd77f2ae1e0'
               $input = Join-Path $env:GITHUB_WORKSPACE 'candidate-mcp'
               if ((git -C $input rev-parse HEAD).Trim() -cne $candidate) { throw 'Candidate identity mismatch' }
               Native-OK 'Candidate identity'
