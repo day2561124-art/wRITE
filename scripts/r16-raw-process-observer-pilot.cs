@@ -445,7 +445,7 @@ internal static class Program {
     }
 
     static int Main(string[] args) {
-        if(args.Length!=3 && (args.Length!=4 || (args[3]!="loss" && args[3]!="tunnel" && args[3]!="mcp" && args[3]!="tunnel_protected")) && (args.Length!=6 || (args[3]!="tunnel_protected" && args[3]!="tunnel_sealed" && args[3]!="tunnel_sealed_git"))) return 2;
+        if(args.Length!=3 && (args.Length!=4 || (args[3]!="loss" && args[3]!="tunnel" && args[3]!="mcp" && args[3]!="tunnel_protected")) && (args.Length!=6 || (args[3]!="tunnel_protected" && args[3]!="tunnel_sealed" && args[3]!="tunnel_sealed_git" && args[3]!="mcp_sealed" && args[3]!="mcp_sealed_git"))) return 2;
         var root=Path.GetFullPath(args[0]);
         var user=args[1]; var sid=args[2];
         if(!WindowsIdentity.GetCurrent().User.IsWellKnown(WellKnownSidType.LocalSystemSid) || Process.GetCurrentProcess().SessionId!=0) return 3;
@@ -460,13 +460,13 @@ internal static class Program {
                 stage="batch_logon";
                 Require(LogonUser(user,Environment.MachineName,password,4,0,out token),"batch_logon");
                 password=null; stage="batch_token_check"; CheckToken(token,sid);
-                if(args.Length>=4 && (args[3]=="tunnel" || args[3]=="mcp" || args[3]=="tunnel_protected" || args[3]=="tunnel_sealed" || args[3]=="tunnel_sealed_git")) {
+                if(args.Length>=4 && (args[3]=="tunnel" || args[3]=="mcp" || args[3]=="tunnel_protected" || args[3]=="tunnel_sealed" || args[3]=="tunnel_sealed_git" || args[3]=="mcp_sealed" || args[3]=="mcp_sealed_git")) {
                     bool separatePrep=args.Length==6;
-                    bool sealGit=args[3]=="tunnel_sealed_git";
-                    bool sealDependencies=args[3]=="tunnel_sealed" || sealGit;
+                    bool sealGit=args[3]=="tunnel_sealed_git" || args[3]=="mcp_sealed_git";
+                    bool sealDependencies=args[3]=="tunnel_sealed" || args[3]=="mcp_sealed" || sealGit;
                     bool protectedSource=args[3]=="tunnel_protected" || sealDependencies;
                     string sealedDependencies=null, sealedTools=null, sealedGit=null, gitTree=null, sealedGitExecPath=null;
-                    bool fullMcp=args[3]=="mcp";
+                    bool fullMcp=args[3]=="mcp" || args[3]=="mcp_sealed" || args[3]=="mcp_sealed_git";
                     string suite=fullMcp?"mcp":"mcp_tunnel";
                     // Fixed native Node entry only; no candidate-defined command or supervisor credential.
                     var guest=Path.Combine(root,"guest");
