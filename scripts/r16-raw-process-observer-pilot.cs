@@ -324,9 +324,28 @@ internal static class Program {
             if(!directory && !seenDefault) throw new InvalidOperationException("DEPENDENCY_DEFAULT_STREAM_MISSING");
         } finally { Require(FindClose(handle),"dependency_stream_close"); }
     }
+    sealed class LinkGroup {
+        public uint expected;
+        public uint seen;
+        public string hash;
+    }
     sealed class TreeBudget {
         public int count;
         public long bytes;
+        // Null for dependency and destination validation. Enabled only for
+        // copying the installed Git tree into new single-link objects.
+        public Dictionary<string,LinkGroup> installedLinks;
+    }
+    static void RecordInstalledLink(TreeBudget budget,FileIdentity info,string hash) {
+        if(info.links<2) return;
+        string key=info.volume.ToString("X8")+":"+info.indexHigh.ToString("X8")+info.indexLow.ToString("X8");
+        LinkGroup group;
+        if(!budget.installedLinks.TryGetValue(key,out group)) {
+            group=new LinkGroup {expected=info.links,hash=hash};
+            budget.installedLinks.Add(key,group);
+        }
+        if(group.expected!=info.links || group.hash!=hash || ++group.seen>group.expected)
+            throw new InvalidOperationException("GIT_INSTALLED_LINK_GROUP_CHANGED");
     }
     static void CheckRegular(string p,bool directory) {
         var a=File.GetAttributes(p);
@@ -361,7 +380,7 @@ internal static class Program {
             using(var input=new FileStream(p,FileMode.Open,FileAccess.Read,FileShare.Read)) {
                 FileIdentity info;
                 Require(GetFileInformationByHandle(input.SafeFileHandle,out info),"dependency_file_identity");
-                if(info.links!=1 || (info.attributes&0x400)!=0) {
+                if(info.links==0 || (info.links!=1 && budget.installedLinks==null) || (info.attributes&0x400)!=0) {
                     var error=new InvalidOperationException("DEPENDENCY_UNSUPPORTED_FILE_IDENTITY");
                     // Relative path encoded so that it cannot inject log lines.
                     error.Data["tree_identity_detail"]="relative_base64="+Convert.ToBase64String(Encoding.UTF8.GetBytes(rel))
@@ -373,6 +392,7 @@ internal static class Program {
                 if(budget.bytes>4L*1024*1024*1024) throw new InvalidOperationException("DEPENDENCY_BYTE_BUDGET");
                 string hash;
                 using(var h=SHA256.Create()) hash=BitConverter.ToString(h.ComputeHash(input)).Replace("-","").ToLowerInvariant();
+                if(budget.installedLinks!=null) RecordInstalledLink(budget,info,hash);
                 if(dst!=null) {
                     input.Position=0;
                     using(var output=new FileStream(dst,FileMode.CreateNew,FileAccess.Write,FileShare.None)) input.CopyTo(output);
@@ -386,6 +406,21 @@ internal static class Program {
         ReadTree(from,to,"",m,budget,0);
         if(budget.count<2 || budget.bytes<1) throw new InvalidOperationException("DEPENDENCY_EMPTY_TREE");
         return HashBytes(Encoding.UTF8.GetBytes(m.ToString()));
+    }
+    static string CopyInstalledGitTree(string from,string to) {
+        if(String.IsNullOrEmpty(to)) throw new InvalidOperationException("GIT_COPY_DESTINATION_REQUIRED");
+        var m=new StringBuilder();
+        var budget=new TreeBudget {installedLinks=new Dictionary<string,LinkGroup>(StringComparer.Ordinal)};
+        ReadTree(from,to,"",m,budget,0);
+        if(budget.count<2 || budget.bytes<1) throw new InvalidOperationException("DEPENDENCY_EMPTY_TREE");
+        // Every link must have been enumerated inside this tree. Reject
+        // external aliases, changed link counts or inconsistent file bytes.
+        foreach(var pair in budget.installedLinks)
+            if(pair.Value.seen!=pair.Value.expected)
+                throw new InvalidOperationException("GIT_INSTALLED_EXTERNAL_HARDLINK");
+        var digest=HashBytes(Encoding.UTF8.GetBytes(m.ToString()));
+        if(TreeDigest(to,null)!=digest) throw new InvalidOperationException("GIT_TOOLCHAIN_COPY_MISMATCH");
+        return digest;
     }
     static string SealPreparedTree(string root,string source) {
         var deps=Path.Combine(source,"node_modules");
@@ -464,7 +499,7 @@ internal static class Program {
                         sealedGitExecPath=Path.GetFullPath(Path.Combine(gitTree,relativeExec));
                         if(!sealedGitExecPath.StartsWith(gitTree+"\\",StringComparison.OrdinalIgnoreCase))
                             throw new InvalidOperationException("GIT_TOOLCHAIN_EXEC_PATH_INVALID");
-                        var before=TreeDigest(installed,gitTree);
+                        var before=CopyInstalledGitTree(installed,gitTree);
                         sealedGit=TreeDigest(gitTree,null);
                         if(before!=sealedGit) throw new InvalidOperationException("GIT_TOOLCHAIN_COPY_MISMATCH");
                         log.WriteLine("COPIED_GIT_TOOLCHAIN_SHA256="+sealedGit);
