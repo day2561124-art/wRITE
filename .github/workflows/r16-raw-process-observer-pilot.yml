@@ -29,7 +29,7 @@ jobs:
       - uses: actions/checkout@v7
         if: matrix.mode == 'tunnel'
         with:
-          ref: 6c958a963a68c1a2e0a91fc0c239ae415c37882b
+          ref: 66b6e755db387e7a31be6f968978ff475b7f21c8
           path: candidate-tunnel
           persist-credentials: false
       - uses: actions/setup-node@v7
@@ -83,7 +83,7 @@ jobs:
             Native-OK 'Guest directory ACL'
             [IO.File]::WriteAllText((Join-Path $root 'sentinel.txt'),'synthetic-protected-sentinel')
             if ($env:OBSERVER_MODE -eq 'tunnel') {
-              $candidate = '6c958a963a68c1a2e0a91fc0c239ae415c37882b'
+              $candidate = '66b6e755db387e7a31be6f968978ff475b7f21c8'
               $input = Join-Path $env:GITHUB_WORKSPACE 'candidate-tunnel'
               if ((git -C $input rev-parse HEAD).Trim() -cne $candidate) { throw 'Candidate identity mismatch' }
               Native-OK 'Candidate identity'
