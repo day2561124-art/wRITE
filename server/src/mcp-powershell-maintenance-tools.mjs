@@ -332,9 +332,22 @@ async function runPowerShellProcessObserved({
       moduleCacheRoot = await mkdtemp(path.join(os.tmpdir(), "nexa-ps-module-cache-"));
       psEnvironment.PSModuleAnalysisCachePath = path.join(moduleCacheRoot, "ModuleAnalysisCache");
     }
+    // Load only the two commonly used inbox modules by absolute manifest
+    // path. This avoids the measured cold command-discovery stall without
+    // copying an externally supplied cache or disabling module autoloading.
+    // Preserve the caller's command text and original command hash.
+    const nativeCommand = process.platform === "win32" ? [
+      "try {",
+      ...["Microsoft.PowerShell.Utility", "Microsoft.PowerShell.Management"].map(name =>
+        "Microsoft.PowerShell.Core\\Import-Module ([IO.Path]::Combine($PSHOME,'Modules','" + name + "','" + name + ".psd1')) -ErrorAction Stop;"),
+      "} catch { [Console]::Error.WriteLine('NEXA_SYSTEM_MODULE_IMPORT_FAILED'); exit 1 }",
+      "& {",
+      command,
+      "}",
+    ].join("\r\n") : command;
     child = spawnImpl(
       "powershell.exe",
-      ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+      ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", nativeCommand],
       {
         cwd,
         env: controlledProcessEnvironment(psEnvironment),
