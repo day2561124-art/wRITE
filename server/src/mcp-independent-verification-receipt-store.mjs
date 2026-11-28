@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import { open, lstat, realpath, link, unlink, readdir } from "node:fs/promises";
 import path from "node:path";
 import { reviewIndependentVerification } from "./mcp-independent-verification-evidence.mjs";
+import { createIndependentTestOutcomeObserver } from "./mcp-independent-verification-outcome.mjs";
 
 // Fixed host-owned filesystem exchange. Host installation must independently
 // verify the issuer-only writer ACL and consumer read-only ACL. Neither an
@@ -229,5 +230,94 @@ export function createIndependentReceiptPublisher({ root, assertProtectedDirecto
     await verify();
     return Object.freeze({ published: true, created, execution_authorized: false,
       receipt_sha256: proof.receipt_sha256, expires_at_ms: proof.expires_at_ms });
+  };
+}
+
+
+// Supervisor-owned writer counterpart to the protected outcome reader. This
+// is NOT an adapter from CI logs or provider conclusions. Only the enrolled
+// supervisor's separately trusted raw observation source can supply facts.
+// No caller-supplied binding, exit code, arbitrary filename or key enrollment.
+export function createIndependentOutcomeAttestationPublisher({
+  root, assertProtectedDirectory, repository, supervisor, pinnedSupervisorKey,
+  pinnedIssuerKey, readObservation, signPayload, maxAgeMs, ttlMs, clock=Date.now
+}={}) {
+  const store=boundary({root,assertProtectedDirectory,role:"outcome_supervisor"});
+  if (typeof readObservation!=="function" || typeof signPayload!=="function"
+    || typeof clock!=="function" || !Number.isSafeInteger(ttlMs) || ttlMs<1
+    || !Number.isSafeInteger(maxAgeMs) || ttlMs>maxAgeMs)
+    fail("INDEPENDENT_OUTCOME_PUBLISHER_HOST_UNBOUND");
+  const observerOptions={repository,supervisor,pinnedSupervisorKey,pinnedIssuerKey,maxAgeMs,clock};
+  // Validate distinct Ed25519 identities before accessing any observation.
+  createIndependentTestOutcomeObserver({...observerOptions,readAttestation:async()=>fail("INDEPENDENT_OUTCOME_SOURCE_UNAVAILABLE")});
+  const keys=["execution_ok","passed","timed_out","skipped","exit_code"];
+  const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+  function observation(value) {
+    if (!exact(value,["binding","outcome"]) || !exact(value.outcome,keys)
+      || keys.slice(0,4).some(k=>typeof value.outcome[k]!=="boolean")
+      || !(value.outcome.exit_code===null || (Number.isInteger(value.outcome.exit_code)
+        && value.outcome.exit_code>=-2147483648 && value.outcome.exit_code<=4294967295))
+      || (value.outcome.passed && (!value.outcome.execution_ok || value.outcome.timed_out
+        || value.outcome.skipped || value.outcome.exit_code!==0)))
+      fail("INDEPENDENT_OUTCOME_RESULT_INVALID");
+    const name=independentOutcomeAttestationFilename(value.binding);
+    return {name,binding:Object.fromEntries(outcomeBindingFields.map(k=>[k,value.binding[k]])),
+      outcome:Object.fromEntries(keys.map(k=>[k,value.outcome[k]]))};
+  }
+  return async function publish(observationId) {
+    if (typeof observationId!=="string" || !/^[A-Za-z0-9_-]{1,128}$/u.test(observationId))
+      fail("INDEPENDENT_OUTCOME_OBSERVATION_ID_INVALID");
+    const current=async()=>observation(structuredClone(await readObservation(observationId)));
+    const first=await current(),directoryStat=await store.check(),now=clock();
+    if (!Number.isSafeInteger(now) || now<first.binding.completed_at_ms
+      || now-first.binding.completed_at_ms>=maxAgeMs) fail("INDEPENDENT_OUTCOME_EXPIRED");
+    const verify=async envelope=>{
+      const observe=createIndependentTestOutcomeObserver({...observerOptions,readAttestation:async()=>envelope});
+      const verified=await observe(first.binding);
+      if (!same(Object.fromEntries(keys.map(k=>[k,verified[k]])),first.outcome))
+        fail("INDEPENDENT_OUTCOME_PUBLICATION_CONFLICT");
+    };
+    const fence=async()=>{
+      if (!same(first,await current()) || !sameStat(directoryStat,await store.check()))
+        fail("INDEPENDENT_OUTCOME_OBSERVATION_CHANGED");
+    };
+    // Identical already-published observations are idempotent, not re-signed.
+    // Expired or conflicting existing records are not overwritten or renewed.
+    try {
+      const prior=await readEnvelopeFile(store,first.name,100*1024);
+      await verify(prior);await fence();
+      return Object.freeze({published:true,created:false,execution_authorized:false,
+        attestation_sha256:createHash("sha256").update(JSON.stringify(prior)).digest("hex")});
+    } catch(error) { if(error?.code!=="ENOENT") throw error; }
+    const expires=Math.min(now+ttlMs,first.binding.completed_at_ms+maxAgeMs);
+    const payload=JSON.stringify({schema_version:1,supervisor,repository,binding:first.binding,
+      observed_at_ms:now,expires_at_ms:expires,outcome:first.outcome});
+    const signature=await signPayload(Buffer.from(payload,"utf8"));
+    if (!Buffer.isBuffer(signature)||signature.length!==64) fail("INDEPENDENT_OUTCOME_SIGNATURE_INVALID");
+    const envelope={payload,signature:signature.toString("base64url")};
+    await verify(envelope);await fence();
+    const filename=path.join(store.directory,first.name);
+    const temporary=path.join(store.directory,"."+first.name+"."+randomUUID()+".tmp");
+    const handle=await open(temporary,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL,0o640);
+    let created=false;
+    try {
+      try { await handle.writeFile(JSON.stringify(envelope));await handle.sync(); }
+      finally { await handle.close(); }
+      await fence();await verify(envelope);
+      try { await link(temporary,filename);created=true; }
+      catch(error) { if(error?.code!=="EEXIST") throw error; }
+    } finally { await unlink(temporary); }
+    if (process.platform!=="win32") {
+      const dirHandle=await open(store.directory,constants.O_RDONLY);
+      try {await dirHandle.sync();} finally {await dirHandle.close();}
+    }
+    await fence();
+    const stored=await readEnvelopeFile(store,first.name,100*1024);
+    await verify(stored);await fence();
+    // If another writer won the atomic publication, validate the exact same
+    // binding and outcome; never assert that our own signature was stored.
+    if (created && !same(stored,envelope)) fail("INDEPENDENT_OUTCOME_PUBLICATION_CONFLICT");
+    return Object.freeze({published:true,created,execution_authorized:false,
+      attestation_sha256:createHash("sha256").update(JSON.stringify(stored)).digest("hex")});
   };
 }
