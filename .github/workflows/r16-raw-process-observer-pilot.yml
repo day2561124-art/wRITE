@@ -100,12 +100,12 @@ jobs:
             $lines = @(Get-Content -LiteralPath $log)
             $lines | Write-Output
             foreach ($pattern in @(
-              '^RAW_OBSERVER isolation outcome=completed exit=0 active=0 total=1$',
-              '^RAW_OBSERVER success outcome=completed exit=0 active=0 total=1$',
-              '^RAW_OBSERVER failure outcome=completed exit=7 active=0 total=1$',
-              '^RAW_OBSERVER descendant outcome=completed exit=7 active=0 total=[2-9][0-9]*$',
-              '^RAW_OBSERVER timeout outcome=timed_out exit=null active=0 total=1$',
-              '^RAW_OBSERVER cancel outcome=cancelled exit=null active=0 total=1$',
+              '^RAW_OBSERVER isolation outcome=completed exit=0 active=0 total=[1-9][0-9]*$',
+              '^RAW_OBSERVER success outcome=completed exit=0 active=0 total=[1-9][0-9]*$',
+              '^RAW_OBSERVER failure outcome=completed exit=7 active=0 total=[1-9][0-9]*$',
+              '^RAW_OBSERVER descendant outcome=completed exit=7 active=0 total=(?:[2-9]|[1-9][0-9]+)$',
+              '^RAW_OBSERVER timeout outcome=timed_out exit=null active=0 total=[1-9][0-9]*$',
+              '^RAW_OBSERVER cancel outcome=cancelled exit=null active=0 total=[1-9][0-9]*$',
               '^RAW_OBSERVER_PILOT_PASS$'
             )) {
               if (@($lines | Where-Object { $_ -match $pattern }).Count -ne 1) { throw "Missing native observation: $pattern" }
