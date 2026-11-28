@@ -49,3 +49,68 @@ test("independent process attestation requires a distinct supervisor key and exa
   await assert.rejects(createIndependentTestOutcomeObserver({...opts,readAttestation:async()=>{throw Error("untrusted detail");}})(binding),
     {code:"INDEPENDENT_OUTCOME_SOURCE_UNAVAILABLE"});
 });
+
+
+test("protected supervisor publishes actual fixture process outcomes once, preserves failures and rejects drift",async t=>{
+  const {mkdtemp,rm,readdir,readFile}=await import("node:fs/promises");
+  const {default:os}=await import("node:os");
+  const {default:path}=await import("node:path");
+  const {spawnSync}=await import("node:child_process");
+  const {createIndependentOutcomeAttestationPublisher,createIndependentOutcomeAttestationReader,
+    independentOutcomeAttestationFilename}=await import("../../server/src/mcp-independent-verification-receipt-store.mjs");
+  const root=await mkdtemp(path.join(os.tmpdir(),"r16-outcome-publish-"));
+  t.after(()=>rm(root,{recursive:true,force:true}));
+  const {realpath}=await import("node:fs/promises");
+  const directory=await realpath(root);
+  const supervisor=generateKeyPairSync("ed25519"),issuer=generateKeyPairSync("ed25519");
+  const now=1795755600000;
+  let time=now,allowed=true,signs=0,reads=0,mutate=false;
+  const records=new Map();
+  function fixture(id,code,attempt) {
+    const child=spawnSync(process.execPath,["-e","process.exit("+code+")"],{timeout:15000,windowsHide:true});
+    assert.equal(child.error,undefined);assert.equal(child.signal,null);assert.equal(child.status,code);
+    const binding={suite:"fixture",platform:process.platform==="win32"?"windows":"linux",
+      workflow_sha256:"1".repeat(64),commit:"2".repeat(40),run_id:111,job_id:222,
+      run_attempt:attempt,completed_at_ms:now-1000};
+    records.set(id,{binding,outcome:{execution_ok:true,passed:child.status===0,
+      timed_out:false,skipped:false,exit_code:child.status}});
+    return binding;
+  }
+  const good=fixture("success",0,1),bad=fixture("failure",7,2),drift=fixture("drift",0,3);
+  const assertProtectedDirectory=async a=>allowed&&a.directory===directory
+    &&["outcome_supervisor","outcome_consumer"].includes(a.role);
+  const opts={root:directory,assertProtectedDirectory,repository:"owner/disposable",supervisor:"fixture-supervisor",
+    pinnedSupervisorKey:supervisor.publicKey,pinnedIssuerKey:issuer.publicKey,maxAgeMs:60000,ttlMs:10000,clock:()=>time,
+    readObservation:async id=>{reads++;const v=structuredClone(records.get(id));if(mutate&&reads>1)v.outcome.passed=false;return v;},
+    signPayload:async payload=>{signs++;return sign(null,payload,supervisor.privateKey);}};
+  const publish=createIndependentOutcomeAttestationPublisher(opts);
+  const observe=createIndependentTestOutcomeObserver({...opts,
+    readAttestation:createIndependentOutcomeAttestationReader({root:directory,assertProtectedDirectory})});
+  assert.throws(()=>createIndependentOutcomeAttestationPublisher({...opts,pinnedIssuerKey:supervisor.publicKey}),/KEY_INVALID/);
+  await assert.rejects(publish({...good,exit_code:0}),/OBSERVATION_ID_INVALID/);
+  assert.equal(signs,0);
+  const result=await publish("success");
+  assert.equal(result.created,true);assert.equal(result.execution_authorized,false);
+  const name=independentOutcomeAttestationFilename(good),bytes=await readFile(path.join(directory,name));
+  assert.equal((await observe(good)).exit_code,0);
+  time+=100;
+  assert.equal((await publish("success")).created,false);assert.equal(signs,1);
+  assert.deepEqual(await readFile(path.join(directory,name)),bytes);
+  await publish("failure");
+  assert.equal((await observe(bad)).exit_code,7);assert.equal((await observe(bad)).passed,false);
+  records.get("success").outcome.passed=false;
+  await assert.rejects(publish("success"),/PUBLICATION_CONFLICT/);
+  assert.deepEqual(await readFile(path.join(directory,name)),bytes);
+  allowed=false;
+  await assert.rejects(publish("drift"),/DIRECTORY_UNVERIFIED/);
+  allowed=true;mutate=true;reads=0;
+  await assert.rejects(publish("drift"),/OBSERVATION_CHANGED/);
+  assert.ok(!(await readdir(directory)).includes(independentOutcomeAttestationFilename(drift)));
+  mutate=false;
+  const wrong=createIndependentOutcomeAttestationPublisher({...opts,signPayload:async payload=>sign(null,payload,issuer.privateKey)});
+  await assert.rejects(wrong("drift"),/SIGNATURE_INVALID/);
+  assert.equal((await readdir(directory)).length,2);
+  time=now+10001;
+  await assert.rejects(publish("success"),/EXPIRED/);
+  assert.deepEqual(await readFile(path.join(directory,name)),bytes);
+});
