@@ -53,6 +53,7 @@ for (const command of [
 }
 
 const tempRoot = await mkdtemp(path.join(os.tmpdir(), "ww-powershell-maintenance-"));
+let primaryError;
 try {
   const journalEvents = [];
   const fakeJournal = {
@@ -268,7 +269,7 @@ try {
       ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", runnerPath, "-ConfigPath", configPath],
       { cwd: rootDir, encoding: "utf8", windowsHide: true, timeout: 15_000 },
     );
-    assert.equal(runner.status, 0, runner.stderr);
+    assert.equal(runner.status, 0, runner.error?.code ?? runner.stderr);
     const runnerResult = JSON.parse(await readFile(
       path.join(runnerStateRoot, "results", `${requestId}.result.json`),
       "utf8",
@@ -300,8 +301,16 @@ try {
   );
   assert.match(registrationScript, /LogonType Interactive/u);
   assert.doesNotMatch(registrationScript, /EnableLUA|ConsentPromptBehaviorAdmin|PromptOnSecureDesktop/u);
+} catch (error) {
+  primaryError = error;
+  throw error;
 } finally {
-  await rm(tempRoot, { recursive: true, force: true });
+  try {
+    await rm(tempRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  } catch (cleanupError) {
+    if (primaryError) throw new AggregateError([primaryError, cleanupError], "Maintenance assertion and fixture cleanup both failed");
+    throw cleanupError;
+  }
 }
 
 await import("./mcp-powershell-admin-native-exit.test.mjs");
