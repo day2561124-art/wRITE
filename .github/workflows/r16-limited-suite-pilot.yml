@@ -52,6 +52,8 @@ jobs:
           $task = "NexaSuiteTask-$suffix"
           $createdUser = $false
           $createdTask = $false
+          $createdProvisioner = $false
+          $provisionTask = 'WriterWorkbench-NexaStationLeaseV1'
           $batchPolicyChanged = $false
           $source = Join-Path $root 'source'
           $tools = Join-Path $root 'tools'
@@ -119,6 +121,26 @@ jobs:
             foreach ($dir in @($source,$run)) {
               icacls $dir /grant:r "*${sid}:(OI)(CI)(M)" | Out-Null
               Native-OK 'Fixture writable guest ACL'
+            }
+            # Install the already-reviewed provider from the pinned merged
+            # baseline, never from the candidate's writable checkout.
+            if ($env:SUITE -eq 'mcp') {
+              $trusted = Join-Path $root 'trusted-station'
+              $archive = Join-Path $root 'trusted-station.zip'
+              $baseline = '3abf37d67959bc264195f5882297fcf68c447b58'
+              git -C "$env:GITHUB_WORKSPACE" archive --format=zip --output=$archive $baseline scripts/register-mcp-session0-station-lease.ps1 scripts/mcp-session0-station-lease-provider.cs
+              Native-OK 'Pinned station provider archive'
+              Expand-Archive -LiteralPath $archive -DestinationPath $trusted
+              $provider = Join-Path $trusted 'scripts\mcp-session0-station-lease-provider.cs'
+              $installer = Join-Path $trusted 'scripts\register-mcp-session0-station-lease.ps1'
+              $hash = (Get-FileHash -LiteralPath $provider -Algorithm SHA256).Hash
+              $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+              $receipt = & $ps -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File $installer -DispatcherAccount $account -ExpectedSourceSha256 $hash
+              Native-OK 'Protected station provider installation'
+              $createdProvisioner = $true
+              $installed = ($receipt | Out-String).Trim() | ConvertFrom-Json
+              if (!$installed.installed -or $installed.started -or $installed.dispatcher_sid -ne $sid -or $installed.source_sha256 -ne $hash) { throw 'Station installation identity mismatch' }
+              Write-Output "LIMITED_STATION_BASELINE=$baseline; SHA256=$hash"
             }
             # Git safe.directory relies on ownership, not only ACL permission.
             icacls $source /setowner "*$sid" /T /Q | Out-Null
@@ -235,7 +257,14 @@ jobs:
               }
             } finally {
               try {
-                if ($batchPolicyChanged) { Set-FixtureBatchRight $originalBatch 'fixture-batch-restore' }
+                try {
+                  if ($createdProvisioner) {
+                    Stop-ScheduledTask -TaskName $provisionTask -ErrorAction SilentlyContinue
+                    Unregister-ScheduledTask -TaskName $provisionTask -Confirm:$false
+                  }
+                } finally {
+                  if ($batchPolicyChanged) { Set-FixtureBatchRight $originalBatch 'fixture-batch-restore' }
+                }
               } finally {
                 if ($createdUser) { Remove-LocalUser -Name $account }
               }
