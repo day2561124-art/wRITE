@@ -300,6 +300,9 @@ internal static class Program {
                     var entry=Path.Combine(source,fullMcp?@"tests\tools\mcp-contract.test.mjs":@"tests\mcp-tunnel-launcher.test.mjs");
                     var windows=Environment.GetFolderPath(Environment.SpecialFolder.Windows);
                     var system=Path.Combine(windows,"System32");
+                    var programFiles=Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+                    var commonData=Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+                    if(!Path.IsPathRooted(programFiles)||!Directory.Exists(programFiles)||!Path.IsPathRooted(commonData)||!Directory.Exists(commonData)) throw new InvalidOperationException("SYSTEM_DIRECTORY_IDENTITY_MISSING");
                     var git=File.ReadAllText(Path.Combine(root,"git-dir.txt")).Trim();
                     if(!Path.IsPathRooted(git) || !File.Exists(Path.Combine(git,"git.exe")) || !File.Exists(node) || !File.Exists(npm) || !File.Exists(entry)) throw new InvalidOperationException("FIXTURE_INPUT_MISSING");
                     // A batch token does not load the user's registry hive by itself.
@@ -320,7 +323,7 @@ internal static class Program {
                         {"APPDATA",Path.Combine(profile,"AppData","Roaming")},{"CI","1"},{"COMSPEC",Path.Combine(system,"cmd.exe")},
                         {"GIT_CONFIG_GLOBAL","NUL"},{"GIT_CONFIG_NOSYSTEM","1"},{"GIT_TERMINAL_PROMPT","0"},{"HOME",profile},{"LOCALAPPDATA",Path.Combine(profile,"AppData","Local")},
                         {"PSModuleAnalysisCachePath",cache},{"PSModulePath",Path.Combine(system,@"WindowsPowerShell\v1.0\Modules")},{"NPM_CONFIG_CACHE",Path.Combine(scratch,"npm-cache")},{"PATH",tools+";"+git+";"+system+";"+Path.Combine(system,@"WindowsPowerShell\v1.0")},{"PATHEXT",".COM;.EXE;.BAT;.CMD"},
-                        {"SystemDrive",Path.GetPathRoot(windows).TrimEnd('\\')},{"SystemRoot",windows},{"TEMP",scratch},{"TMP",scratch},{"USERPROFILE",profile},{"WINDIR",windows},
+                        {"ProgramFiles",programFiles},{"ProgramW6432",programFiles},{"ProgramData",commonData},{"SystemDrive",Path.GetPathRoot(windows).TrimEnd('\\')},{"SystemRoot",windows},{"TEMP",scratch},{"TMP",scratch},{"USERPROFILE",profile},{"WINDIR",windows},
                         {"WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL","1"},{"WRITER_WORKBENCH_ISOLATED_TEST_CHECKPOINT","1"},{"WRITER_WORKBENCH_ISOLATED_TEST_TRANSACTION","1"}
                     };
                     var block=new StringBuilder(); foreach(var item in env) block.Append(item.Key+"="+item.Value+"\0"); block.Append("\0");
