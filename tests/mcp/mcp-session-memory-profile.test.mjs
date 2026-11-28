@@ -18,7 +18,12 @@ const windowsOnly=process.platform==='win32'?{}:{skip:'Windows PowerShell profil
 async function until(check,label,timeout=10000){const end=Date.now()+timeout;while(Date.now()<end){const value=await check();if(value)return value;await sleep(25);}throw Error(label);}
 const exists=async file=>readFile(file,'utf8').then(JSON.parse,e=>{if(e.code!=='ENOENT')throw e;return null;});
 function cleanEnvironment(){const env={...process.env};for(const key of Object.keys(env))if(key.startsWith('WRITER_WORKBENCH_ISOLATED_TEST_')||key==='WRITER_WORKBENCH_TEST_JOURNAL_GROUP')delete env[key];return env;}
-function encodedPowerShell(script){return exec('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],{windowsHide:true,timeout:15000,maxBuffer:1024*1024,env:controlledProcessEnvironment()});}
+function encodedPowerShell(script){
+ // Use the same fixed inbox module manifests as the maintenance runner;
+ // keep real profile and process-memory observations, and original deadline.
+ const bootstrap=['Microsoft.PowerShell.Utility','Microsoft.PowerShell.Management'].map(name=>`Microsoft.PowerShell.Core\\Import-Module ([IO.Path]::Combine($PSHOME,'Modules','${name}','${name}.psd1')) -ErrorAction Stop;`).join('');
+ return exec('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(bootstrap+script,'utf16le').toString('base64')],{windowsHide:true,timeout:15000,maxBuffer:1024*1024,env:controlledProcessEnvironment()});
+}
 async function profile(){const file=path.join(source,'config/mcp-session-memory-profile.json').replaceAll("'","''");
  const {stdout}=await encodedPowerShell(`$ErrorActionPreference='Stop';$env:MCP_HTTP_MAX_TOTAL_SESSION_COUNT='23';$sessionProfile=Get-Content -LiteralPath '${file}' -Raw|ConvertFrom-Json;$env:MCP_HTTP_SESSION_IDLE_TIMEOUT_MS=[string]$sessionProfile.MCP_HTTP_SESSION_IDLE_TIMEOUT_MS;$env:MCP_HTTP_MAX_IDLE_SESSION_COUNT=[string]$sessionProfile.MCP_HTTP_MAX_IDLE_SESSION_COUNT;[ordered]@{MCP_HTTP_SESSION_IDLE_TIMEOUT_MS=$env:MCP_HTTP_SESSION_IDLE_TIMEOUT_MS;MCP_HTTP_MAX_IDLE_SESSION_COUNT=$env:MCP_HTTP_MAX_IDLE_SESSION_COUNT;total=$env:MCP_HTTP_MAX_TOTAL_SESSION_COUNT}|ConvertTo-Json -Compress`);
  return JSON.parse(stdout.trim());}
@@ -27,6 +32,9 @@ async function freePort(){const server=net.createServer();await new Promise((r,j
 function facts(raw){if(raw.error)throw Error(JSON.stringify(raw.error));const result=raw.result??raw;if(result.isError)throw Error(result.content?.[0]?.text??'MCP_ERROR');return result.structuredContent??JSON.parse(result.content.find(c=>c.type==='text').text);}
 async function fixture(t,environment={},seed=false){
  const container=await mkdtemp(path.join(os.tmpdir(),'mcp-memory-')),repo=path.join(container,'repo');await mkdir(repo);
+ // Register cleanup before any fixture Git work can fail.
+ let runtimeOwnsCleanup=false;
+ t.after(async()=>{if(!runtimeOwnsCleanup)await rm(container,{recursive:true,force:true});});
  const control=path.join(repo,'test-control');await mkdir(control);
  for(const dir of ['server','scripts'])await cp(path.join(source,dir),path.join(repo,dir),{recursive:true,filter:p=>!['node_modules','.tmp'].includes(path.basename(p))});
  // Real HTTP startup now requires the versioned profile. Keep the fixture
@@ -80,6 +88,7 @@ async function fixture(t,environment={},seed=false){
  };
  const pid=session=>{const line=stderr.split(/\r?\n/).find(l=>l.includes('session initialized id='+session.id+' '));return Number(line?.match(/child_pid=(\d+)/)?.[1]);};
  const allPids=()=>[...new Set([...stderr.matchAll(/session initialized .*child_pid=(\d+)/g)].map(m=>Number(m[1])))];
+ runtimeOwnsCleanup=true;
  t.after(async()=>{
   // Release only our fixture gates so a failed assertion cannot strand a worker.
   await writeFile(path.join(control,'release-read'),'1');await writeFile(path.join(control,'release-worker'),'1');
