@@ -6,6 +6,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# The controlled Session 0 environment has no prebuilt command-discovery cache.
+# Load the inbox module containing JSON and event cmdlets directly.
+Microsoft.PowerShell.Core\Import-Module ([IO.Path]::Combine($PSHOME, 'Modules', 'Microsoft.PowerShell.Utility', 'Microsoft.PowerShell.Utility.psd1')) -ErrorAction Stop
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
 function Write-WatcherMessage {
