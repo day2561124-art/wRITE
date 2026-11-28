@@ -284,6 +284,46 @@ internal static class Program {
     }
     [DllImport("kernel32.dll",SetLastError=true)]
     static extern bool GetFileInformationByHandle(SafeFileHandle file,out FileIdentity identity);
+    // NTFS named data streams are not part of the ordinary file byte hash.
+    // Reject rather than silently omit them, including streams on directories.
+    [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)]
+    struct StreamData {
+        public long size;
+        [MarshalAs(UnmanagedType.ByValTStr,SizeConst=296)]
+        public string name;
+    }
+    [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
+    static extern IntPtr FindFirstStreamW(string path,int level,out StreamData data,uint flags);
+    [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
+    static extern bool FindNextStreamW(IntPtr handle,out StreamData data);
+    [DllImport("kernel32.dll",SetLastError=true)]
+    static extern bool FindClose(IntPtr handle);
+    static void CheckDataStreams(string path,bool directory) {
+        StreamData data;
+        var handle=FindFirstStreamW(path,0,out data,0);
+        if(handle==new IntPtr(-1)) {
+            int error=Marshal.GetLastWin32Error();
+            // Directories may have no default data stream. Other errors,
+            // including a filesystem without enumeration support, fail closed.
+            if(directory && error==38) return;
+            throw new Win32Exception(error,"dependency_stream_enumeration");
+        }
+        try {
+            bool seenDefault=false;
+            while(true) {
+                if(!String.Equals(data.name,"::$DATA",StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("DEPENDENCY_NAMED_DATA_STREAM");
+                if(seenDefault) throw new InvalidOperationException("DEPENDENCY_DUPLICATE_DATA_STREAM");
+                seenDefault=true;
+                if(!FindNextStreamW(handle,out data)) {
+                    int error=Marshal.GetLastWin32Error();
+                    if(error!=38) throw new Win32Exception(error,"dependency_stream_enumeration");
+                    break;
+                }
+            }
+            if(!directory && !seenDefault) throw new InvalidOperationException("DEPENDENCY_DEFAULT_STREAM_MISSING");
+        } finally { Require(FindClose(handle),"dependency_stream_close"); }
+    }
     sealed class TreeBudget {
         public int count;
         public long bytes;
@@ -299,6 +339,7 @@ internal static class Program {
     static void ReadTree(string from,string to,string relative,StringBuilder manifest,TreeBudget budget,int depth) {
         if(depth>100 || ++budget.count>200000) throw new InvalidOperationException("DEPENDENCY_TREE_BUDGET");
         CheckRegular(from,true);
+        CheckDataStreams(from,true);
         if(to!=null) {
             if(Directory.Exists(to)||File.Exists(to)) throw new InvalidOperationException("DEPENDENCY_COPY_COLLISION");
             Directory.CreateDirectory(to);
@@ -321,6 +362,7 @@ internal static class Program {
                 FileIdentity info;
                 Require(GetFileInformationByHandle(input.SafeFileHandle,out info),"dependency_file_identity");
                 if(info.links!=1 || (info.attributes&0x400)!=0) throw new InvalidOperationException("DEPENDENCY_UNSUPPORTED_FILE_IDENTITY");
+                CheckDataStreams(p,false);
                 budget.bytes=checked(budget.bytes+input.Length);
                 if(budget.bytes>4L*1024*1024*1024) throw new InvalidOperationException("DEPENDENCY_BYTE_BUDGET");
                 string hash;

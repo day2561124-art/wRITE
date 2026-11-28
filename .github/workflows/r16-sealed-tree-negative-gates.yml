@@ -79,6 +79,36 @@ jobs:
           Must-Reject $source 'DEPENDENCY_UNSUPPORTED_FILE_IDENTITY'
           [IO.File]::Delete($alias)
           if ((Digest $source) -cne $original) { throw 'Hardlink removal changed original' }
+          # PowerShell Remove-Item -Stream fails on directory streams on this
+          # runner. Use the native API on these exact synthetic fixture paths.
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class R16FixtureStream {
+              [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+              [return: MarshalAs(UnmanagedType.Bool)]
+              public static extern bool DeleteFileW(string name);
+          }
+          '@
+          function Remove-FixtureStream([string]$item,[string]$stream) {
+            if (![R16FixtureStream]::DeleteFileW($item + ':' + $stream)) {
+              throw [ComponentModel.Win32Exception]::new([Runtime.InteropServices.Marshal]::GetLastWin32Error())
+            }
+          }
+          # Ordinary bytes remain unchanged when a named stream is inserted.
+          # Both a file and a directory stream must fail closed.
+          Set-Content -LiteralPath $file -Stream 'r16-fixture' -Value 'named-data'
+          Must-Reject $source 'DEPENDENCY_NAMED_DATA_STREAM'
+          Remove-Item -LiteralPath $file -Stream 'r16-fixture'
+          if ((Digest $source) -cne $original) { throw 'File stream removal changed original' }
+          Set-Content -LiteralPath $nested -Stream 'r16-fixture' -Value 'named-directory-data'
+          Must-Reject $source 'DEPENDENCY_NAMED_DATA_STREAM'
+          Remove-FixtureStream $nested 'r16-fixture'
+          if ((Digest $source) -cne $original) { throw 'Directory stream removal changed original' }
+          Set-Content -LiteralPath $source -Stream 'r16-root-fixture' -Value 'named-root-data'
+          Must-Reject $source 'DEPENDENCY_NAMED_DATA_STREAM'
+          Remove-FixtureStream $source 'r16-root-fixture'
+          if ((Digest $source) -cne $original) { throw 'Root stream removal changed original' }
           $outside = Join-Path $root 'outside'
           $null = New-Item -ItemType Directory -Path $outside
           $sentinel = Join-Path $outside 'sentinel.txt'
