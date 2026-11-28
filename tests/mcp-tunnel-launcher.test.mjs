@@ -14,7 +14,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { terminateProcessTree } from "../server/src/process-control.mjs";
+import { redactProcessOutput, terminateProcessTree } from "../server/src/process-control.mjs";
 import {createTestOAuthCredentials,testOAuthEnvironment,createTestProbeCredentialFile} from './mcp/fixtures/workbench-http-test-security.mjs';
 import {authenticateProbeRequest} from '../scripts/probe-mcp-credentials.mjs';
 
@@ -1649,6 +1649,32 @@ async function main() {
     console.log("MCP tunnel launcher integration tests passed.");
     console.log("- Launcher default MCP HTTP profile: chatgpt_developer (107 tools: 106 child-owned plus parent-owned dev_mcp_reload)");
     console.log("- External MCP_TOOL_PROFILE override: chatgpt_public (40 tools, development write/test/PowerShell tools absent)");
+  } catch (error) {
+    // Preserve bounded, redacted diagnostics before this owned fixture is removed.
+    // These logs are for compatibility debugging, not trusted verification evidence.
+    try {
+      const dir = path.join(fixtureDir, "quic-logs");
+      const files = (await readdir(dir)).filter(name =>
+        /^mcp-http\.[0-9-]+\.(?:stdout|stderr)\.log$/u.test(name)).sort().slice(-4);
+      const { lstat, open } = await import("node:fs/promises");
+      for (const name of files) {
+        const file = path.join(dir, name);
+        const info = await lstat(file);
+        if (!info.isFile() || info.isSymbolicLink()) continue;
+        const handle = await open(file, "r");
+        try {
+          const size = Math.min(info.size, 4096);
+          const bytes = Buffer.alloc(size);
+          const { bytesRead } = await handle.read(bytes, 0, size, info.size - size);
+          const diagnostic = redactProcessOutput(bytes.subarray(0, bytesRead).toString("utf8")
+            .split(httpCredentials.proof).join("[REDACTED FIXTURE PROOF]"));
+          console.error("Owned MCP fixture diagnostic " + name + ": " + diagnostic);
+        } finally { await handle.close(); }
+      }
+    } catch (diagnosticError) {
+      console.error("Owned MCP fixture diagnostic unavailable: " + (diagnosticError.code ?? "UNKNOWN"));
+    }
+    throw error;
   } finally {
     if (!serverClosed) await new Promise((resolve) => server.close(resolve));
     try {
