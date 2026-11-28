@@ -263,11 +263,15 @@ try {
     );
 
     const runnerPath = path.join(rootDir, "scripts", "mcp-powershell-admin-runner.ps1");
+    // This outer fixture deadline includes cold Windows PowerShell startup,
+    // module loading, request admission, command execution and result publication.
+    // It is not the maintenance command deadline (timeout_ms: 5_000 above).
+    const runnerFixtureDeadlineMs = 60_000;
     const runnerStarted = Date.now();
     const runner = spawnSync(
       "powershell.exe",
       ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", runnerPath, "-ConfigPath", configPath],
-      { cwd: rootDir, encoding: "utf8", windowsHide: true, timeout: 15_000 },
+      { cwd: rootDir, encoding: "utf8", windowsHide: true, timeout: runnerFixtureDeadlineMs },
     );
     // Keep the original process deadline and success assertion. A null status
     // alone cannot distinguish an OS spawn failure, signal, or outer timeout.
@@ -277,12 +281,15 @@ try {
       error_code: runner.error?.code ?? null,
       error_message: runner.error?.message ?? null,
       elapsed_ms: Date.now() - runnerStarted,
+      fixture_deadline_ms: runnerFixtureDeadlineMs,
+      command_deadline_ms: 5_000,
       stdout: String(runner.stdout ?? "").slice(-2048),
       stderr: String(runner.stderr ?? "").slice(-2048),
       result_files: readdirSync(path.join(runnerStateRoot, "results")).sort(),
       request_files: readdirSync(path.join(runnerStateRoot, "requests")).sort(),
     };
     assert.equal(runner.status, 0, JSON.stringify(runnerDiagnostic));
+    console.log(`Admin runner fixture wall time: ${runnerDiagnostic.elapsed_ms}ms (outer deadline ${runnerFixtureDeadlineMs}ms, command deadline 5000ms).`);
     const runnerResult = JSON.parse(await readFile(
       path.join(runnerStateRoot, "results", `${requestId}.result.json`),
       "utf8",
