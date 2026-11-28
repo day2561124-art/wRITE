@@ -1,6 +1,7 @@
 name: R16 sealed full MCP observer pilot
 
-# Disposable feasibility only. Candidate PR workflows are not trusted issuers.
+# Disposable independent execution candidate. PR runs remain fixtures.
+# Manual main dispatch separates reviewed supervisor and exact candidate checkout.
 # No signing credentials, production grants, or attestation permissions.
 on:
   pull_request:
@@ -8,13 +9,20 @@ on:
     paths:
       - 'scripts/r16-raw-process-observer-pilot.cs'
       - '.github/workflows/r16-sealed-full-mcp-pilot.yml'
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: 'Exact 40-character committed candidate SHA (not branch or command)'
+        required: true
+        type: string
 permissions:
   contents: read
 concurrency:
-  group: r16-sealed-full-mcp-${{ github.event.pull_request.number }}
+  group: r16-sealed-full-mcp-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 jobs:
   observe:
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: windows-latest
     timeout-minutes: 80
     strategy:
@@ -22,14 +30,27 @@ jobs:
       matrix:
         mode: [mcp]
     steps:
+      - name: Resolve exact candidate and supervisor identity
+        id: identity
+        shell: pwsh
+        env:
+          REQUESTED_CANDIDATE: ${{ inputs.candidate_sha }}
+          SUPERVISOR_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $candidate=if($env:GITHUB_EVENT_NAME -eq 'pull_request'){'9ed113cfa7593d4deacdc33c8a94e07b16404bfd'}else{$env:REQUESTED_CANDIDATE}
+          if($candidate -cnotmatch '^[a-f0-9]{40}$' -or $env:SUPERVISOR_SHA -cnotmatch '^[a-f0-9]{40}$' -or $candidate -ceq $env:SUPERVISOR_SHA){throw 'Exact distinct candidate and supervisor commits required'}
+          if($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch' -and $env:GITHUB_REF -cne 'refs/heads/main'){throw 'Manual supervisor dispatch requires main'}
+          "candidate_sha=$candidate" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "supervisor_sha=$env:SUPERVISOR_SHA" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ steps.identity.outputs.supervisor_sha }}
           persist-credentials: false
       - uses: actions/checkout@v7
         if: matrix.mode == 'mcp'
         with:
-          ref: 9ed113cfa7593d4deacdc33c8a94e07b16404bfd
+          ref: ${{ steps.identity.outputs.candidate_sha }}
           path: candidate-mcp
           persist-credentials: false
       # Exact committed candidate includes the isolated reconciliation fixture;
@@ -48,12 +69,16 @@ jobs:
           node-version: '24.18.0'
           package-manager-cache: false
       - name: Exercise actual Session 0 process handles and protected observer
+        id: observer
         shell: pwsh
         env:
           OBSERVER_MODE: ${{ matrix.mode }}
+          EXACT_CANDIDATE: ${{ steps.identity.outputs.candidate_sha }}
+          EXACT_SUPERVISOR: ${{ steps.identity.outputs.supervisor_sha }}
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $false
+          if ((git -C $env:GITHUB_WORKSPACE rev-parse HEAD).Trim() -cne $env:EXACT_SUPERVISOR -or $LASTEXITCODE -ne 0) { throw 'Supervisor checkout identity mismatch' }
           $suffix = [guid]::NewGuid().ToString('N').Substring(0,12)
           $root = Join-Path $env:SystemDrive "NexaObserver-$suffix"
           $user = "NexaObs$suffix"
@@ -113,7 +138,7 @@ jobs:
             Native-OK 'Guest directory ACL'
             [IO.File]::WriteAllText((Join-Path $root 'sentinel.txt'),'synthetic-protected-sentinel')
             if ($env:OBSERVER_MODE -eq 'mcp') {
-              $candidate = '9ed113cfa7593d4deacdc33c8a94e07b16404bfd'
+              $candidate = $env:EXACT_CANDIDATE
               $input = Join-Path $env:GITHUB_WORKSPACE 'candidate-mcp'
               if ((git -C $input rev-parse HEAD).Trim() -cne $candidate) { throw 'Candidate identity mismatch' }
               Native-OK 'Candidate identity'
@@ -371,6 +396,38 @@ jobs:
               Write-Output 'SEALED_FULL_MCP_PILOT_PASS; OS_executable_closure=unverified; certification=none'
               if (Test-Path -LiteralPath (Join-Path $root 'password.txt')) { throw 'Temporary logon material remains' }
               if ([IO.File]::ReadAllText((Join-Path $root 'sentinel.txt')) -cne 'synthetic-protected-sentinel') { throw 'Sentinel changed' }
+              # The administrator/SYSTEM-only root owns the native observer
+              # log; candidate stdout/stderr is excluded from the handoff.
+              # This is a protected capture, NOT a signed attestation.
+              # GitHub job ID and completion timestamp are bound later.
+              $raw = [IO.File]::ReadAllBytes($log)
+              if ($raw.Length -lt 1 -or $raw.Length -gt 16384) { throw 'Invalid protected observation bytes' }
+              $rawLine = @($lines | Where-Object { $_ -match '^RAW_OBSERVER mcp outcome=completed exit=0 active=0 total=[1-9][0-9]*$' })
+              if ($rawLine.Count -ne 1 -or $rawLine[0] -notmatch '^RAW_OBSERVER mcp outcome=completed exit=(0) active=(0) total=([1-9][0-9]*)$') { throw 'Raw observation mismatch' }
+              $exitCode = [int]$Matches[1]
+              $active = [int]$Matches[2]
+              $total = [long]$Matches[3]
+              $handoff = Join-Path $root 'supervisor-capture.json'
+              $sha256 = [Security.Cryptography.SHA256]::Create()
+              try { $rawDigest = [BitConverter]::ToString($sha256.ComputeHash($raw)).Replace('-','').ToLowerInvariant() }
+              finally { $sha256.Dispose() }
+              $record = [ordered]@{
+                schema_version=1; repository=$env:GITHUB_REPOSITORY; repository_id=[long]$env:GITHUB_REPOSITORY_ID
+                supervisor_commit=$env:EXACT_SUPERVISOR; candidate_commit=$candidate
+                workflow_ref=$env:GITHUB_WORKFLOW_REF; workflow_sha=$env:GITHUB_WORKFLOW_SHA
+                run_id=[long]$env:GITHUB_RUN_ID; run_attempt=[int]$env:GITHUB_RUN_ATTEMPT
+                job_key=$env:GITHUB_JOB; suite='mcp'; platform='windows'
+                observed_at_ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+                native_exit_code=$exitCode; active_processes=$active; total_processes=$total
+                native_observer_source_sha256=(Get-FileHash -LiteralPath $src -Algorithm SHA256).Hash.ToLowerInvariant()
+                native_log_sha256=$rawDigest; native_log_base64=[Convert]::ToBase64String($raw)
+                postchecks_completed=$true; certification='none'; execution_authorized=$false
+              }
+              # The fresh file is outside the guest and prep-writable trees.
+              if (Test-Path -LiteralPath $handoff) { throw 'Unexpected existing supervisor capture' }
+              [IO.File]::WriteAllText($handoff,($record|ConvertTo-Json -Depth 4 -Compress),[Text.UTF8Encoding]::new($false))
+              "capture_path=$handoff" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+              Write-Output "R16_PROTECTED_SUPERVISOR_CAPTURE; run=$env:GITHUB_RUN_ID; attempt=$env:GITHUB_RUN_ATTEMPT; raw_sha256=$rawDigest; certification=none"
               return
             }
             foreach ($pattern in @(
@@ -408,3 +465,12 @@ jobs:
             }
             # Disposable VM; never recursively traverse guest-writable paths.
           }
+
+      - name: Retain protected supervisor capture after successful native cleanup
+        uses: actions/upload-artifact@v7
+        with:
+          name: r16-supervisor-mcp-windows-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.observer.outputs.capture_path }}
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
