@@ -272,7 +272,7 @@ internal static class Program {
         }
     }
     static int Main(string[] args) {
-        if(args.Length!=3 && (args.Length!=4 || (args[3]!="loss" && args[3]!="tunnel" && args[3]!="mcp" && args[3]!="tunnel_protected"))) return 2;
+        if(args.Length!=3 && (args.Length!=4 || (args[3]!="loss" && args[3]!="tunnel" && args[3]!="mcp" && args[3]!="tunnel_protected")) && (args.Length!=6 || args[3]!="tunnel_protected")) return 2;
         var root=Path.GetFullPath(args[0]);
         var user=args[1]; var sid=args[2];
         if(!WindowsIdentity.GetCurrent().User.IsWellKnown(WellKnownSidType.LocalSystemSid) || Process.GetCurrentProcess().SessionId!=0) return 3;
@@ -287,7 +287,8 @@ internal static class Program {
                 stage="batch_logon";
                 Require(LogonUser(user,Environment.MachineName,password,4,0,out token),"batch_logon");
                 password=null; stage="batch_token_check"; CheckToken(token,sid);
-                if(args.Length==4 && (args[3]=="tunnel" || args[3]=="mcp" || args[3]=="tunnel_protected")) {
+                if(args.Length>=4 && (args[3]=="tunnel" || args[3]=="mcp" || args[3]=="tunnel_protected")) {
+                    bool separatePrep=args.Length==6;
                     bool protectedSource=args[3]=="tunnel_protected";
                     bool fullMcp=args[3]=="mcp";
                     string suite=fullMcp?"mcp":"mcp_tunnel";
@@ -345,7 +346,39 @@ internal static class Program {
                         + "if (-not [IO.File]::Exists($cache)) { [Console]::WriteLine('GUEST_CACHE_NOT_WRITTEN') }";
                     var warmArgs="-NoLogo -NoProfile -NonInteractive -EncodedCommand "+Convert.ToBase64String(Encoding.Unicode.GetBytes(warm));
                     if(!Run(token,sid,root,"guest_profile_prepare","",0,120000,false,log,powershell,warmArgs,source,environment)) return 1;
-                    if(!Run(token,sid,root,"npm_prepare","",0,600000,false,log,node,"\""+npm+"\" ci --ignore-scripts --no-audit --no-fund",source,environment)) return 1;
+                    string npmArgs="\""+npm+"\" ci --ignore-scripts --no-audit --no-fund";
+                    if(separatePrep) {
+                        // Dependency preparation has a different standard-user SID.
+                        // No test guest can read its password or writable cache.
+                        var prepUser=args[4]; var prepSid=args[5];
+                        if(prepSid==sid) throw new InvalidOperationException("DEPENDENCY_IDENTITY_COLLISION");
+                        var prepSecret=Path.Combine(root,"prep-password.txt");
+                        var prepPassword=File.ReadAllText(prepSecret); File.Delete(prepSecret);
+                        IntPtr prepToken=IntPtr.Zero;
+                        try {
+                            Require(LogonUser(prepUser,Environment.MachineName,prepPassword,4,0,out prepToken),"dependency_batch_logon");
+                            prepPassword=null; CheckToken(prepToken,prepSid);
+                            var prepProfile=new ProfileInfo {size=Marshal.SizeOf(typeof(ProfileInfo)),flags=1,user=prepUser};
+                            Require(LoadUserProfile(prepToken,ref prepProfile),"dependency_profile_load");
+                            try {
+                                uint prepLength=32768;
+                                var prepProfilePath=new StringBuilder((int)prepLength);
+                                Require(GetUserProfileDirectory(prepToken,prepProfilePath,ref prepLength),"dependency_profile_path");
+                                var pp=prepProfilePath.ToString();
+                                if(!Path.IsPathRooted(pp)||String.Equals(pp,profile,StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("DEPENDENCY_PROFILE_COLLISION");
+                                var prepScratch=Path.Combine(root,"prep-run");
+                                var prepEnv=new SortedDictionary<string,string>(env,StringComparer.OrdinalIgnoreCase);
+                                prepEnv["APPDATA"]=Path.Combine(pp,"AppData","Roaming");
+                                prepEnv["LOCALAPPDATA"]=Path.Combine(pp,"AppData","Local");
+                                prepEnv["HOME"]=pp; prepEnv["USERPROFILE"]=pp;
+                                prepEnv["TEMP"]=prepScratch; prepEnv["TMP"]=prepScratch;
+                                prepEnv["PSModuleAnalysisCachePath"]=Path.Combine(prepScratch,"module-cache");
+                                prepEnv["NPM_CONFIG_CACHE"]=Path.Combine(prepScratch,"npm-cache");
+                                var prepBlock=new StringBuilder(); foreach(var item in prepEnv) prepBlock.Append(item.Key+"="+item.Value+"\0"); prepBlock.Append("\0");
+                                if(!Run(prepToken,prepSid,root,"npm_prepare","",0,600000,false,log,node,npmArgs,source,prepBlock.ToString())) return 1;
+                            } finally { Require(UnloadUserProfile(prepToken,prepProfile.handle),"dependency_profile_unload"); }
+                        } finally { Close(prepToken); }
+                    } else if(!Run(token,sid,root,"npm_prepare","",0,600000,false,log,node,npmArgs,source,environment)) return 1;
                     if(protectedSource) {
                         // Test the actual guest token, including directory delete-child rights.
                         // No candidate-controlled script is used for this check.
@@ -353,7 +386,14 @@ internal static class Program {
                             + "if([IO.File]::ReadAllBytes($entry).Length -lt 1){exit 90}; try { $h=[IO.File]::Open($entry,[IO.FileMode]::Open,[IO.FileAccess]::Write,[IO.FileShare]::ReadWrite); $h.Dispose(); exit 91 } catch [UnauthorizedAccessException] {}; "
                             + "try { [IO.File]::Delete($canary); exit 92 } catch [UnauthorizedAccessException] {}; if(-not [IO.File]::Exists($canary)){exit 93}; "
                             + "try { [IO.File]::WriteAllText([IO.Path]::Combine($source,'.r16-forbidden-write'),'bad'); exit 94 } catch [UnauthorizedAccessException] {}; "
-                            + "[IO.File]::WriteAllText($tmp,'ok'); [IO.File]::Delete($tmp); [Console]::WriteLine('PROTECTED_SOURCE_DENIAL_PASS'); exit 0";
+                            + "[IO.File]::WriteAllText($tmp,'ok'); [IO.File]::Delete($tmp); ";
+                        if(separatePrep) {
+                            probe += "$dependency=[IO.Path]::Combine($source,'node_modules','@modelcontextprotocol','sdk','package.json'); if([IO.File]::ReadAllBytes($dependency).Length -lt 1){exit 95}; "
+                                + "try { $h=[IO.File]::Open($dependency,[IO.FileMode]::Open,[IO.FileAccess]::Write,[IO.FileShare]::ReadWrite); $h.Dispose(); exit 96 } catch [UnauthorizedAccessException] {}; "
+                                + "try { [IO.File]::WriteAllText([IO.Path]::Combine($source,'node_modules','.r16-forbidden-write'),'bad'); exit 97 } catch [UnauthorizedAccessException] {}; "
+                                + "try { [IO.File]::Delete($dependency); exit 98 } catch [UnauthorizedAccessException] {}; if(-not [IO.File]::Exists($dependency)){exit 99}; [Console]::WriteLine('PROTECTED_DEPENDENCY_DENIAL_PASS'); ";
+                        }
+                        probe += "[Console]::WriteLine('PROTECTED_SOURCE_DENIAL_PASS'); exit 0";
                         string probeArgs="-NoLogo -NoProfile -NonInteractive -EncodedCommand "+Convert.ToBase64String(Encoding.Unicode.GetBytes(probe));
                         if(!Run(token,sid,root,"protected_source_probe","",0,10000,false,log,powershell,probeArgs,source,environment)) return 1;
                     }
