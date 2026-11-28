@@ -55,19 +55,20 @@ if (process.platform === 'win32') {
     assert.equal(observed.action, 'Reconcile');
     assert.equal(observed.data, temp, 'Unicode, spaces, apostrophe and ampersand survive argv');
     await writeFile(fixture, '\ufeff' + `param($Action,[switch]$Json,$DataDirectory)
-      [IO.File]::WriteAllText((Join-Path $DataDirectory 'phase-enter.txt'),[DateTime]::UtcNow.ToString('o'))
+      $ErrorActionPreference='Stop'
+      [IO.File]::WriteAllText(([IO.Path]::Combine($DataDirectory,'phase-enter.txt')),[DateTime]::UtcNow.ToString('o'))
       Microsoft.PowerShell.Core\\Import-Module ([IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Utility.psd1')) -ErrorAction Stop
       Microsoft.PowerShell.Core\\Import-Module ([IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Management','Microsoft.PowerShell.Management.psd1')) -ErrorAction Stop
-      [IO.File]::WriteAllText((Join-Path $DataDirectory 'phase-modules.txt'),[DateTime]::UtcNow.ToString('o'))
+      [IO.File]::WriteAllText(([IO.Path]::Combine($DataDirectory,'phase-modules.txt')),[DateTime]::UtcNow.ToString('o'))
       $s=[Diagnostics.ProcessStartInfo]::new()
       $s.FileName="$env:SystemRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
       $s.Arguments='-NoProfile -NonInteractive -Command Start-Sleep -Seconds 20'
       $s.UseShellExecute=$false; $s.CreateNoWindow=$true; $s.RedirectStandardError=$true
-      [IO.File]::WriteAllText((Join-Path $DataDirectory 'phase-start.txt'),[DateTime]::UtcNow.ToString('o'))
+      [IO.File]::WriteAllText(([IO.Path]::Combine($DataDirectory,'phase-start.txt')),[DateTime]::UtcNow.ToString('o'))
       $child=[Diagnostics.Process]::Start($s)
       [IO.File]::WriteAllText((Join-Path $DataDirectory 'descendant.pid'),[string]$child.Id)
       $child.Dispose()
-      [IO.File]::WriteAllText((Join-Path $DataDirectory 'phase-exit.txt'),[DateTime]::UtcNow.ToString('o'))
+      [IO.File]::WriteAllText(([IO.Path]::Combine($DataDirectory,'phase-exit.txt')),[DateTime]::UtcNow.ToString('o'))
       exit 8`);
     try {
       const started=Date.now();
