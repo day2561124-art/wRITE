@@ -40,7 +40,7 @@ jobs:
           $ErrorActionPreference='Stop'
           $candidate=if($env:GITHUB_EVENT_NAME -eq 'pull_request'){'9ed113cfa7593d4deacdc33c8a94e07b16404bfd'}else{$env:REQUESTED_CANDIDATE}
           if($candidate -cnotmatch '^[a-f0-9]{40}$' -or $env:SUPERVISOR_SHA -cnotmatch '^[a-f0-9]{40}$' -or $candidate -ceq $env:SUPERVISOR_SHA){throw 'Exact distinct candidate and supervisor commits required'}
-          if($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch' -and $env:GITHUB_REF -cne 'refs/heads/main'){throw 'Manual supervisor dispatch requires main'}
+          if($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch' -and ($env:GITHUB_REF -cne 'refs/heads/main' -or $env:GITHUB_WORKFLOW_SHA -cne $env:SUPERVISOR_SHA -or $env:GITHUB_WORKFLOW_REF -cne ($env:GITHUB_REPOSITORY+'/.github/workflows/r16-sealed-full-mcp-pilot.yml@refs/heads/main'))){throw 'Manual supervisor workflow identity mismatch'}
           "candidate_sha=$candidate" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "supervisor_sha=$env:SUPERVISOR_SHA" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
       - uses: actions/checkout@v7
@@ -414,7 +414,7 @@ jobs:
               $record = [ordered]@{
                 schema_version=1; repository=$env:GITHUB_REPOSITORY; repository_id=[long]$env:GITHUB_REPOSITORY_ID
                 supervisor_commit=$env:EXACT_SUPERVISOR; candidate_commit=$candidate
-                workflow_ref=$env:GITHUB_WORKFLOW_REF; workflow_sha=$env:GITHUB_WORKFLOW_SHA
+                event_name=$env:GITHUB_EVENT_NAME; workflow_ref=$env:GITHUB_WORKFLOW_REF; workflow_sha=$env:GITHUB_WORKFLOW_SHA
                 run_id=[long]$env:GITHUB_RUN_ID; run_attempt=[int]$env:GITHUB_RUN_ATTEMPT
                 job_key=$env:GITHUB_JOB; suite='mcp'; platform='windows'
                 observed_at_ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
