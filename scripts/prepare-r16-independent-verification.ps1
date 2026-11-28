@@ -21,7 +21,6 @@ $ownerRights=[Security.Principal.SecurityIdentifier]::new('S-1-3-4')
 $inherit=[Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
 $prop=[Security.AccessControl.PropagationFlags]::None
 $allow=[Security.AccessControl.AccessControlType]::Allow
-$rights=[Security.AccessControl.FileSystemRights]
 $sections=[Security.AccessControl.AccessControlSections]::Owner -bor [Security.AccessControl.AccessControlSections]::Group -bor [Security.AccessControl.AccessControlSections]::Access
 
 function Assert-RegularDirectory([string]$Path) {
@@ -44,13 +43,13 @@ function New-DirectoryAcl([Security.Principal.SecurityIdentifier[]]$Readers,
     $acl.SetAccessRuleProtection($true,$false)
     foreach ($sid in @($admins,$system)) {
         $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
-            $sid,$rights::FullControl,$inherit,$prop,$allow))
+            $sid,[Security.AccessControl.FileSystemRights]::FullControl,$inherit,$prop,$allow))
     }
     $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
-        $ownerRights,$rights::ReadPermissions,$inherit,$prop,$allow))
+        $ownerRights,[Security.AccessControl.FileSystemRights]::ReadPermissions,$inherit,$prop,$allow))
     foreach ($sid in $Readers) {
         $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
-            $sid,$rights::ReadAndExecute,$inherit,$prop,$allow))
+            $sid,[Security.AccessControl.FileSystemRights]::ReadAndExecute,$inherit,$prop,$allow))
     }
     foreach ($sid in $Writers) {
         # A writer may publish files in its own exchange directory, but must
@@ -58,7 +57,7 @@ function New-DirectoryAcl([Security.Principal.SecurityIdentifier[]]$Readers,
         $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
             $sid,[Security.AccessControl.FileSystemRights]'ReadAndExecute, Write, DeleteSubdirectoriesAndFiles',$allow))
         $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
-            $sid,$rights::Modify,[Security.AccessControl.InheritanceFlags]::ObjectInherit,
+            $sid,[Security.AccessControl.FileSystemRights]::Modify,[Security.AccessControl.InheritanceFlags]::ObjectInherit,
             [Security.AccessControl.PropagationFlags]::InheritOnly,$allow))
     }
     return $acl
