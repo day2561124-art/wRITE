@@ -162,7 +162,14 @@ jobs:
               # Pin the installed Git layout; native observer copies the entire
               # regular-file tree into a fresh inherited readonly destination.
               $gitInstall = Split-Path $gitDir -Parent
-              if ((Split-Path $gitDir -Leaf) -cne 'bin' -or !(Test-Path -LiteralPath (Join-Path $gitInstall 'mingw64\bin\git.exe'))) { throw 'Unsupported Git installation layout' }
+              $launcherDir = Split-Path $gitDir -Leaf
+              # Git for Windows exposes both cmd and bin entry points. Accept
+              # only a complete installation root; always execute the copied bin.
+              Write-Output "GIT_INSTALL_DISCOVERY launcher=$gitDir; root=$gitInstall"
+              if ($launcherDir -notin @('cmd','bin') -or
+                  !(Test-Path -LiteralPath (Join-Path $gitInstall 'bin\git.exe') -PathType Leaf) -or
+                  !(Test-Path -LiteralPath (Join-Path $gitInstall 'mingw64\bin\git.exe') -PathType Leaf) -or
+                  !(Test-Path -LiteralPath (Join-Path $gitInstall 'mingw64\libexec\git-core') -PathType Container)) { throw 'Unsupported Git installation layout' }
               $gitParent = Join-Path $root 'git-tools-parent'
               $null = New-Item -ItemType Directory -Path $gitParent
               icacls $gitParent /grant:r ("*" + $sid + ":(OI)(CI)(RX)") ("*" + $prepSid + ":(OI)(CI)(RX)") | Out-Null
