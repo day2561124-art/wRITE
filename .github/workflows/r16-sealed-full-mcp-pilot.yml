@@ -160,6 +160,21 @@ jobs:
                 Native-OK 'Exact writable fixture directory'
               }
               [IO.File]::WriteAllText((Join-Path $source '.r16-protected-canary'),'synthetic-immutable-canary')
+              # Legacy smoke creates/restores this exact synthetic data fixture.
+              # Precreate only the untracked file; never grant write on its parent
+              # or on any tracked file. The original smoke will restore its bytes.
+              $fixtureRelative = 'data/canon_db/versions/engine_v999.999.999.md'
+              $fixtureTracked = @(git -C $source ls-files -- $fixtureRelative)
+              Native-OK 'Smoke fixture tracked-file exclusion'
+              if ($fixtureTracked.Count -ne 0) { throw 'Smoke fixture is tracked' }
+              $smokeFixture = Join-Path $source $fixtureRelative
+              if (Test-Path -LiteralPath $smokeFixture) { throw 'Smoke fixture already exists' }
+              $fixtureParent = Get-Item -LiteralPath (Split-Path $smokeFixture -Parent) -Force
+              if (!$fixtureParent.PSIsContainer -or ($fixtureParent.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Invalid smoke fixture parent' }
+              [IO.File]::WriteAllText($smokeFixture,'synthetic R16 no-op engine fixture baseline')
+              $smokeFixtureHash = (Get-FileHash -LiteralPath $smokeFixture -Algorithm SHA256).Hash
+              icacls $smokeFixture /grant:r ("*" + $sid + ":(W)") | Out-Null
+              Native-OK 'Exact smoke fixture write only'
               Write-Output 'PROTECTED_SOURCE_LAYOUT_READY'
               $nodeDir = Split-Path (Get-Command node.exe -ErrorAction Stop).Source
               $gitDir = Split-Path (Get-Command git.exe -ErrorAction Stop).Source
@@ -318,6 +333,10 @@ jobs:
               if ([IO.File]::ReadAllText((Join-Path $source '.r16-protected-canary')) -cne 'synthetic-immutable-canary') { throw 'Source canary changed' }
               git -C $source diff --exit-code --no-ext-diff --no-textconv HEAD --
               Native-OK 'Protected tracked source unchanged'
+              $fixtureAfter = Get-Item -LiteralPath $smokeFixture -Force
+              if ($fixtureAfter.PSIsContainer -or ($fixtureAfter.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Invalid restored smoke fixture' }
+              if ((Get-FileHash -LiteralPath $smokeFixture -Algorithm SHA256).Hash -cne $smokeFixtureHash) { throw 'Smoke fixture not restored byte-for-byte' }
+              Write-Output 'EXACT_SMOKE_FIXTURE_RESTORED'
               if (Test-Path -LiteralPath (Join-Path $root 'prep-password.txt')) { throw 'Preparation logon material remains' }
               Write-Output 'SEALED_FULL_MCP_PILOT_PASS; external_executable_closure=unverified; certification=none'
               if (Test-Path -LiteralPath (Join-Path $root 'password.txt')) { throw 'Temporary logon material remains' }
