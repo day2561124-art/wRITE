@@ -272,7 +272,7 @@ internal static class Program {
         }
     }
     static int Main(string[] args) {
-        if(args.Length!=3 && (args.Length!=4 || (args[3]!="loss" && args[3]!="tunnel" && args[3]!="mcp"))) return 2;
+        if(args.Length!=3 && (args.Length!=4 || (args[3]!="loss" && args[3]!="tunnel" && args[3]!="mcp" && args[3]!="tunnel_protected"))) return 2;
         var root=Path.GetFullPath(args[0]);
         var user=args[1]; var sid=args[2];
         if(!WindowsIdentity.GetCurrent().User.IsWellKnown(WellKnownSidType.LocalSystemSid) || Process.GetCurrentProcess().SessionId!=0) return 3;
@@ -287,12 +287,13 @@ internal static class Program {
                 stage="batch_logon";
                 Require(LogonUser(user,Environment.MachineName,password,4,0,out token),"batch_logon");
                 password=null; stage="batch_token_check"; CheckToken(token,sid);
-                if(args.Length==4 && (args[3]=="tunnel" || args[3]=="mcp")) {
+                if(args.Length==4 && (args[3]=="tunnel" || args[3]=="mcp" || args[3]=="tunnel_protected")) {
+                    bool protectedSource=args[3]=="tunnel_protected";
                     bool fullMcp=args[3]=="mcp";
                     string suite=fullMcp?"mcp":"mcp_tunnel";
                     // Fixed native Node entry only; no candidate-defined command or supervisor credential.
                     var guest=Path.Combine(root,"guest");
-                    var source=Path.Combine(guest,"source");
+                    var source=protectedSource?Path.Combine(root,"protected-source"):Path.Combine(guest,"source");
                     var scratch=Path.Combine(guest,"run");
                     var tools=Path.Combine(root,"tools");
                     var node=Path.Combine(tools,"node.exe");
@@ -326,6 +327,13 @@ internal static class Program {
                         {"ProgramFiles",programFiles},{"ProgramW6432",programFiles},{"ProgramData",commonData},{"SystemDrive",Path.GetPathRoot(windows).TrimEnd('\\')},{"SystemRoot",windows},{"TEMP",scratch},{"TMP",scratch},{"USERPROFILE",profile},{"WINDIR",windows},
                         {"WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL","1"},{"WRITER_WORKBENCH_ISOLATED_TEST_CHECKPOINT","1"},{"WRITER_WORKBENCH_ISOLATED_TEST_TRANSACTION","1"}
                     };
+                    if(protectedSource) {
+                        // Read-only checkout is owned by the supervisor, not the guest.
+                        // Trust this exact Git path only; never a wildcard.
+                        env["GIT_CONFIG_COUNT"]="1";
+                        env["GIT_CONFIG_KEY_0"]="safe.directory";
+                        env["GIT_CONFIG_VALUE_0"]=source;
+                    }
                     var block=new StringBuilder(); foreach(var item in env) block.Append(item.Key+"="+item.Value+"\0"); block.Append("\0");
                     var environment=block.ToString();
                     // Populate only the guest's own cache as the guest. Never
@@ -338,6 +346,17 @@ internal static class Program {
                     var warmArgs="-NoLogo -NoProfile -NonInteractive -EncodedCommand "+Convert.ToBase64String(Encoding.Unicode.GetBytes(warm));
                     if(!Run(token,sid,root,"guest_profile_prepare","",0,120000,false,log,powershell,warmArgs,source,environment)) return 1;
                     if(!Run(token,sid,root,"npm_prepare","",0,600000,false,log,node,"\""+npm+"\" ci --ignore-scripts --no-audit --no-fund",source,environment)) return 1;
+                    if(protectedSource) {
+                        // Test the actual guest token, including directory delete-child rights.
+                        // No candidate-controlled script is used for this check.
+                        string probe="$ErrorActionPreference='Stop'; $entry="+QuotePs(entry)+"; $source="+QuotePs(source)+"; $canary=[IO.Path]::Combine($source,'.r16-protected-canary'); $tmp=[IO.Path]::Combine($source,'tests','.tmp','r16-write-probe'); "
+                            + "if([IO.File]::ReadAllBytes($entry).Length -lt 1){exit 90}; try { $h=[IO.File]::Open($entry,[IO.FileMode]::Open,[IO.FileAccess]::Write,[IO.FileShare]::ReadWrite); $h.Dispose(); exit 91 } catch [UnauthorizedAccessException] {}; "
+                            + "try { [IO.File]::Delete($canary); exit 92 } catch [UnauthorizedAccessException] {}; if(-not [IO.File]::Exists($canary)){exit 93}; "
+                            + "try { [IO.File]::WriteAllText([IO.Path]::Combine($source,'.r16-forbidden-write'),'bad'); exit 94 } catch [UnauthorizedAccessException] {}; "
+                            + "[IO.File]::WriteAllText($tmp,'ok'); [IO.File]::Delete($tmp); [Console]::WriteLine('PROTECTED_SOURCE_DENIAL_PASS'); exit 0";
+                        string probeArgs="-NoLogo -NoProfile -NonInteractive -EncodedCommand "+Convert.ToBase64String(Encoding.Unicode.GetBytes(probe));
+                        if(!Run(token,sid,root,"protected_source_probe","",0,10000,false,log,powershell,probeArgs,source,environment)) return 1;
+                    }
                     if(!Run(token,sid,root,suite,"",0,fullMcp?2700000:1200000,false,log,node,"\""+entry+"\"",source,environment)) return 1;
                     } finally {
                         stage="guest_profile_unload";
