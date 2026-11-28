@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { rm, readFile } from 'node:fs/promises';
+import { rm, readFile, mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -310,8 +310,9 @@ console.log('MCP HTTP session lifecycle SSE regression tests passed.');
 async function verifyCrossSessionReconciliation() {
   const group = randomUUID();
   const { proof, invalidProof, publicJwk } = createTestOAuthCredentials();
-  const artifact = 'tests/r5-reconciliation-' + group + '.txt';
+  const artifact = 'tests/.tmp/r5-reconciliation-' + group + '.txt';
   const journalRoot = path.join(os.tmpdir(), 'writer-workbench-operation-journal-test-' + group);
+  await mkdir(path.dirname(path.join(rootDir, artifact)), { recursive: true });
   try {
     await withServer({
       WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL: '1', WRITER_WORKBENCH_TEST_JOURNAL_GROUP: group,
