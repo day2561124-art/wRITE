@@ -63,6 +63,14 @@ function readinessFacts(payload) {
   return {
     runtimeState: ['idle', 'unverified', 'running', 'ready', 'degraded', 'failed'].includes(runtime?.state) ? runtime.state : 'unknown',
     runtimeStep: ['journal', 'checkpoint', 'transaction', 'trpg'].includes(runtime?.current_step) ? runtime.current_step : null,
+    // Component names and state values are closed enums. Never include
+    // last_error, paths, arbitrary keys, or server-supplied messages.
+    ...(runtime?.components && typeof runtime.components === 'object' ? {
+      runtimeComponents: Object.fromEntries(['journal', 'checkpoint', 'transaction', 'trpg'].map(name => {
+        const state = runtime.components[name]?.state;
+        return [name, ['idle', 'recovering', 'ready', 'degraded', 'unavailable'].includes(state) ? state : 'unknown'];
+      })),
+    } : {}),
   };
 }
 
