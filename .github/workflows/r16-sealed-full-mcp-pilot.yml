@@ -4,7 +4,7 @@ name: R16 sealed full MCP observer pilot
 # No signing credentials, production grants, or attestation permissions.
 on:
   pull_request:
-    branches: [nexa/r16-sealed-git-toolchain-pilot, main]
+    branches: [main]
     paths:
       - 'scripts/r16-raw-process-observer-pilot.cs'
       - '.github/workflows/r16-sealed-full-mcp-pilot.yml'
