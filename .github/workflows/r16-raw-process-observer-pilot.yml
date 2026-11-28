@@ -205,6 +205,20 @@ jobs:
             $lines = @(Get-Content -LiteralPath $log)
             $lines | Write-Output
             if ($env:OBSERVER_MODE -eq 'tunnel') {
+              # Guest text is diagnostic only; prevent workflow commands/control
+              # sequences and bound output even on an unsuccessful suite.
+              foreach ($name in @('npm_prepare.stdout','npm_prepare.stderr','mcp_tunnel.stdout','mcp_tunnel.stderr')) {
+                $file = Join-Path $root ($name + '.b64')
+                $capture = Get-Item -LiteralPath $file -ErrorAction SilentlyContinue
+                if (!$capture) { continue }
+                if ($capture.PSIsContainer -or ($capture.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $capture.Length -gt 44000) { throw 'Invalid diagnostic capture' }
+                $decoded = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([IO.File]::ReadAllText($file)))
+                $decoded -split '\r?\n' | Select-Object -Last 100 | ForEach-Object {
+                  $safe = $_ -replace '[\x00-\x1f\x7f-\x9f]', '?'
+                  $safe = $safe.Replace('::', ': :')
+                  Write-Output ("GUEST_DIAGNOSTIC $name : " + $safe.Substring(0,[Math]::Min(2048,$safe.Length)))
+                }
+              }
               foreach ($pattern in @(
                 '^RAW_OBSERVER npm_prepare outcome=completed exit=0 active=0 total=[1-9][0-9]*$',
                 '^RAW_OBSERVER mcp_tunnel outcome=completed exit=0 active=0 total=[1-9][0-9]*$',
