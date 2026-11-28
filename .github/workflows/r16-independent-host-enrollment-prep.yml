@@ -30,6 +30,8 @@ jobs:
           $names=@('R16TestDispatch','R16TestIssuer','R16TestObserver')
           $created=@()
           $credentials=@{}
+          $batchPolicyChanged=$false
+          $policyRoot=Join-Path $env:RUNNER_TEMP ('r16-role-rights-'+[Guid]::NewGuid().ToString('N'))
           try {
             foreach($name in $names) {
               $password=ConvertTo-SecureString ([Guid]::NewGuid().ToString()+'Aa1!') -AsPlainText -Force
@@ -40,6 +42,29 @@ jobs:
             $dispatch=(Get-LocalUser -Name $names[0]).SID
             $issuer=(Get-LocalUser -Name $names[1]).SID
             $supervisor=(Get-LocalUser -Name $names[2]).SID
+            # Same disposable-only batch-logon preparation as the passing
+            # Session 0 lease workflow. Preserve existing principals.
+            $null=New-Item -ItemType Directory -Path $policyRoot
+            $policy=Join-Path $policyRoot 'original.inf'
+            secedit /export /cfg $policy /areas USER_RIGHTS /quiet
+            if($LASTEXITCODE -ne 0){throw 'Fixture rights export failed'}
+            $line=@(Get-Content -LiteralPath $policy | Where-Object {$_ -match '^SeBatchLogonRight\s*='})
+            if($line.Count -gt 1){throw 'Ambiguous batch-logon policy'}
+            $originalBatch=if($line.Count -eq 1){($line[0] -split '=',2)[1].Trim()}else{''}
+            $entries=@($originalBatch -split ',' | ForEach-Object {$_.Trim()} | Where-Object {$_})
+            $newBatch=(@($entries)+@("*$($dispatch.Value)","*$($issuer.Value)","*$($supervisor.Value)") | Select-Object -Unique) -join ','
+            function Set-FixtureBatchRight([string]$Value,[string]$Label) {
+              $inf=Join-Path $policyRoot "$Label.inf"
+              $db=Join-Path $policyRoot "$Label.sdb"
+              @('[Unicode]','Unicode=yes','[Version]','signature="$CHICAGO$"','Revision=1','[Privilege Rights]',"SeBatchLogonRight = $Value") |
+                Set-Content -LiteralPath $inf -Encoding Unicode
+              secedit /configure /db $db /cfg $inf /areas USER_RIGHTS /quiet
+              if($LASTEXITCODE -ne 0){throw "Fixture batch-logon $Label failed"}
+            }
+            $batchPolicyChanged=$true
+            Set-FixtureBatchRight $newBatch 'grant'
+            wevtutil sl Microsoft-Windows-TaskScheduler/Operational /e:true
+            if($LASTEXITCODE -ne 0){throw 'Unable to enable fixture task history'}
             $acl=[Security.AccessControl.DirectorySecurity]::new()
             $acl.SetOwner($admin)
             $acl.SetAccessRuleProtection($true,$false)
@@ -120,6 +145,7 @@ jobs:
                 $principal=(Get-ScheduledTask -TaskName $task).Principal
                 if([string]$principal.LogonType -ne 'Password' -or [string]$principal.RunLevel -ne 'Limited'){throw 'Fixture task principal mismatch'}
                 $prior=(Get-ScheduledTaskInfo -TaskName $task).LastRunTime
+                $started=Get-Date
                 Start-ScheduledTask -TaskName $task
                 $deadline=[DateTime]::UtcNow.AddSeconds(60)
                 do {
@@ -132,6 +158,9 @@ jobs:
                     return
                   }
                 } while([DateTime]::UtcNow -lt $deadline)
+                Write-Output "ROLE_TASK_STATE=$state; LAST_TASK_RESULT=$($info.LastTaskResult); LAST_RUN_TIME=$($info.LastRunTime)"
+                Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-TaskScheduler/Operational';StartTime=$started} -ErrorAction SilentlyContinue |
+                  Where-Object {$_.Message -like "*$task*"} | Select-Object -First 12 Id,LevelDisplayName,Message | Format-List
                 throw "Role probe timed out: $account"
               } finally {
                 if($registered){
@@ -177,6 +206,11 @@ jobs:
           } finally {
             # Only the new fixture root, on the disposable GitHub runner.
             if(Test-Path -LiteralPath $root){Remove-Item -LiteralPath $root -Recurse -Force}
-            foreach($name in $created){Remove-LocalUser -Name $name}
-            foreach($credential in $credentials.Values){$credential.Password.Dispose()}
+            try {
+              if($batchPolicyChanged){Set-FixtureBatchRight $originalBatch 'restore'}
+            } finally {
+              foreach($name in $created){Remove-LocalUser -Name $name}
+              foreach($credential in $credentials.Values){$credential.Password.Dispose()}
+              if(Test-Path -LiteralPath $policyRoot){Remove-Item -LiteralPath $policyRoot -Recurse -Force}
+            }
           }
