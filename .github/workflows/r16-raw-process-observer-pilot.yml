@@ -16,16 +16,27 @@ concurrency:
 jobs:
   observe:
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        mode: [normal, loss]
+        mode: [normal, loss, tunnel]
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
+      - uses: actions/checkout@v7
+        if: matrix.mode == 'tunnel'
+        with:
+          ref: dddc5e5619238f92c6592356735f0a9cdbce2b1d
+          path: candidate-tunnel
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        if: matrix.mode == 'tunnel'
+        with:
+          node-version: '24.18.0'
+          package-manager-cache: false
       - name: Exercise actual Session 0 process handles and protected observer
         shell: pwsh
         env:
@@ -71,6 +82,42 @@ jobs:
             icacls $guest /grant:r ("*" + $sid + ":(OI)(CI)(M)") | Out-Null
             Native-OK 'Guest directory ACL'
             [IO.File]::WriteAllText((Join-Path $root 'sentinel.txt'),'synthetic-protected-sentinel')
+            if ($env:OBSERVER_MODE -eq 'tunnel') {
+              $candidate = 'dddc5e5619238f92c6592356735f0a9cdbce2b1d'
+              $input = Join-Path $env:GITHUB_WORKSPACE 'candidate-tunnel'
+              if ((git -C $input rev-parse HEAD).Trim() -cne $candidate) { throw 'Candidate identity mismatch' }
+              Native-OK 'Candidate identity'
+              $source = Join-Path $guest 'source'
+              $run = Join-Path $guest 'run'
+              $tools = Join-Path $root 'tools'
+              $null = New-Item -ItemType Directory -Path $run,$tools
+              $env:GIT_CONFIG_NOSYSTEM = '1'
+              $env:GIT_CONFIG_GLOBAL = 'NUL'
+              git clone --no-local --no-hardlinks --no-checkout -- $input $source
+              Native-OK 'Candidate clone'
+              git -C $source config --local core.autocrlf false
+              Native-OK 'Candidate CRLF policy'
+              git -C $source config --local core.filemode false
+              Native-OK 'Candidate mode policy'
+              git -C $source checkout --detach $candidate
+              Native-OK 'Candidate checkout'
+              git -C $source remote remove origin
+              Native-OK 'Remove candidate remote'
+              $dirty = @(git -C $source status --porcelain=v1 --untracked-files=all)
+              Native-OK 'Candidate status'
+              if ($dirty.Count -ne 0 -or (git -C $source rev-parse HEAD).Trim() -cne $candidate) { throw 'Candidate checkout not exact and clean' }
+              Native-OK 'Candidate exact commit'
+              icacls $source /setowner ("*" + $sid) /T /Q | Out-Null
+              Native-OK 'Guest checkout ownership'
+              $nodeDir = Split-Path (Get-Command node.exe -ErrorAction Stop).Source
+              $gitDir = Split-Path (Get-Command git.exe -ErrorAction Stop).Source
+              robocopy $nodeDir $tools /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+              if ($LASTEXITCODE -ge 8) { throw 'Toolchain copy failed' }
+              icacls $tools /grant:r ("*" + $sid + ":(OI)(CI)(RX)") | Out-Null
+              Native-OK 'Guest readonly toolchain'
+              [IO.File]::WriteAllText((Join-Path $root 'git-dir.txt'),$gitDir)
+              Write-Output "RAW_OBSERVER_CANDIDATE=$candidate; SUITE=mcp_tunnel"
+            }
             $export = Join-Path $root 'original.inf'
             secedit /export /cfg $export /areas USER_RIGHTS /quiet
             Native-OK 'Export batch right'
@@ -88,9 +135,11 @@ jobs:
             Native-OK 'Compile native observer'
             $args = '"' + $root + '" ' + $user + ' ' + $sid
             if ($env:OBSERVER_MODE -eq 'loss') { $args += ' loss' }
+            if ($env:OBSERVER_MODE -eq 'tunnel') { $args += ' tunnel' }
             $action = New-ScheduledTaskAction -Execute $exe -Argument $args -WorkingDirectory $root
             $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-            $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 3) -MultipleInstances IgnoreNew
+            $taskMinutes = if ($env:OBSERVER_MODE -eq 'tunnel') { 32 } else { 3 }
+            $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes $taskMinutes) -MultipleInstances IgnoreNew
             $null = Register-ScheduledTask -TaskName $task -Action $action -Principal $principal -Settings $settings
             $createdTask = $true
             $prior = (Get-ScheduledTaskInfo -TaskName $task).LastRunTime
@@ -143,7 +192,7 @@ jobs:
               # Abrupt loss is never interpreted as a successful suite outcome.
               return
             }
-            $deadline = [datetime]::UtcNow.AddMinutes(4)
+            $deadline = [datetime]::UtcNow.AddMinutes($taskMinutes + 1)
             do {
               Start-Sleep -Seconds 1
               $state = (Get-ScheduledTask -TaskName $task).State
@@ -155,6 +204,19 @@ jobs:
             if ($item.Length -gt 16384 -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Invalid observer log' }
             $lines = @(Get-Content -LiteralPath $log)
             $lines | Write-Output
+            if ($env:OBSERVER_MODE -eq 'tunnel') {
+              foreach ($pattern in @(
+                '^RAW_OBSERVER npm_prepare outcome=completed exit=0 active=0 total=[1-9][0-9]*$',
+                '^RAW_OBSERVER mcp_tunnel outcome=completed exit=0 active=0 total=[1-9][0-9]*$',
+                '^RAW_OBSERVER_TUNNEL_PILOT_PASS$'
+              )) {
+                if (@($lines | Where-Object { $_ -match $pattern }).Count -ne 1) { throw "Missing actual native suite observation: $pattern" }
+              }
+              if ($info.LastTaskResult -ne 0) { throw "Observer task failed: $($info.LastTaskResult)" }
+              if (Test-Path -LiteralPath (Join-Path $root 'password.txt')) { throw 'Temporary logon material remains' }
+              if ([IO.File]::ReadAllText((Join-Path $root 'sentinel.txt')) -cne 'synthetic-protected-sentinel') { throw 'Sentinel changed' }
+              return
+            }
             foreach ($pattern in @(
               '^RAW_OBSERVER isolation outcome=completed exit=0 active=0 total=[1-9][0-9]*$',
               '^RAW_OBSERVER success outcome=completed exit=0 active=0 total=[1-9][0-9]*$',
