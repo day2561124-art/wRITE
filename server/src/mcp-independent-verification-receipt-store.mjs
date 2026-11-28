@@ -283,12 +283,14 @@ export function createIndependentOutcomeAttestationPublisher({
     };
     // Identical already-published observations are idempotent, not re-signed.
     // Expired or conflicting existing records are not overwritten or renewed.
-    try {
-      const prior=await readEnvelopeFile(store,first.name,100*1024);
+    let prior;
+    try { prior=await readEnvelopeFile(store,first.name,100*1024); }
+    catch(error) { if(error?.code!=="ENOENT") throw error; }
+    if (prior) {
       await verify(prior);await fence();
       return Object.freeze({published:true,created:false,execution_authorized:false,
         attestation_sha256:createHash("sha256").update(JSON.stringify(prior)).digest("hex")});
-    } catch(error) { if(error?.code!=="ENOENT") throw error; }
+    }
     const expires=Math.min(now+ttlMs,first.binding.completed_at_ms+maxAgeMs);
     const payload=JSON.stringify({schema_version:1,supervisor,repository,binding:first.binding,
       observed_at_ms:now,expires_at_ms:expires,outcome:first.outcome});
