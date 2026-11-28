@@ -49,6 +49,11 @@ internal static class Program {
         public long userTime,kernelTime,periodUserTime,periodKernelTime;
         public uint pageFaults,totalProcesses,activeProcesses,terminatedProcesses;
     }
+    [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)]
+    struct ProfileInfo { public int size,flags; public string user,path,defaultPath,server,policy; public IntPtr handle; }
+    [DllImport("userenv.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool LoadUserProfile(IntPtr token,ref ProfileInfo profile);
+    [DllImport("userenv.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool GetUserProfileDirectory(IntPtr token,StringBuilder path,ref uint length);
+    [DllImport("userenv.dll",SetLastError=true)] static extern bool UnloadUserProfile(IntPtr token,IntPtr profile);
     [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
     static extern bool LogonUser(string user,string domain,string password,int type,int provider,out IntPtr token);
     [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
@@ -280,20 +285,41 @@ internal static class Program {
                     var system=Path.Combine(windows,"System32");
                     var git=File.ReadAllText(Path.Combine(root,"git-dir.txt")).Trim();
                     if(!Path.IsPathRooted(git) || !File.Exists(Path.Combine(git,"git.exe")) || !File.Exists(node) || !File.Exists(npm) || !File.Exists(entry)) throw new InvalidOperationException("FIXTURE_INPUT_MISSING");
-                    var profile=Path.Combine(scratch,"profile");
-                    Directory.CreateDirectory(profile);
+                    // A batch token does not load the user's registry hive by itself.
+                    // DPAPI and Windows PowerShell command discovery need the real
+                    // disposable account profile, not a fabricated USERPROFILE.
+                    var loaded=new ProfileInfo {size=Marshal.SizeOf(typeof(ProfileInfo)),flags=1,user=user};
+                    stage="guest_profile_load";
+                    Require(LoadUserProfile(token,ref loaded),"load_guest_profile");
+                    try {
+                    uint length=32768;
+                    var profilePath=new StringBuilder((int)length);
+                    Require(GetUserProfileDirectory(token,profilePath,ref length),"guest_profile_path");
+                    var profile=profilePath.ToString();
+                    if(!Path.IsPathRooted(profile) || String.Equals(profile,Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("GUEST_PROFILE_MISMATCH");
+                    var cache=Path.Combine(scratch,"guest-module-analysis-cache");
                     // No inherited GitHub token, OIDC, or supervisor environment.
                     var env=new SortedDictionary<string,string>(StringComparer.OrdinalIgnoreCase) {
                         {"APPDATA",Path.Combine(profile,"AppData","Roaming")},{"CI","1"},{"COMSPEC",Path.Combine(system,"cmd.exe")},
                         {"GIT_CONFIG_GLOBAL","NUL"},{"GIT_CONFIG_NOSYSTEM","1"},{"GIT_TERMINAL_PROMPT","0"},{"HOME",profile},{"LOCALAPPDATA",Path.Combine(profile,"AppData","Local")},
-                        {"NPM_CONFIG_CACHE",Path.Combine(scratch,"npm-cache")},{"PATH",tools+";"+git+";"+system+";"+Path.Combine(system,@"WindowsPowerShell\v1.0")},{"PATHEXT",".COM;.EXE;.BAT;.CMD"},
+                        {"PSModuleAnalysisCachePath",cache},{"NPM_CONFIG_CACHE",Path.Combine(scratch,"npm-cache")},{"PATH",tools+";"+git+";"+system+";"+Path.Combine(system,@"WindowsPowerShell\v1.0")},{"PATHEXT",".COM;.EXE;.BAT;.CMD"},
                         {"SystemDrive",Path.GetPathRoot(windows).TrimEnd('\\')},{"SystemRoot",windows},{"TEMP",scratch},{"TMP",scratch},{"USERPROFILE",profile},{"WINDIR",windows},
                         {"WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL","1"},{"WRITER_WORKBENCH_ISOLATED_TEST_CHECKPOINT","1"},{"WRITER_WORKBENCH_ISOLATED_TEST_TRANSACTION","1"}
                     };
                     var block=new StringBuilder(); foreach(var item in env) block.Append(item.Key+"="+item.Value+"\0"); block.Append("\0");
                     var environment=block.ToString();
+                    // Populate only the guest's own cache as the guest. Never
+                    // import or trust this cache from the supervisor process.
+                    var powershell=Path.Combine(system,@"WindowsPowerShell\v1.0\powershell.exe");
+                    string warm="Write-Output 'guest-powershell-ready'; [Threading.Thread]::Sleep(1000)";
+                    var warmArgs="-NoLogo -NoProfile -NonInteractive -EncodedCommand "+Convert.ToBase64String(Encoding.Unicode.GetBytes(warm));
+                    if(!Run(token,sid,root,"guest_profile_prepare","",0,120000,false,log,powershell,warmArgs,source,environment)) return 1;
                     if(!Run(token,sid,root,"npm_prepare","",0,600000,false,log,node,"\""+npm+"\" ci --ignore-scripts --no-audit --no-fund",source,environment)) return 1;
                     if(!Run(token,sid,root,"mcp_tunnel","",0,1200000,false,log,node,"\""+entry+"\"",source,environment)) return 1;
+                    } finally {
+                        stage="guest_profile_unload";
+                        Require(UnloadUserProfile(token,loaded.handle),"unload_guest_profile");
+                    }
                     log.WriteLine("RAW_OBSERVER_TUNNEL_PILOT_PASS");
                     return 0;
                 }
