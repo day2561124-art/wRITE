@@ -191,6 +191,33 @@ test("GitHub collector requires exact provider identity, pinned workflow and com
   assert.equal((await build({ readRun: async () => ({ ...run(), run_attempt: ++calls }) })(req)).code,
     "GITHUB_RUN_CHANGED_DURING_OBSERVATION");
   assert.equal((await build()({ ...req, repository: "attacker/repo" })).code, "INVALID_GITHUB_VERIFICATION_REQUEST");
+
+  // The distinct supervisor revision is a host policy, not a candidate input.
+  const supervisorCommit="8".repeat(40);
+  const supervisorPolicy={...policy,supervisor_commit:supervisorCommit};
+  const supervisorRun=()=>({...run(),head_sha:supervisorCommit,event:"workflow_dispatch"});
+  const supervisorJob=()=>({...job(),head_sha:supervisorCommit});
+  const separate=overrides=>build({policy:supervisorPolicy,readRun:async()=>supervisorRun(),
+    readJobs:async()=>({total_count:1,jobs:[supervisorJob()]}),
+    readWorkflowBytes:async args=>{
+      assert.equal(args.commit,supervisorCommit);
+      return bytes;
+    },...overrides});
+  const observed=await separate()(req);
+  assert.equal(observed.observed,true);
+  assert.equal(observed.supervisor_commit,supervisorCommit);
+  assert.equal(observed.candidate_binding_pending,true);
+  assert.equal(observed.commit,commit);
+  assert.equal(observed.observations[0].commit,commit);
+  assert.equal(observed.observations[0].exit_code,undefined);
+  assert.equal(observed.execution_authorized,false);
+  assert.equal((await separate()({...req,commit:supervisorCommit})).code,"GITHUB_SUPERVISOR_CANDIDATE_NOT_SEPARATE");
+  assert.equal((await separate({readRun:async()=>run()})(req)).code,"GITHUB_RUN_IDENTITY_UNVERIFIED");
+  for(const event of ["push","pull_request"]) {
+    assert.equal((await separate({readRun:async()=>({...supervisorRun(),event})})(req)).code,"GITHUB_WORKFLOW_EVENT_UNSUPPORTED");
+  }
+  assert.equal((await separate({readJobs:async()=>({total_count:1,jobs:[job()]})})(req)).code,"GITHUB_JOB_IDENTITY_UNVERIFIED");
+  assert.equal((await separate()({...req,supervisor_commit:supervisorCommit})).code,"INVALID_GITHUB_VERIFICATION_REQUEST");
 });
 
 test("GitHub read transport binds exact repository, immutable blob bytes and read-only requests", async () => {
@@ -570,6 +597,44 @@ test("host verifier service composes exact provider reads, independent outcomes 
   assert.equal(checked.receipt_sha256,result.receipt_sha256);
   assert.equal(checked.execution_authorized,false);
   assert.equal((await gate.reviewForValidation({...c,revision:c.revision+1,state:"preflight_passed"},context.plan)).verified,false);
+
+  // Separate reviewed supervisor dispatch. Real signed candidate binding is
+  // still mandatory even when every provider metadata check succeeds.
+  const supervisorCommit="8".repeat(40), separateRoot=path.join(root,"separate-receipts");
+  await mkdir(separateRoot);
+  fixtures["/actions/runs/112"]={...run,id:112,head_sha:supervisorCommit,event:"workflow_dispatch"};
+  fixtures["/actions/runs/112/attempts/1/jobs?per_page=100"]={total_count:2,
+    jobs:jobs.map((j,i)=>({...j,id:322+i,run_id:112,head_sha:supervisorCommit}))};
+  fixtures["/git/commits/"+supervisorCommit]={sha:supervisorCommit,tree:{sha:rootTree}};
+  const separated=createProtectedIndependentVerifierService({...boundOptions,
+    policy:{...policy,supervisor_commit:supervisorCommit},receiptRoot:separateRoot,
+    assertReceiptDirectory:async({directory,role})=>directory===separateRoot&&["issuer","consumer"].includes(role),
+    readRunSelection:async(_identity,rows)=>rows.map(({suite,platform})=>({suite,platform,run_id:112})),
+    fetchImpl:async(url,opts)=>{
+      assert.notEqual(url,base+"/git/commits/"+c.integration_commit,"must not read candidate workflow");
+      return options.fetchImpl(url,opts);
+    }});
+  const separateBindings=bindings.map((b,i)=>({...b,run_id:112,job_id:322+i}));
+  const beforeSeparate=signs;
+  assert.equal((await separated.verifyAndPublish(request)).published,false);
+  await record(separateBindings[0]);
+  await record({...separateBindings[1],commit:supervisorCommit});
+  assert.equal((await separated.verifyAndPublish(request)).published,false);
+  assert.equal(signs,beforeSeparate);
+  assert.deepEqual(await readdir(separateRoot),[]);
+  await record(separateBindings[1],supervisorKey.privateKey,7);
+  assert.equal((await separated.verifyAndPublish(request)).published,false);
+  await record(separateBindings[1]);
+  const separateResult=await separated.verifyAndPublish(request);
+  assert.equal(separateResult.published,true);
+  assert.equal(separateResult.execution_authorized,false);
+  assert.equal(signs,beforeSeparate+1);
+  const separateEnvelope=await createIndependentReceiptReader({root:separateRoot,
+    assertProtectedDirectory:async()=>true})(c);
+  const separateBody=JSON.parse(separateEnvelope.payload);
+  assert.equal(separateBody.candidate.integration_commit,c.integration_commit);
+  assert.deepEqual(separateBody.results.map(r=>[r.commit,r.run_id,r.job_id]),
+    separateBindings.map(b=>[b.commit,b.run_id,b.job_id]));
 });
 
 
