@@ -80,7 +80,7 @@ jobs:
           $copyInstalled = $type.GetMethod('CopyInstalledGitTree',$flags)
           if ($null -eq $copyInstalled) { throw 'Installed Git tree copy missing' }
           $gitCopy = Join-Path $root 'installed-copy'
-          $gitDigest = $copyInstalled.Invoke($null,[object[]]@($source,$gitCopy))
+          $gitDigest = $copyInstalled.Invoke($null,[object[]]@([string]$source,[string]$gitCopy))
           if ($gitDigest -cne (Digest $gitCopy)) { throw 'Normalized hardlink digest mismatch' }
           $gitAlias = Join-Path $gitCopy 'hardlink.txt'
           $gitFile = Join-Path $gitCopy 'nested\fixture.txt'
@@ -92,7 +92,7 @@ jobs:
           $null = New-Item -ItemType HardLink -Path $externalAlias -Target $file
           $externalCopy = Join-Path $root 'external-copy'
           try {
-            $null = $copyInstalled.Invoke($null,[object[]]@($source,$externalCopy))
+            $null = $copyInstalled.Invoke($null,[object[]]@([string]$source,[string]$externalCopy))
             throw 'Unexpected external hardlink acceptance'
           } catch {
             $e = $_.Exception
