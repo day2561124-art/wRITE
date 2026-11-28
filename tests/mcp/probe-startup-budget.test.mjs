@@ -116,9 +116,11 @@ test('hung runtime is bounded, reports runtime phase, and closes session', async
 
 test('failed runtime fails immediately with safe readiness diagnostics', async t => {
   const f = await fixture(t, {resources: async () => {throw new Error('timeout');},
-    readiness: {ready: false, child: {runtime_readiness: {state: 'failed', current_step: 'checkpoint', last_error: 'SECRET'}}}});
+    readiness: {ready: false, child: {runtime_readiness: {state: 'failed', current_step: 'checkpoint', last_error: 'SECRET', components: {journal: {state: 'ready'}, checkpoint: {state: 'unavailable', last_error: 'SECRET'}, transaction: {state: 'degraded'}, trpg: {state: 'SECRET'}, SECRET: {state: 'ready'}}}}}});
   await assert.rejects(f.run(), e => e.code === 'RUNTIME_NOT_READY' && e.details.runtimeState === 'failed'
-    && e.details.runtimeStep === 'checkpoint' && !formatProbeFailure(e).includes('SECRET'));
+    && e.details.runtimeStep === 'checkpoint'
+    && (assert.deepEqual(e.details.runtimeComponents, {journal: 'ready', checkpoint: 'unavailable', transaction: 'degraded', trpg: 'unknown'}), true)
+    && !formatProbeFailure(e).includes('SECRET'));
   assert.equal(f.counts.ready, 1);
 });
 
