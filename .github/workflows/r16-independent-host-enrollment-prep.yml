@@ -29,10 +29,12 @@ jobs:
           if(Test-Path -LiteralPath $root){throw 'Unexpected preexisting fixture root'}
           $names=@('R16TestDispatch','R16TestIssuer','R16TestObserver')
           $created=@()
+          $credentials=@{}
           try {
             foreach($name in $names) {
               $password=ConvertTo-SecureString ([Guid]::NewGuid().ToString()+'Aa1!') -AsPlainText -Force
               $null=New-LocalUser -Name $name -Password $password
+              $credentials[$name]=[pscredential]::new("$env:COMPUTERNAME\$name",$password)
               $created+= $name
             }
             $dispatch=(Get-LocalUser -Name $names[0]).SID
@@ -79,9 +81,71 @@ jobs:
             try { & $script -IssuerAccount $names[1] -SupervisorAccount $names[2] -Confirm:$false } catch { $rejected=$true }
             if(-not $rejected){throw 'Existing target accepted'}
             if((Get-FileHash -LiteralPath $config).Hash -cne $before -or (Get-Acl -LiteralPath $root).Sddl -cne $parentBefore){throw 'Existing maintenance changed'}
-            Write-Output 'R16_ENROLLMENT_DIRECTORY_PREPARATION_FIXTURE_PASS; activation=false; effective_token_access=unverified'
+            # Real token access, using only temporary local accounts and
+            # fixed commands on the disposable runner. No grant or host change.
+            function Invoke-RoleProbe([string]$account,[string]$expectedSid,[string]$body) {
+              $prefix=@'
+          $ErrorActionPreference='Stop'
+          function Denied([scriptblock]$op) {
+            try { & $op | Out-Null } catch {
+              $e=$_.Exception
+              while($null -ne $e) {
+                if($e -is [UnauthorizedAccessException]){return}
+                $e=$e.InnerException
+              }
+              throw
+            }
+            throw 'Expected access denial'
+          }
+          '@
+              $identity='$i=[Security.Principal.WindowsIdentity]::GetCurrent();if($i.User.Value -cne '''+$expectedSid+'''){exit 81};if(([Security.Principal.WindowsPrincipal]::new($i)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){exit 82};'
+              $paths='$root='''+$target.Replace("'","''")+''';$receipts=[IO.Path]::Combine($root,''receipts'');$outcomes=[IO.Path]::Combine($root,''outcomes'');'
+              $command=$prefix+[Environment]::NewLine+$identity+$paths+[Environment]::NewLine+'try {'+$body+';exit 0}catch{exit 83}'
+              $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+              $exe=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+              $proc=Start-Process -FilePath $exe -ArgumentList @('-NoProfile','-NonInteractive','-EncodedCommand',$encoded) -Credential $credentials[$account] -WorkingDirectory (Join-Path $env:SystemRoot 'System32') -PassThru
+              try {
+                if(-not $proc.WaitForExit(30000)) { $proc.Kill();throw "Role probe timed out: $account" }
+                if($proc.ExitCode -ne 0){throw "Role probe failed: $account exit=$($proc.ExitCode)"}
+              } finally {$proc.Dispose()}
+            }
+            Invoke-RoleProbe $names[2] $supervisor.Value @'
+          [IO.File]::WriteAllText([IO.Path]::Combine($outcomes,'outcome-fixture.txt'),'outcome')
+          Denied {[IO.File]::WriteAllText([IO.Path]::Combine($receipts,'forbidden.txt'),'bad')}
+          Denied {[IO.File]::WriteAllText([IO.Path]::Combine($root,'forbidden.txt'),'bad')}
+          '@
+            Invoke-RoleProbe $names[1] $issuer.Value @'
+          $o=[IO.Path]::Combine($outcomes,'outcome-fixture.txt')
+          if([IO.File]::ReadAllText($o) -cne 'outcome'){exit 84}
+          Denied {[IO.File]::WriteAllText($o,'bad')}
+          Denied {[IO.File]::Delete($o)}
+          Denied {[IO.File]::WriteAllText([IO.Path]::Combine($outcomes,'forbidden.txt'),'bad')}
+          [IO.File]::WriteAllText([IO.Path]::Combine($receipts,'receipt-fixture.txt'),'receipt')
+          Denied {[IO.File]::WriteAllText([IO.Path]::Combine($root,'forbidden.txt'),'bad')}
+          '@
+            Invoke-RoleProbe $names[0] $dispatch.Value @'
+          $r=[IO.Path]::Combine($receipts,'receipt-fixture.txt')
+          if([IO.File]::ReadAllText($r) -cne 'receipt'){exit 85}
+          Denied {[IO.File]::WriteAllText($r,'bad')}
+          Denied {[IO.File]::Delete($r)}
+          Denied {[IO.File]::WriteAllText([IO.Path]::Combine($receipts,'forbidden.txt'),'bad')}
+          Denied {[IO.File]::ReadAllText([IO.Path]::Combine($outcomes,'outcome-fixture.txt'))}
+          Denied {[IO.File]::WriteAllText([IO.Path]::Combine($outcomes,'forbidden.txt'),'bad')}
+          Denied {[IO.File]::WriteAllText([IO.Path]::Combine($root,'forbidden.txt'),'bad')}
+          '@
+            Invoke-RoleProbe $names[2] $supervisor.Value @'
+          Denied {[IO.File]::ReadAllText([IO.Path]::Combine($receipts,'receipt-fixture.txt'))}
+          Denied {[IO.File]::Delete([IO.Path]::Combine($receipts,'receipt-fixture.txt'))}
+          '@
+            if([IO.File]::ReadAllText((Join-Path $target 'outcomes\outcome-fixture.txt')) -cne 'outcome' -or [IO.File]::ReadAllText((Join-Path $target 'receipts\receipt-fixture.txt')) -cne 'receipt'){throw 'Fixture data changed'}
+            foreach($location in @($target,(Join-Path $target 'receipts'),(Join-Path $target 'outcomes'))){
+              if(Test-Path -LiteralPath (Join-Path $location 'forbidden.txt')){throw 'Unexpected forbidden write'}
+            }
+            Write-Output 'R16_ENROLLMENT_EFFECTIVE_TOKEN_ACCESS_PASS; disposable_accounts_only=true; activation=false'
+            Write-Output 'R16_ENROLLMENT_DIRECTORY_PREPARATION_FIXTURE_PASS; activation=false; effective_token_access=fixture_only'
           } finally {
             # Only the new fixture root, on the disposable GitHub runner.
             if(Test-Path -LiteralPath $root){Remove-Item -LiteralPath $root -Recurse -Force}
             foreach($name in $created){Remove-LocalUser -Name $name}
+            foreach($credential in $credentials.Values){$credential.Password.Dispose()}
           }
