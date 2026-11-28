@@ -11,12 +11,16 @@ else {
   const start = text.indexOf('function Invoke-McpTunnelLauncher {');
   const wrapper = text.slice(start, text.indexOf('function Start-McpTunnel {', start));
   const quote = value => "'" + value.replaceAll("'", "''") + "'";
+  const bootstrap = String.raw`$ErrorActionPreference='Stop'
+Microsoft.PowerShell.Core\Import-Module ([IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Management','Microsoft.PowerShell.Management.psd1')) -ErrorAction Stop
+Microsoft.PowerShell.Core\Import-Module ([IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Utility.psd1')) -ErrorAction Stop
+`;
   try {
     for (const code of [0, 7]) {
       const fixture = path.join(dir, `fixture ${code}.ps1`);
-      await writeFile(fixture, `Write-Host 'wrapper fixture completed'\nexit ${code}\n`);
+      await writeFile(fixture, `${bootstrap}Write-Host 'wrapper fixture completed'\nexit ${code}\n`);
       const run = path.join(dir, 'run.ps1');
-      await writeFile(run, `\uFEFF$ErrorActionPreference="Stop"\n$Root=${quote(root)}\n$LogDir=${quote(dir)}\n${wrapper}\nif (Invoke-McpTunnelLauncher ${quote(fixture)}) { exit 0 } else { exit 1 }\n`, 'utf8');
+      await writeFile(run, `\uFEFF${bootstrap}$Root=${quote(root)}\n$LogDir=${quote(dir)}\n${wrapper}\nif (Invoke-McpTunnelLauncher ${quote(fixture)}) { exit 0 } else { exit 1 }\n`, 'utf8');
       const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', run], {
         encoding: 'utf8', windowsHide: true, timeout: 10000,
       });
