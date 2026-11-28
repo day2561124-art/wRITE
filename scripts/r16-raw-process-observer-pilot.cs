@@ -9,6 +9,7 @@ using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using System.Collections.Generic;
+using Microsoft.Win32.SafeHandles;
 
 internal static class Program {
     const uint Suspended=4, UnicodeEnvironment=0x400, NoWindow=0x08000000;
@@ -21,6 +22,10 @@ internal static class Program {
         public short show,reserved2;
         public IntPtr reservedPtr,input,output,error;
     }
+    [StructLayout(LayoutKind.Sequential)]
+    struct StartupEx { public Startup info; public IntPtr attributes; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct PipeSecurity { public int size; public IntPtr descriptor; public int inherit; }
     [StructLayout(LayoutKind.Sequential)]
     struct ProcessInfo { public IntPtr process,thread; public uint pid,tid; }
     [StructLayout(LayoutKind.Sequential)]
@@ -44,10 +49,22 @@ internal static class Program {
         public long userTime,kernelTime,periodUserTime,periodKernelTime;
         public uint pageFaults,totalProcesses,activeProcesses,terminatedProcesses;
     }
+    [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)]
+    struct ProfileInfo { public int size,flags; public string user,path,defaultPath,server,policy; public IntPtr handle; }
+    [DllImport("userenv.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool LoadUserProfile(IntPtr token,ref ProfileInfo profile);
+    [DllImport("userenv.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool GetUserProfileDirectory(IntPtr token,StringBuilder path,ref uint length);
+    [DllImport("userenv.dll",SetLastError=true)] static extern bool UnloadUserProfile(IntPtr token,IntPtr profile);
     [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
     static extern bool LogonUser(string user,string domain,string password,int type,int provider,out IntPtr token);
     [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
     static extern bool CreateProcessAsUser(IntPtr token,string executable,StringBuilder command,IntPtr pa,IntPtr ta,bool inherit,uint flags,IntPtr env,string cwd,ref Startup startup,out ProcessInfo info);
+    [DllImport("advapi32.dll",EntryPoint="CreateProcessAsUserW",CharSet=CharSet.Unicode,SetLastError=true)]
+    static extern bool CreateProcessWithCapture(IntPtr token,string executable,StringBuilder command,IntPtr pa,IntPtr ta,bool inherit,uint flags,IntPtr env,string cwd,ref StartupEx startup,out ProcessInfo info);
+    [DllImport("kernel32.dll",SetLastError=true)] static extern bool CreatePipe(out IntPtr read,out IntPtr write,ref PipeSecurity security,uint size);
+    [DllImport("kernel32.dll",SetLastError=true)] static extern bool SetHandleInformation(IntPtr handle,uint mask,uint flags);
+    [DllImport("kernel32.dll",SetLastError=true)] static extern bool InitializeProcThreadAttributeList(IntPtr attrs,int count,uint flags,ref IntPtr size);
+    [DllImport("kernel32.dll",SetLastError=true)] static extern bool UpdateProcThreadAttribute(IntPtr attrs,uint flags,IntPtr key,IntPtr value,IntPtr size,IntPtr previous,IntPtr returned);
+    [DllImport("kernel32.dll")] static extern void DeleteProcThreadAttributeList(IntPtr attrs);
     [DllImport("advapi32.dll",SetLastError=true)]
     static extern bool OpenProcessToken(IntPtr process,uint access,out IntPtr token);
     [DllImport("kernel32.dll",SetLastError=true)] static extern IntPtr CreateJobObject(IntPtr sa,IntPtr name);
@@ -65,6 +82,34 @@ internal static class Program {
 
     static void Require(bool value,string stage) { if(!value) throw new Win32Exception(Marshal.GetLastWin32Error(),stage); }
     static void Close(IntPtr handle) { if(handle!=IntPtr.Zero) CloseHandle(handle); }
+    static void Close(ref IntPtr handle) { Close(handle); handle=IntPtr.Zero; }
+    // Keep a bounded rolling diagnostic tail; do not interpret guest text as evidence.
+    sealed class Capture {
+        const int Limit=32768;
+        readonly byte[] ring=new byte[Limit];
+        int next,count;
+        internal bool failed;
+        internal readonly Thread reader;
+        internal Capture(IntPtr handle) {
+            reader=new Thread(delegate() {
+                try {
+                    using(var stream=new FileStream(new SafeFileHandle(handle,true),FileAccess.Read,4096,false)) {
+                        var chunk=new byte[4096]; int n;
+                        while((n=stream.Read(chunk,0,chunk.Length))>0) {
+                            for(int i=0;i<n;i++) { ring[next]=chunk[i]; next=(next+1)%Limit; if(count<Limit) count++; }
+                        }
+                    }
+                } catch(IOException e) { int code=e.HResult&0xffff; failed=code!=109&&code!=232; }
+                catch(Exception) { failed=true; }
+            });
+            reader.IsBackground=true; reader.Start();
+        }
+        internal string Tail() {
+            byte[] value=new byte[count]; int start=(next-count+Limit)%Limit;
+            for(int i=0;i<count;i++) value[i]=ring[(start+i)%Limit];
+            return Convert.ToBase64String(value);
+        }
+    }
     static string QuotePs(string value) { return "'" + value.Replace("'","''") + "'"; }
     static string stage="initial";
     static void CheckToken(IntPtr token,string sid) {
@@ -90,18 +135,22 @@ internal static class Program {
             return ids;
         } finally { Marshal.FreeHGlobal(buffer); }
     }
-    static void Run(IntPtr token,string sid,string root,string name,string script,uint expectedExit,int limitMs,bool cancel,StreamWriter log) {
+    static bool Run(IntPtr token,string sid,string root,string name,string script,uint expectedExit,int limitMs,bool cancel,StreamWriter log,string nativeExe=null,string nativeArgs=null,string workDir=null,string envBlock=null) {
         var windows=Environment.GetFolderPath(Environment.SpecialFolder.Windows);
         var executable=Path.Combine(windows,@"System32\WindowsPowerShell\v1.0\powershell.exe");
         var guest=Path.Combine(root,"guest");
         string encoded=Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
-        var command=new StringBuilder("\""+executable+"\" -NoLogo -NoProfile -NonInteractive -EncodedCommand "+encoded);
-        var environment=Marshal.StringToHGlobalUni("PATH="+Path.Combine(windows,"System32")+"\0SystemRoot="+windows+"\0TEMP="+guest+"\0TMP="+guest+"\0WINDIR="+windows+"\0\0");
+        if(nativeExe!=null) executable=nativeExe;
+        bool actualSuite=nativeExe!=null;
+        var command=new StringBuilder("\""+executable+"\" "+(actualSuite?nativeArgs:"-NoLogo -NoProfile -NonInteractive -EncodedCommand "+encoded));
+        var environment=Marshal.StringToHGlobalUni(envBlock??("PATH="+Path.Combine(windows,"System32")+"\0SystemRoot="+windows+"\0TEMP="+guest+"\0TMP="+guest+"\0WINDIR="+windows+"\0\0"));
         IntPtr job=IntPtr.Zero,childToken=IntPtr.Zero;
         ProcessInfo child=new ProcessInfo();
-        bool assigned=false;
+        bool assigned=false,attrsInitialized=false;
         EventWaitHandle cancellation=null;
         Thread cancellationSource=null;
+        IntPtr input=IntPtr.Zero,inputWrite=IntPtr.Zero,output=IntPtr.Zero,outputWrite=IntPtr.Zero,error=IntPtr.Zero,errorWrite=IntPtr.Zero,attrs=IntPtr.Zero,handleList=IntPtr.Zero;
+        Capture stdout=null,stderr=null;
         try {
             stage=name+":job_create";
             job=CreateJobObject(IntPtr.Zero,IntPtr.Zero);
@@ -110,12 +159,41 @@ internal static class Program {
             Require(SetInformationJobObject(job,9,ref limits,Marshal.SizeOf(typeof(ExtendedLimits))),"job_limits");
             var startup=new Startup(); startup.cb=Marshal.SizeOf(typeof(Startup));
             stage=name+":process_create";
-            Require(CreateProcessAsUser(token,executable,command,IntPtr.Zero,IntPtr.Zero,false,Suspended|UnicodeEnvironment|NoWindow,environment,guest,ref startup,out child),"process_create");
+            if(actualSuite) {
+                // Inherit exactly three pipe endpoints, never the job or privileged handles.
+                var pipe=new PipeSecurity {size=Marshal.SizeOf(typeof(PipeSecurity)),inherit=1};
+                Require(CreatePipe(out input,out inputWrite,ref pipe,0),"stdin_pipe");
+                Require(CreatePipe(out output,out outputWrite,ref pipe,0),"stdout_pipe");
+                Require(CreatePipe(out error,out errorWrite,ref pipe,0),"stderr_pipe");
+                Require(SetHandleInformation(output,1,0),"stdout_private");
+                Require(SetHandleInformation(error,1,0),"stderr_private");
+                Close(ref inputWrite);
+                IntPtr size=IntPtr.Zero;
+                InitializeProcThreadAttributeList(IntPtr.Zero,1,0,ref size);
+                Require(size!=IntPtr.Zero,"attribute_size");
+                attrs=Marshal.AllocHGlobal(size);
+                Require(InitializeProcThreadAttributeList(attrs,1,0,ref size),"attribute_init"); attrsInitialized=true;
+                handleList=Marshal.AllocHGlobal(IntPtr.Size*3);
+                Marshal.WriteIntPtr(handleList,0,input);
+                Marshal.WriteIntPtr(handleList,IntPtr.Size,outputWrite);
+                Marshal.WriteIntPtr(handleList,IntPtr.Size*2,errorWrite);
+                Require(UpdateProcThreadAttribute(attrs,0,new IntPtr(0x20002),handleList,new IntPtr(IntPtr.Size*3),IntPtr.Zero,IntPtr.Zero),"handle_list");
+                startup.cb=Marshal.SizeOf(typeof(StartupEx)); startup.flags=0x100; startup.input=input; startup.output=outputWrite; startup.error=errorWrite;
+                var extended=new StartupEx {info=startup,attributes=attrs};
+                Require(CreateProcessWithCapture(token,executable,command,IntPtr.Zero,IntPtr.Zero,true,Suspended|UnicodeEnvironment|NoWindow|0x80000,environment,workDir??guest,ref extended,out child),"process_create_capture");
+            } else {
+                Require(CreateProcessAsUser(token,executable,command,IntPtr.Zero,IntPtr.Zero,false,Suspended|UnicodeEnvironment|NoWindow,environment,workDir??guest,ref startup,out child),"process_create");
+            }
             Require(AssignProcessToJobObject(job,child.process),"job_assign"); assigned=true;
             stage=name+":token_open";
             Require(OpenProcessToken(child.process,Query|Duplicate,out childToken),"token_open");
             stage=name+":token_check";
             CheckToken(childToken,sid);
+            if(actualSuite) {
+                Close(ref input); Close(ref outputWrite); Close(ref errorWrite);
+                stdout=new Capture(output); output=IntPtr.Zero;
+                stderr=new Capture(error); error=IntPtr.Zero;
+            }
             stage=name+":resume";
             Require(ResumeThread(child.thread)!=uint.MaxValue,"thread_resume");
             if(name=="observer_loss") {
@@ -138,12 +216,8 @@ internal static class Program {
                 throw new InvalidOperationException("LOSS_CONTROLLER_DID_NOT_TERMINATE");
             }
             stage=name+":wait";
-            var elapsed=Stopwatch.StartNew();
             uint state;
             if(cancel) {
-                // This is an actual independent waitable cancellation signal,
-                // generated by a trusted fixture thread, not a guest timeout.
-                // No inherited handle or guest-selectable event name.
                 cancellation=new EventWaitHandle(false,EventResetMode.ManualReset);
                 var signal=cancellation;
                 cancellationSource=new Thread(delegate() { Thread.Sleep(1000); signal.Set(); });
@@ -155,13 +229,13 @@ internal static class Program {
             uint exit=0;
             if(state==WaitObject) {
                 Require(GetExitCodeProcess(child.process,out exit),"exit_read");
-                if(cancel || exit!=expectedExit || limitMs<2000) throw new InvalidOperationException("UNEXPECTED_NATIVE_EXIT");
+                if(!actualSuite && (cancel || exit!=expectedExit || limitMs<2000)) throw new InvalidOperationException("UNEXPECTED_NATIVE_EXIT");
                 result="completed";
             } else if(state==WaitObject+1 && cancel) {
                 if(WaitForSingleObject(child.process,0)!=WaitTimeout) throw new InvalidOperationException("CANCELLED_CHILD_NOT_RUNNING");
                 result="cancelled";
             } else if(state==WaitTimeout) {
-                if(limitMs>=2000 || cancel) throw new InvalidOperationException("UNEXPECTED_NATIVE_TIMEOUT");
+                if(cancel || (!actualSuite && limitMs>=2000)) throw new InvalidOperationException("UNEXPECTED_NATIVE_TIMEOUT");
                 result="timed_out";
             } else throw new Win32Exception(Marshal.GetLastWin32Error(),"process_wait");
             stage=name+":cleanup";
@@ -177,17 +251,28 @@ internal static class Program {
             if(facts.activeProcesses!=0) throw new InvalidOperationException("JOB_NOT_EMPTY");
             if(name=="descendant" && facts.totalProcesses<2) throw new InvalidOperationException("DESCENDANT_NOT_OBSERVED");
             log.WriteLine("RAW_OBSERVER "+name+" outcome="+result+" exit="+(result=="completed"?exit.ToString():"null")+" active=0 total="+facts.totalProcesses);
+            if(actualSuite) {
+                if(!stdout.reader.Join(5000)||!stderr.reader.Join(5000)||stdout.failed||stderr.failed) throw new InvalidOperationException("CAPTURE_DRAIN_FAILED");
+                // Distinct prefixed encoded records in protected log; bounded, non-authoritative.
+                File.WriteAllText(Path.Combine(root,name+".stdout.b64"),stdout.Tail());
+                File.WriteAllText(Path.Combine(root,name+".stderr.b64"),stderr.Tail());
+            }
+            return result=="completed" && exit==0;
         } finally {
             if(cancellationSource!=null) cancellationSource.Join();
             if(cancellation!=null) cancellation.Dispose();
             if(assigned) TerminateJobObject(job,125);
             else if(child.process!=IntPtr.Zero) TerminateProcess(child.process,125);
             Close(childToken); Close(child.thread); Close(child.process); Close(job);
+            Close(ref input); Close(ref inputWrite); Close(ref output); Close(ref outputWrite); Close(ref error); Close(ref errorWrite);
+            if(attrsInitialized) DeleteProcThreadAttributeList(attrs);
+            if(attrs!=IntPtr.Zero) Marshal.FreeHGlobal(attrs);
+            if(handleList!=IntPtr.Zero) Marshal.FreeHGlobal(handleList);
             Marshal.FreeHGlobal(environment);
         }
     }
     static int Main(string[] args) {
-        if(args.Length!=3 && (args.Length!=4 || args[3]!="loss")) return 2;
+        if(args.Length!=3 && (args.Length!=4 || (args[3]!="loss" && args[3]!="tunnel" && args[3]!="mcp"))) return 2;
         var root=Path.GetFullPath(args[0]);
         var user=args[1]; var sid=args[2];
         if(!WindowsIdentity.GetCurrent().User.IsWellKnown(WellKnownSidType.LocalSystemSid) || Process.GetCurrentProcess().SessionId!=0) return 3;
@@ -202,6 +287,65 @@ internal static class Program {
                 stage="batch_logon";
                 Require(LogonUser(user,Environment.MachineName,password,4,0,out token),"batch_logon");
                 password=null; stage="batch_token_check"; CheckToken(token,sid);
+                if(args.Length==4 && (args[3]=="tunnel" || args[3]=="mcp")) {
+                    bool fullMcp=args[3]=="mcp";
+                    string suite=fullMcp?"mcp":"mcp_tunnel";
+                    // Fixed native Node entry only; no candidate-defined command or supervisor credential.
+                    var guest=Path.Combine(root,"guest");
+                    var source=Path.Combine(guest,"source");
+                    var scratch=Path.Combine(guest,"run");
+                    var tools=Path.Combine(root,"tools");
+                    var node=Path.Combine(tools,"node.exe");
+                    var npm=Path.Combine(tools,@"node_modules\npm\bin\npm-cli.js");
+                    var entry=Path.Combine(source,fullMcp?@"tests\tools\mcp-contract.test.mjs":@"tests\mcp-tunnel-launcher.test.mjs");
+                    var windows=Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+                    var system=Path.Combine(windows,"System32");
+                    var programFiles=Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+                    var commonData=Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+                    if(!Path.IsPathRooted(programFiles)||!Directory.Exists(programFiles)||!Path.IsPathRooted(commonData)||!Directory.Exists(commonData)) throw new InvalidOperationException("SYSTEM_DIRECTORY_IDENTITY_MISSING");
+                    var git=File.ReadAllText(Path.Combine(root,"git-dir.txt")).Trim();
+                    if(!Path.IsPathRooted(git) || !File.Exists(Path.Combine(git,"git.exe")) || !File.Exists(node) || !File.Exists(npm) || !File.Exists(entry)) throw new InvalidOperationException("FIXTURE_INPUT_MISSING");
+                    // A batch token does not load the user's registry hive by itself.
+                    // DPAPI and Windows PowerShell command discovery need the real
+                    // disposable account profile, not a fabricated USERPROFILE.
+                    var loaded=new ProfileInfo {size=Marshal.SizeOf(typeof(ProfileInfo)),flags=1,user=user};
+                    stage="guest_profile_load";
+                    Require(LoadUserProfile(token,ref loaded),"load_guest_profile");
+                    try {
+                    uint length=32768;
+                    var profilePath=new StringBuilder((int)length);
+                    Require(GetUserProfileDirectory(token,profilePath,ref length),"guest_profile_path");
+                    var profile=profilePath.ToString();
+                    if(!Path.IsPathRooted(profile) || String.Equals(profile,Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("GUEST_PROFILE_MISMATCH");
+                    var cache=Path.Combine(scratch,"guest-module-analysis-cache");
+                    // No inherited GitHub token, OIDC, or supervisor environment.
+                    var env=new SortedDictionary<string,string>(StringComparer.OrdinalIgnoreCase) {
+                        {"APPDATA",Path.Combine(profile,"AppData","Roaming")},{"CI","1"},{"COMSPEC",Path.Combine(system,"cmd.exe")},
+                        {"GIT_CONFIG_GLOBAL","NUL"},{"GIT_CONFIG_NOSYSTEM","1"},{"GIT_TERMINAL_PROMPT","0"},{"HOME",profile},{"LOCALAPPDATA",Path.Combine(profile,"AppData","Local")},
+                        {"PSModuleAnalysisCachePath",cache},{"PSModulePath",Path.Combine(system,@"WindowsPowerShell\v1.0\Modules")},{"NPM_CONFIG_CACHE",Path.Combine(scratch,"npm-cache")},{"PATH",tools+";"+git+";"+system+";"+Path.Combine(system,@"WindowsPowerShell\v1.0")},{"PATHEXT",".COM;.EXE;.BAT;.CMD"},
+                        {"ProgramFiles",programFiles},{"ProgramW6432",programFiles},{"ProgramData",commonData},{"SystemDrive",Path.GetPathRoot(windows).TrimEnd('\\')},{"SystemRoot",windows},{"TEMP",scratch},{"TMP",scratch},{"USERPROFILE",profile},{"WINDIR",windows},
+                        {"WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL","1"},{"WRITER_WORKBENCH_ISOLATED_TEST_CHECKPOINT","1"},{"WRITER_WORKBENCH_ISOLATED_TEST_TRANSACTION","1"}
+                    };
+                    var block=new StringBuilder(); foreach(var item in env) block.Append(item.Key+"="+item.Value+"\0"); block.Append("\0");
+                    var environment=block.ToString();
+                    // Populate only the guest's own cache as the guest. Never
+                    // import or trust this cache from the supervisor process.
+                    var powershell=Path.Combine(system,@"WindowsPowerShell\v1.0\powershell.exe");
+                    string warm="$ErrorActionPreference='Stop'; Write-Output 'guest-powershell-ready'; "
+                        + "$deadline=[DateTime]::UtcNow.AddSeconds(40); $cache=$env:PSModuleAnalysisCachePath; "
+                        + "while ([DateTime]::UtcNow -lt $deadline) { if ([IO.File]::Exists($cache)) { $length=([IO.FileInfo]::new($cache)).Length; if ($length -gt 0) { [Console]::WriteLine('GUEST_CACHE_BYTES='+$length); break } }; [Threading.Thread]::Sleep(250) }; "
+                        + "if (-not [IO.File]::Exists($cache)) { [Console]::WriteLine('GUEST_CACHE_NOT_WRITTEN') }";
+                    var warmArgs="-NoLogo -NoProfile -NonInteractive -EncodedCommand "+Convert.ToBase64String(Encoding.Unicode.GetBytes(warm));
+                    if(!Run(token,sid,root,"guest_profile_prepare","",0,120000,false,log,powershell,warmArgs,source,environment)) return 1;
+                    if(!Run(token,sid,root,"npm_prepare","",0,600000,false,log,node,"\""+npm+"\" ci --ignore-scripts --no-audit --no-fund",source,environment)) return 1;
+                    if(!Run(token,sid,root,suite,"",0,fullMcp?2700000:1200000,false,log,node,"\""+entry+"\"",source,environment)) return 1;
+                    } finally {
+                        stage="guest_profile_unload";
+                        Require(UnloadUserProfile(token,loaded.handle),"unload_guest_profile");
+                    }
+                    log.WriteLine(fullMcp?"RAW_OBSERVER_MCP_PILOT_PASS":"RAW_OBSERVER_TUNNEL_PILOT_PASS");
+                    return 0;
+                }
                 if(args.Length==4) {
                     string loss="$ErrorActionPreference='Stop'; $p=[Diagnostics.ProcessStartInfo]::new([IO.Path]::Combine($PSHOME,'powershell.exe'),'-NoProfile -NonInteractive -Command [Threading.Thread]::Sleep(90000)'); $p.UseShellExecute=$false; $p.CreateNoWindow=$true; $child=[Diagnostics.Process]::Start($p); if ($null -eq $child -or $child.HasExited) { exit 93 }; [Threading.Thread]::Sleep(90000)";
                     Run(token,sid,root,"observer_loss",loss,0,10000,false,log);
