@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import {traceSpan} from "./mcp-request-tracing.mjs";
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -312,6 +312,10 @@ async function runPowerShellProcessObserved({
   const stderrCollector = createBoundedOutputCollector(POWERSHELL_MAINTENANCE_OUTPUT_MAX_CHARACTERS);
   let child;
   let timedOut = false;
+  let moduleCacheRoot;
+  const cleanModuleCache = async () => {
+    if (moduleCacheRoot) await rm(moduleCacheRoot, { recursive: true, force: true }).catch(() => {});
+  };
 
   try {
     // Match the fixed Windows PowerShell module root already used by the
@@ -321,6 +325,13 @@ async function runPowerShellProcessObserved({
     const psEnvironment = process.platform === "win32" && windows && path.isAbsolute(windows)
       ? { PSModulePath: path.join(windows, "System32", "WindowsPowerShell", "v1.0", "Modules") }
       : {};
+    // Windows PowerShell can hang during implicit module cache discovery
+    // in a restricted Session 0 environment. Use a fresh private scratch
+    // location rather than trusting or forwarding the parent's cache path.
+    if (process.platform === "win32") {
+      moduleCacheRoot = await mkdtemp(path.join(os.tmpdir(), "nexa-ps-module-cache-"));
+      psEnvironment.PSModuleAnalysisCachePath = path.join(moduleCacheRoot, "ModuleAnalysisCache");
+    }
     child = spawnImpl(
       "powershell.exe",
       ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
@@ -333,6 +344,7 @@ async function runPowerShellProcessObserved({
       },
     );
   } catch (error) {
+    await cleanModuleCache();
     return {
       ...processResultBase({ elevated: false, command, cwd, timeoutMs, startedAt }),
       stderr: redactProcessOutput(error?.message ?? String(error)),
@@ -360,6 +372,7 @@ async function runPowerShellProcessObserved({
     child.once("close", (code, signal) => finish({ code, signal }));
   });
 
+  await cleanModuleCache();
   const stdout = stdoutCollector.finish();
   const stderr = stderrCollector.finish();
   const executionOk = !result.error;
