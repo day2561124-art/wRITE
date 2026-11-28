@@ -528,7 +528,15 @@ if (process.platform === "win32") {
     assert.equal(provider.status({ workspace_id: workspaceId }).helper_pid, null);
     await rm(root, { recursive: true, force: true });
   } finally {
-    provider.close();
+    // Even when startup or a fence assertion fails, wait for the helper
+    // process to exit before deleting its current working directory.
+    try {
+      if (provider.status({ workspace_id: workspaceId }).helper_pid !== null) {
+        await provider.release({ workspace_id: workspaceId });
+      }
+    } finally {
+      provider.close();
+    }
     await rm(temp, { recursive: true, force: true });
   }
 }
