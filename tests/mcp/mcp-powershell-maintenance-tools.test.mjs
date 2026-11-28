@@ -250,6 +250,9 @@ try {
       allowed_roots: [rootDir],
     }), "utf8");
     const requestId = "c".repeat(32);
+    // Successful cold-process fixture, not a latency SLA. The separate
+    // 1s timeout regression above still tests the timeout contract.
+    const runnerCommandDeadlineMs = 30_000;
     await writeFile(
       path.join(runnerStateRoot, "requests", `${requestId}.request.json`),
       JSON.stringify({
@@ -257,24 +260,47 @@ try {
         request_id: requestId,
         command: "Write-Output 'admin-runner-path-ok'",
         cwd: rootDir,
-        timeout_ms: 5_000,
+        timeout_ms: runnerCommandDeadlineMs,
       }),
       "utf8",
     );
 
     const runnerPath = path.join(rootDir, "scripts", "mcp-powershell-admin-runner.ps1");
+    // This outer fixture deadline includes cold Windows PowerShell startup,
+    // module loading, request admission, command execution and result publication.
+    // It is separate from the bounded command deadline above.
+    const runnerFixtureDeadlineMs = 90_000;
+    const runnerStarted = Date.now();
     const runner = spawnSync(
       "powershell.exe",
       ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", runnerPath, "-ConfigPath", configPath],
-      { cwd: rootDir, encoding: "utf8", windowsHide: true, timeout: 15_000 },
+      { cwd: rootDir, encoding: "utf8", windowsHide: true, timeout: runnerFixtureDeadlineMs },
     );
-    assert.equal(runner.status, 0, runner.stderr);
+    // Keep a finite process deadline and the original success assertion. A null status
+    // alone cannot distinguish an OS spawn failure, signal, or outer timeout.
+    const runnerDiagnostic = {
+      status: runner.status,
+      signal: runner.signal,
+      error_code: runner.error?.code ?? null,
+      error_message: runner.error?.message ?? null,
+      elapsed_ms: Date.now() - runnerStarted,
+      fixture_deadline_ms: runnerFixtureDeadlineMs,
+      command_deadline_ms: runnerCommandDeadlineMs,
+      stdout: String(runner.stdout ?? "").slice(-2048),
+      stderr: String(runner.stderr ?? "").slice(-2048),
+      result_files: readdirSync(path.join(runnerStateRoot, "results")).sort(),
+      request_files: readdirSync(path.join(runnerStateRoot, "requests")).sort(),
+    };
+    assert.equal(runner.status, 0, JSON.stringify(runnerDiagnostic));
+    console.log(`Admin runner fixture wall time: ${runnerDiagnostic.elapsed_ms}ms (outer deadline ${runnerFixtureDeadlineMs}ms, command deadline ${runnerCommandDeadlineMs}ms).`);
     const runnerResult = JSON.parse(await readFile(
       path.join(runnerStateRoot, "results", `${requestId}.result.json`),
       "utf8",
     ));
-    assert.equal(runnerResult.execution_ok, true, runnerResult.stderr);
-    assert.equal(runnerResult.exit_code, 0, runnerResult.stderr);
+    const resultDiagnostic = JSON.stringify({ execution_ok: runnerResult.execution_ok, exit_code: runnerResult.exit_code, timed_out: runnerResult.timed_out, duration_ms: runnerResult.duration_ms, reason: runnerResult.reason, stdout: runnerResult.stdout, stderr: runnerResult.stderr });
+    assert.equal(runnerResult.execution_ok, true, resultDiagnostic);
+    assert.equal(runnerResult.timed_out, false, resultDiagnostic);
+    assert.equal(runnerResult.exit_code, 0, resultDiagnostic);
     assert.match(runnerResult.stdout, /admin-runner-path-ok/u);
   }
 
