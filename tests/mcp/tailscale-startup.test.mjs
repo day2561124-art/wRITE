@@ -13,7 +13,13 @@ const definitions = launcher.slice(launcher.indexOf('function Invoke-McpProbe'),
 const quote = value => "'" + value.replaceAll("'", "''") + "'";
 async function powershell(script, cwd = root, env = {}) {
   const file = path.join(cwd, 'case.ps1');
-  await fs.writeFile(file, '\uFEFF' + script, 'utf8');
+  // Avoid cold command discovery in the synthetic fixtures; explicitly load
+  // the same inbox modules without changing the launcher or deadline.
+  const bootstrap = String.raw`$ErrorActionPreference='Stop'
+Microsoft.PowerShell.Core\Import-Module ([IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Utility.psd1')) -ErrorAction Stop
+Microsoft.PowerShell.Core\Import-Module ([IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Management','Microsoft.PowerShell.Management.psd1')) -ErrorAction Stop
+`;
+  await fs.writeFile(file, '\uFEFF' + bootstrap + script, 'utf8');
   return new Promise((resolve, reject) => {
     const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', file], {cwd, windowsHide: true, env:{...process.env,...env,PSModulePath:path.join(process.env.SystemRoot??'C:/Windows','System32/WindowsPowerShell/v1.0/Modules')}});
     let output = '';const timer=setTimeout(()=>{child.kill();reject(Error('PowerShell fixture exceeded deadline'));},120_000);
@@ -154,6 +160,12 @@ try {
 `;
   const result=await powershell(script,f.dir,authEnv);
   let nativeFacts=[];try{const text=await fs.readFile(path.join(f.dir,'logs/mcp-probe.failures.jsonl'),'utf8');nativeFacts=text.split(/\r?\n/u).filter(Boolean).map(line=>{const d=JSON.parse(line.replace(/^\uFEFF/u,''));return {code:d.code,phase:d.phase,exitCode:d.exitCode,wallMs:d.wallMs};});}catch{}
+  if(result.code!==0) {
+    // Emit the synthetic fixture's failure before the outer suite deadline can
+    // terminate the test reporter. Redact both generated fixture credentials.
+    const safe=result.output.replaceAll(credentials.proof,'[REDACTED]').replaceAll(credentials.invalidProof,'[REDACTED]');
+    console.error('ENSURE_MCP_FIXTURE_FAILURE '+JSON.stringify({exit:result.code,output:safe.slice(-4000),nativeFacts}));
+  }
   assert.equal(result.code,0,result.output+'\n'+JSON.stringify(nativeFacts));assert.match(result.output,/COLD_REUSE_RESTART_HEALTH_PASSED/);assert.match(result.output,/AUTHENTICATED_FULL_PROTOCOL_PASSED/);assert.ok(!result.output.includes(credentials.proof));assert.ok(!result.output.includes(credentials.invalidProof));
   for(const name of await fs.readdir(path.join(f.dir,'logs'))){const text=await fs.readFile(path.join(f.dir,'logs',name),'utf8');assert.ok(!text.includes(credentials.proof));assert.ok(!text.includes(credentials.invalidProof));}
 });

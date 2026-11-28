@@ -10,16 +10,16 @@ const windowsAclScript=`$ErrorActionPreference='Stop'
 try {
  $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
  $allowed=@($sid,'S-1-5-18','S-1-5-32-544')
- $acl=Get-Acl -LiteralPath $env:WRITER_PROBE_INTERNAL_CREDENTIAL_PATH
- $owner=(New-Object Security.Principal.NTAccount($acl.Owner)).Translate([Security.Principal.SecurityIdentifier]).Value
+ $acl=[IO.File]::GetAccessControl($env:WRITER_PROBE_INTERNAL_CREDENTIAL_PATH)
+ $owner=$acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
  if($allowed -notcontains $owner){exit 2}
- foreach($rule in $acl.Access){
+ foreach($rule in $acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])){
   if($rule.AccessControlType -eq 'Allow'){
-   $identity=$rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+   $identity=$rule.IdentityReference.Value
    if($allowed -notcontains $identity){exit 3}
   }
  }
- Write-Output 'PRIVATE'
+ [Console]::WriteLine('PRIVATE')
 } catch {exit 4}`;
 async function readCredentialFile(filename){
  if(typeof filename!=='string'||!path.isAbsolute(filename)||filename.startsWith('\\\\'))return fail();

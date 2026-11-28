@@ -16,6 +16,21 @@ if (process.platform === 'win32') {
     assert.equal(result.status, 0, result.stderr || result.stdout || result.error?.message);
     return result.stdout.trim();
   };
+  // Stop the fixture's own child and wait on the same process handle.
+  // Windows releases a child's working directory and file handles on exit,
+  // not necessarily when the termination request returns.
+  const stopFixture = pid => {
+    assert(Number.isSafeInteger(pid) && pid > 0, 'Invalid fixture child PID');
+    ps(`$ErrorActionPreference='Stop';
+      Microsoft.PowerShell.Core\\Import-Module ([IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Management','Microsoft.PowerShell.Management.psd1')) -ErrorAction Stop;
+      $p=Get-Process -Id ${pid} -ErrorAction SilentlyContinue;
+      if ($null -ne $p) { try {
+        $null=$p.Handle;
+        if (-not $p.HasExited) { $p.Kill() }
+        if (-not $p.WaitForExit(5000)) { throw 'Fixture child did not terminate' }
+      } finally { $p.Dispose() } }`);
+  };
+  let primaryError;
   try {
     // Use the actual builder, not a separate test-only compilation path.
     const manager = path.join(root, 'scripts/manage-secure-tunnel.ps1');
@@ -40,22 +55,42 @@ if (process.platform === 'win32') {
     assert.equal(observed.action, 'Reconcile');
     assert.equal(observed.data, temp, 'Unicode, spaces, apostrophe and ampersand survive argv');
     await writeFile(fixture, '\ufeff' + `param($Action,[switch]$Json,$DataDirectory)
-      $s=New-Object Diagnostics.ProcessStartInfo
+      $ErrorActionPreference='Stop'
+      [IO.File]::WriteAllText(([IO.Path]::Combine($DataDirectory,'phase-enter.txt')),[DateTime]::UtcNow.ToString('o'))
+      Microsoft.PowerShell.Core\\Import-Module ([IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Utility.psd1')) -ErrorAction Stop
+      Microsoft.PowerShell.Core\\Import-Module ([IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Management','Microsoft.PowerShell.Management.psd1')) -ErrorAction Stop
+      [IO.File]::WriteAllText(([IO.Path]::Combine($DataDirectory,'phase-modules.txt')),[DateTime]::UtcNow.ToString('o'))
+      $s=[Diagnostics.ProcessStartInfo]::new()
       $s.FileName="$env:SystemRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
       $s.Arguments='-NoProfile -NonInteractive -Command Start-Sleep -Seconds 20'
       $s.UseShellExecute=$false; $s.CreateNoWindow=$true; $s.RedirectStandardError=$true
+      [IO.File]::WriteAllText(([IO.Path]::Combine($DataDirectory,'phase-start.txt')),[DateTime]::UtcNow.ToString('o'))
       $child=[Diagnostics.Process]::Start($s)
       [IO.File]::WriteAllText((Join-Path $DataDirectory 'descendant.pid'),[string]$child.Id)
       $child.Dispose()
+      [IO.File]::WriteAllText(([IO.Path]::Combine($DataDirectory,'phase-exit.txt')),[DateTime]::UtcNow.ToString('o'))
       exit 8`);
     try {
+      const started=Date.now();
       const inherited = spawnSync(host, [fixture, temp], { timeout: 8000 });
-      assert.equal(inherited.status, 8, 'Detached descendants retaining a pipe must not keep the task running');
-    } finally {
-      const pid = Number(await readFile(path.join(temp, 'descendant.pid'), 'utf8'));
-      if (Number.isSafeInteger(pid) && pid > 0) {
-        ps(`Stop-Process -Id ${pid} -ErrorAction SilentlyContinue`);
+      if (inherited.status !== 8) {
+        const phases={};
+        for (const name of ['phase-enter','phase-modules','phase-start','phase-exit']) {
+          phases[name]=await readFile(path.join(temp,name+'.txt'),'utf8').catch(error=>{
+            if(error.code==='ENOENT') return null;
+            throw error;
+          });
+        }
+        console.error('HEADLESS_PHASES '+JSON.stringify({elapsed_ms:Date.now()-started,status:inherited.status,error:inherited.error?.code,phases}));
       }
+      assert.equal(inherited.status, 8, inherited.error?.message || 'Detached descendants retaining a pipe must not keep the task running');
+    } finally {
+      // Missing PID must not obscure an earlier launch failure.
+      const pidText = await readFile(path.join(temp, 'descendant.pid'), 'utf8').catch(error => {
+        if (error.code === 'ENOENT') return '';
+        throw error;
+      });
+      if (pidText) stopFixture(Number(pidText));
     }
     assert.equal(spawnSync(host, [], { timeout: 10000 }).status, 2, 'Invalid args fail silently');
     const listener = path.join(temp, 'listener.mjs');
@@ -83,7 +118,17 @@ if (process.platform === 'win32') {
           return error == 6 ? 0 : 100 + error;
         } }';
         exit [ListenerConsoleProbe]::Check(${listenerPid})`);
-    } finally { process.kill(listenerPid); }
+    } finally { stopFixture(listenerPid); }
     console.log('Headless host passed: GUI PE, actual console absence, exact argv, pipe draining, exit propagation.');
-  } finally { await rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+  } catch (error) {
+    primaryError = error;
+    throw error;
+  } finally {
+    try {
+      await rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } catch (cleanupError) {
+      if (primaryError) throw new AggregateError([primaryError, cleanupError], 'Headless assertion and fixture cleanup both failed');
+      throw cleanupError;
+    }
+  }
 }
