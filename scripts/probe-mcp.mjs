@@ -63,6 +63,14 @@ function readinessFacts(payload) {
   return {
     runtimeState: ['idle', 'unverified', 'running', 'ready', 'degraded', 'failed'].includes(runtime?.state) ? runtime.state : 'unknown',
     runtimeStep: ['journal', 'checkpoint', 'transaction', 'trpg'].includes(runtime?.current_step) ? runtime.current_step : null,
+    // Component names and state values are closed enums. Never include
+    // last_error, paths, arbitrary keys, or server-supplied messages.
+    ...(runtime?.components && typeof runtime.components === 'object' ? {
+      runtimeComponents: Object.fromEntries(['journal', 'checkpoint', 'transaction', 'trpg'].map(name => {
+        const state = runtime.components[name]?.state;
+        return [name, ['idle', 'recovering', 'ready', 'degraded', 'unavailable'].includes(state) ? state : 'unknown'];
+      })),
+    } : {}),
   };
 }
 
@@ -215,10 +223,33 @@ export async function runMcpProbe({ endpoint, mode = 'probe', expectedInstance,
         }
       }
       if (!Array.isArray(resources?.resources)) throw failure('RESOURCES_DISCOVERY_FAILED', 'MCP resources/list response is invalid');
-      const { response: readyResponse, payload: readiness } = await stage('ready', () => json('/ready', headers()));
-      lastReadiness = readinessFacts(readiness);
-      if (readyResponse.status !== 200 || readiness?.ready !== true || lastReadiness.runtimeState !== 'ready') {
-        throw failure(readyResponse.status === 404 ? 'SESSION_NOT_FOUND' : 'RUNTIME_NOT_READY', 'Session runtime readiness validation failed');
+      let readiness;
+      // Discovery can succeed while the component recovery graph is still
+      // running. Wait only for a recognized transient state, within the
+      // original startup deadline; never treat HTTP 200 alone as readiness.
+      for (;;) {
+        let response, payload;
+        try {
+          ({ response, payload } = await stage('ready', () => json('/ready', headers())));
+        } catch (error) {
+          if (error?.code === 'HTTP_TIMEOUT' && ['idle', 'unverified', 'running'].includes(lastReadiness.runtimeState)
+            && deadlineAt - performance.now() <= 2) {
+            throw failure('RUNTIME_NOT_READY', 'Runtime did not become ready within the startup budget');
+          }
+          throw error;
+        }
+        lastReadiness = readinessFacts(payload);
+        if (response.status === 200 && payload?.ready === true && lastReadiness.runtimeState === 'ready') {
+          readiness = payload;
+          break;
+        }
+        if (![200, 503].includes(response.status) || !['idle', 'unverified', 'running'].includes(lastReadiness.runtimeState)) {
+          throw failure(response.status === 404 ? 'SESSION_NOT_FOUND' : 'RUNTIME_NOT_READY', 'Session runtime readiness validation failed');
+        }
+        const remainingStartup = deadlineAt - performance.now();
+        if (remainingStartup <= 2) throw failure('RUNTIME_NOT_READY', 'Runtime did not become ready within the startup budget');
+        await new Promise(resolve => setTimeout(resolve, Math.min(250, Math.max(1, remainingStartup - 2))));
+        if (deadlineAt - performance.now() <= 2) throw failure('RUNTIME_NOT_READY', 'Runtime did not become ready within the startup budget');
       }
       try { await stage('ping', () => client.ping({ timeout: Math.ceil(remaining()) })); }
       catch (e) { if (e instanceof ProbeError) throw e; if(authenticationFailure(e))throw failure('MCP_AUTHENTICATION_FAILED','MCP authentication required or rejected',e); throw failure('MCP_PING_FAILED', 'MCP ping failed', e); }

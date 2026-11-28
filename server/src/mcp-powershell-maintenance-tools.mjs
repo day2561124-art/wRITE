@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import {traceSpan} from "./mcp-request-tracing.mjs";
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -312,20 +312,52 @@ async function runPowerShellProcessObserved({
   const stderrCollector = createBoundedOutputCollector(POWERSHELL_MAINTENANCE_OUTPUT_MAX_CHARACTERS);
   let child;
   let timedOut = false;
+  let moduleCacheRoot;
+  const cleanModuleCache = async () => {
+    if (moduleCacheRoot) await rm(moduleCacheRoot, { recursive: true, force: true }).catch(() => {});
+  };
 
   try {
+    // Match the fixed Windows PowerShell module root already used by the
+    // native AppContainer, scoped admin and probe launchers. A stripped
+    // environment must not rely on discovery of caller/user PSModulePath.
+    const windows = process.env.SystemRoot ?? process.env.WINDIR;
+    const psEnvironment = process.platform === "win32" && windows && path.isAbsolute(windows)
+      ? { PSModulePath: path.join(windows, "System32", "WindowsPowerShell", "v1.0", "Modules") }
+      : {};
+    // Windows PowerShell can hang during implicit module cache discovery
+    // in a restricted Session 0 environment. Use a fresh private scratch
+    // location rather than trusting or forwarding the parent's cache path.
+    if (process.platform === "win32") {
+      moduleCacheRoot = await mkdtemp(path.join(os.tmpdir(), "nexa-ps-module-cache-"));
+      psEnvironment.PSModuleAnalysisCachePath = path.join(moduleCacheRoot, "ModuleAnalysisCache");
+    }
+    // Load only the two commonly used inbox modules by absolute manifest
+    // path. This avoids the measured cold command-discovery stall without
+    // copying an externally supplied cache or disabling module autoloading.
+    // Preserve the caller's command text and original command hash.
+    const nativeCommand = process.platform === "win32" ? [
+      "try {",
+      ...["Microsoft.PowerShell.Utility", "Microsoft.PowerShell.Management"].map(name =>
+        "Microsoft.PowerShell.Core\\Import-Module ([IO.Path]::Combine($PSHOME,'Modules','" + name + "','" + name + ".psd1')) -ErrorAction Stop;"),
+      "} catch { [Console]::Error.WriteLine('NEXA_SYSTEM_MODULE_IMPORT_FAILED'); exit 1 }",
+      "& {",
+      command,
+      "}",
+    ].join("\r\n") : command;
     child = spawnImpl(
       "powershell.exe",
-      ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+      ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", nativeCommand],
       {
         cwd,
-        env: controlledProcessEnvironment(),
+        env: controlledProcessEnvironment(psEnvironment),
         shell: false,
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
   } catch (error) {
+    await cleanModuleCache();
     return {
       ...processResultBase({ elevated: false, command, cwd, timeoutMs, startedAt }),
       stderr: redactProcessOutput(error?.message ?? String(error)),
@@ -353,6 +385,7 @@ async function runPowerShellProcessObserved({
     child.once("close", (code, signal) => finish({ code, signal }));
   });
 
+  await cleanModuleCache();
   const stdout = stdoutCollector.finish();
   const stderr = stderrCollector.finish();
   const executionOk = !result.error;

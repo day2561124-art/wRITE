@@ -86,6 +86,35 @@ test('cold recovery beyond 30 seconds succeeds and resources discovery is retrie
   assert.ok(result.discoveryMs >= 32_000 && result.discoveryMs < 45_000);
 });
 
+test('successful discovery waits for still recovering HTTP 200 runtime', async t => {
+  let polls = 0;
+  const f = await fixture(t, {
+    ready: () => ({ready: true, child: {generation: 1, runtime_readiness: {
+      state: ++polls >= 3 ? 'ready' : 'running', current_step: 'journal',
+      components: {journal: {state: polls >= 3 ? 'ready' : 'recovering'}}
+    }}}),
+  });
+  const result = await f.run();
+  assert.equal(result.ready, true);
+  assert.equal(f.counts.ready, 3);
+  assert.equal(f.counts.resources, 1);
+  assert.equal(f.counts.ping, 1);
+  assert.equal(f.counts.closed, 1);
+});
+
+test('successful discovery does not certify hung or degraded runtime', async t => {
+  for (const state of ['running', 'degraded']) {
+    const f = await fixture(t, {readiness: {ready: true, child: {runtime_readiness: {state}}}});
+    await assert.rejects(f.run({startupBudgetMs: 600, hardDeadlineMs: 2000}), e =>
+      e.code === 'RUNTIME_NOT_READY' && e.details.runtimeState === state);
+    assert.equal(f.counts.ping, 0);
+    assert.equal(f.counts.resources, 1);
+    assert.equal(f.counts.closed, 1);
+    if (state === 'degraded') assert.equal(f.counts.ready, 1);
+    else assert.ok(f.counts.ready >= 2);
+  }
+});
+
 test('ready never substitutes for failed resources/list', async t => {
   const f = await fixture(t, {resources: async () => {throw Object.assign(new Error('HTTP 503 private token'), {status: 503});}});
   await assert.rejects(f.run(), e => e.code === 'RESOURCES_DISCOVERY_FAILED');
@@ -116,9 +145,11 @@ test('hung runtime is bounded, reports runtime phase, and closes session', async
 
 test('failed runtime fails immediately with safe readiness diagnostics', async t => {
   const f = await fixture(t, {resources: async () => {throw new Error('timeout');},
-    readiness: {ready: false, child: {runtime_readiness: {state: 'failed', current_step: 'checkpoint', last_error: 'SECRET'}}}});
+    readiness: {ready: false, child: {runtime_readiness: {state: 'failed', current_step: 'checkpoint', last_error: 'SECRET', components: {journal: {state: 'ready'}, checkpoint: {state: 'unavailable', last_error: 'SECRET'}, transaction: {state: 'degraded'}, trpg: {state: 'SECRET'}, SECRET: {state: 'ready'}}}}}});
   await assert.rejects(f.run(), e => e.code === 'RUNTIME_NOT_READY' && e.details.runtimeState === 'failed'
-    && e.details.runtimeStep === 'checkpoint' && !formatProbeFailure(e).includes('SECRET'));
+    && e.details.runtimeStep === 'checkpoint'
+    && (assert.deepEqual(e.details.runtimeComponents, {journal: 'ready', checkpoint: 'unavailable', transaction: 'degraded', trpg: 'unknown'}), true)
+    && !formatProbeFailure(e).includes('SECRET'));
   assert.equal(f.counts.ready, 1);
 });
 

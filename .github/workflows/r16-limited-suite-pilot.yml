@@ -1,0 +1,274 @@
+name: R16 limited Windows suite compatibility
+
+# Disposable hosted CI only. No secrets, OIDC, signing, or production admission.
+# This workflow runs unchanged legacy suites under a limited Password task.
+# The candidate-controlled PR workflow is NOT an independent trusted verifier.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/r16-limited-suite-pilot.yml'
+permissions:
+  contents: read
+concurrency:
+  group: r16-limited-suite-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  limited-suite:
+    runs-on: windows-latest
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [mcp, mcp_tunnel]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          package-manager-cache: false
+      - name: Run complete unchanged suite as a temporary standard user
+        shell: pwsh
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          SUITE: ${{ matrix.suite }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -cne $env:EXPECTED_HEAD) { throw 'Candidate mismatch' }
+          $entry = switch ($env:SUITE) {
+            'mcp' { 'tests\tools\mcp-contract.test.mjs' }
+            'mcp_tunnel' { 'tests\mcp-tunnel-launcher.test.mjs' }
+            default { throw 'Unsupported suite' }
+          }
+          $suffix = [guid]::NewGuid().ToString('N').Substring(0,12)
+          $root = Join-Path $env:SystemDrive "NexaSuite-$suffix"
+          $account = "NexaSuit$suffix"
+          $task = "NexaSuiteTask-$suffix"
+          $createdUser = $false
+          $createdTask = $false
+          $createdProvisioner = $false
+          $provisionTask = 'WriterWorkbench-NexaStationLeaseV1'
+          $batchPolicyChanged = $false
+          $source = Join-Path $root 'source'
+          $tools = Join-Path $root 'tools'
+          $run = Join-Path $root 'run'
+          function Native-OK([string]$Label) {
+            if ($LASTEXITCODE -ne 0) { throw "$Label failed: $LASTEXITCODE" }
+          }
+          function Set-FixtureBatchRight([string]$Value,[string]$Label) {
+            $inf = Join-Path $root "$Label.inf"
+            $db = Join-Path $root "$Label.sdb"
+            @('[Unicode]', 'Unicode=yes', '[Version]', 'signature="$CHICAGO$"', 'Revision=1', '[Privilege Rights]', "SeBatchLogonRight = $Value") |
+              Set-Content -LiteralPath $inf -Encoding Unicode
+            secedit /configure /db $db /cfg $inf /areas USER_RIGHTS /quiet
+            Native-OK "Fixture batch-logon $Label"
+          }
+          try {
+            $null = New-Item -ItemType Directory -Path $root
+            icacls $root /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)(F)' '*S-1-5-32-544:(OI)(CI)(F)' | Out-Null
+            Native-OK 'Fixture root protection'
+            $null = New-Item -ItemType Directory -Path $tools,$run
+            # Full clone, not a synthetic fixture commit. No persisted remote credentials.
+            # Use identical Git configuration in the provisioner and limited user.
+            # Honor explicit tracked .gitattributes, without machine/user CRLF defaults.
+            $env:GIT_CONFIG_NOSYSTEM = '1'
+            $env:GIT_CONFIG_GLOBAL = 'NUL'
+            git clone --no-local --no-hardlinks --no-checkout -- "$env:GITHUB_WORKSPACE" "$source"
+            Native-OK 'Local clone'
+            git -C $source config --local core.autocrlf false
+            Native-OK 'Pin checkout line ending policy'
+            git -C $source config --local core.filemode false
+            Native-OK 'Pin Windows filemode policy'
+            git -C $source checkout --detach $actual
+            Native-OK 'Exact checkout'
+            git -C $source remote remove origin
+            Native-OK 'Remove origin'
+            if ((git -C $source rev-parse HEAD).Trim() -cne $actual) { throw 'Guest Git identity mismatch' }
+            Native-OK 'Guest Git identity'
+            $initialStatus = @(git -C $source status --porcelain=v1 --untracked-files=all)
+            Native-OK 'Provisioner checkout status'
+            if ($initialStatus.Count -ne 0) {
+              $initialStatus | Select-Object -First 40 | ForEach-Object { Write-Output ("CHECKOUT_STATUS: " + $_) }
+              throw 'Provisioner checkout is not clean'
+            }
+            $nodeDir = Split-Path (Get-Command node.exe -ErrorAction Stop).Source
+            $gitDir = Split-Path (Get-Command git.exe -ErrorAction Stop).Source
+            robocopy $nodeDir $tools /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+            if ($LASTEXITCODE -ge 8) { throw 'Fixture toolchain copy failed' }
+            $node = Join-Path $tools 'node.exe'
+            $password = 'Nexa!9a-' + [guid]::NewGuid().ToString('N')
+            $secure = ConvertTo-SecureString -String $password -AsPlainText -Force
+            $user = New-LocalUser -Name $account -Password $secure -Description 'Disposable Nexa limited suite diagnostic'
+            $createdUser = $true
+            $sid = $user.SID.Value
+            $policy = Join-Path $root 'original-rights.inf'
+            secedit /export /cfg $policy /areas USER_RIGHTS /quiet
+            Native-OK 'Fixture rights export'
+            $line = @(Get-Content -LiteralPath $policy | Where-Object { $_ -match '^SeBatchLogonRight\s*=' })
+            if ($line.Count -gt 1) { throw 'Ambiguous batch-logon policy' }
+            $originalBatch = if ($line.Count -eq 1) { ($line[0] -split '=',2)[1].Trim() } else { '' }
+            $entries = @($originalBatch -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+            $batchPolicyChanged = $true
+            Set-FixtureBatchRight ((@($entries) + "*$sid") -join ',') 'fixture-batch-grant'
+            icacls $root /grant:r "*${sid}:(OI)(CI)(RX)" | Out-Null
+            Native-OK 'Fixture read ACL'
+            foreach ($dir in @($source,$run)) {
+              icacls $dir /grant:r "*${sid}:(OI)(CI)(M)" | Out-Null
+              Native-OK 'Fixture writable guest ACL'
+            }
+            # Install the already-reviewed provider from the pinned merged
+            # baseline, never from the candidate's writable checkout.
+            if ($env:SUITE -eq 'mcp') {
+              $trusted = Join-Path $root 'trusted-station'
+              $archive = Join-Path $root 'trusted-station.zip'
+              $baseline = '3abf37d67959bc264195f5882297fcf68c447b58'
+              git -C "$env:GITHUB_WORKSPACE" archive --format=zip --output=$archive $baseline scripts/register-mcp-session0-station-lease.ps1 scripts/mcp-session0-station-lease-provider.cs
+              Native-OK 'Pinned station provider archive'
+              Expand-Archive -LiteralPath $archive -DestinationPath $trusted
+              $provider = Join-Path $trusted 'scripts\mcp-session0-station-lease-provider.cs'
+              $installer = Join-Path $trusted 'scripts\register-mcp-session0-station-lease.ps1'
+              $hash = (Get-FileHash -LiteralPath $provider -Algorithm SHA256).Hash
+              $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+              $receipt = & $ps -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File $installer -DispatcherAccount $account -ExpectedSourceSha256 $hash
+              Native-OK 'Protected station provider installation'
+              $createdProvisioner = $true
+              $installed = ($receipt | Out-String).Trim() | ConvertFrom-Json
+              if (!$installed.installed -or $installed.started -or $installed.dispatcher_sid -ne $sid -or $installed.source_sha256 -ne $hash) { throw 'Station installation identity mismatch' }
+              Write-Output "LIMITED_STATION_BASELINE=$baseline; SHA256=$hash"
+            }
+            # Git safe.directory relies on ownership, not only ACL permission.
+            icacls $source /setowner "*$sid" /T /Q | Out-Null
+            Native-OK 'Guest checkout ownership'
+            # Supervisor-owned filename and parent, never read guest-selected paths.
+            $log = Join-Path $root 'suite.log'
+            [IO.File]::WriteAllText($log, '')
+            icacls $log /grant:r "*${sid}:(W)" | Out-Null
+            Native-OK 'Diagnostic log ACL'
+            $script = Join-Path $root 'limited-suite.ps1'
+            @'
+          param([string]$Root,[string]$Expected,[string]$Entry,[string]$GitDir)
+          $ErrorActionPreference = 'Stop'
+          $source = Join-Path $Root 'source'
+          $run = Join-Path $Root 'run'
+          $tools = Join-Path $Root 'tools'
+          $node = Join-Path $tools 'node.exe'
+          $npm = Join-Path $tools 'node_modules\npm\bin\npm-cli.js'
+          $env:PATH = "$tools;$GitDir;$env:SystemRoot\System32;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
+          $env:TEMP = $run
+          $env:TMP = $run
+          $env:GIT_CONFIG_NOSYSTEM = '1'
+          $env:GIT_CONFIG_GLOBAL = 'NUL'
+          $env:GIT_TERMINAL_PROMPT = '0'
+          $env:WRITER_WORKBENCH_PROBE_CREDENTIAL_FILE = ''
+          Set-Location -LiteralPath $source
+          $session = (Get-Process -Id $PID).SessionId
+          $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+          Write-Output "LIMITED_IDENTITY=$([Security.Principal.WindowsIdentity]::GetCurrent().User.Value); SESSION=$session; ADMIN=$admin"
+          if ($session -ne 0 -or $admin) { exit 60 }
+          if ((git rev-parse HEAD).Trim() -cne $Expected -or $LASTEXITCODE -ne 0) { exit 61 }
+          $dirty = @(git status --porcelain=v1 --untracked-files=all)
+          if ($LASTEXITCODE -ne 0) { exit 63 }
+          if ($dirty.Count -ne 0) {
+            $dirty | Select-Object -First 30 | ForEach-Object { Write-Output ("GUEST_CHECKOUT_STATUS: " + $_) }
+            exit 62
+          }
+          Write-Output 'LIMITED_CHECKOUT_CLEAN'
+          # Dependency installation runs under the same disposable user, never supervisor.
+          & $node $npm ci --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { exit 64 }
+          # Cold startup is separate from the existing 5s production-path test.
+          # Exercise the same controlled environment and pipe-based runner once,
+          # record the real latency, and still require the unchanged suite.
+          if ($Entry -eq 'tests\tools\mcp-contract.test.mjs') {
+            $preflight = 'import {spawnSync} from "node:child_process"; import path from "node:path"; import os from "node:os"; import {mkdtempSync,lstatSync,rmSync} from "node:fs"; import {controlledProcessEnvironment} from "./server/src/process-control.mjs"; const exe=path.join(process.env.SystemRoot,"System32","WindowsPowerShell","v1.0","powershell.exe"); const base=controlledProcessEnvironment({PSModulePath:path.join(path.dirname(exe),"Modules")}); const scratch=mkdtempSync(path.join(os.tmpdir(),"nexa-cache-probe-")); const run=(name,cache,command,timeout=5000)=>{const env={...base,PSModuleAnalysisCachePath:cache};const start=Date.now();const r=spawnSync(exe,["-NoLogo","-NoProfile","-NonInteractive","-Command",command],{cwd:process.cwd(),env,stdio:["ignore","pipe","pipe"],encoding:"utf8",windowsHide:true,timeout,maxBuffer:65536});let info;try{info=lstatSync(cache);}catch{}console.log("LIMITED_PS_VARIANT="+JSON.stringify({name,ok:r.status===0&&r.stdout?.includes("limited-launch-ok"),exit_code:r.status,error:r.error?.code??null,elapsed_ms:Date.now()-start,cacheBytes:info?.isFile()?info.size:null}));}; const marker="Write-Output ''limited-launch-ok''"; const utility="Microsoft.PowerShell.Utility"; const management="Microsoft.PowerShell.Management"; const importModule=name=>"$ErrorActionPreference=''Stop''; Import-Module ([IO.Path]::Combine($PSHOME,''Modules'',''"+name+"'',''"+name+".psd1'')) -ErrorAction Stop; "; try {const fresh=name=>path.join(scratch,name);run("existing",process.env.PSModuleAnalysisCachePath,marker);run("qualified",fresh("qualified"),utility+"\\Write-Output ''limited-launch-ok''");run("explicit-utility",fresh("utility"),importModule(utility)+marker);run("explicit-both",fresh("both"),importModule(utility)+importModule(management)+"if ((Get-Process -Id $PID).Id -eq $PID) {"+marker+"}");run("autoload-none",fresh("none"),"$PSModuleAutoLoadingPreference=''None''; "+importModule(utility)+importModule(management)+"if ((Get-Process -Id $PID).Id -eq $PID) {"+marker+"}");const warmed=fresh("warm");run("fresh-warm",warmed,importModule(utility)+importModule(management)+"[Console]::WriteLine(''limited-launch-ok''); [Threading.Thread]::Sleep(1000)",10000);run("warm-reuse",warmed,marker);run("fresh-long",fresh("long"),marker,30000);}finally{rmSync(scratch,{recursive:true,force:true});}'
+            # Node reads the exact diagnostic from stdin, not a generated source file.
+            $preflight | & $node --input-type=module -
+            $preflightExit = $LASTEXITCODE
+            Write-Output "LIMITED_PS_PREFLIGHT_EXIT=$preflightExit"
+            # A failed diagnostic does not replace or skip the mandatory suite.
+          }
+          # The tunnel integration suite owns synthetic OAuth and loopback
+          # services, not the operator's external TRPG adapter. Match the
+          # existing Windows tailscale/recovery test fixture environment.
+          if ($Entry -eq 'tests\mcp-tunnel-launcher.test.mjs') {
+            $env:WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL = '1'
+            $env:WRITER_WORKBENCH_ISOLATED_TEST_CHECKPOINT = '1'
+            $env:WRITER_WORKBENCH_ISOLATED_TEST_TRANSACTION = '1'
+            Write-Output 'LIMITED_TUNNEL_FIXTURE_ISOLATION=1'
+          }
+          Write-Output "LIMITED_SUITE_BEGIN=$Entry; HEAD=$Expected"
+          & $node $Entry
+          $code = $LASTEXITCODE
+          Write-Output "LIMITED_SUITE_EXIT=$code"
+          exit $code
+          '@ | Set-Content -LiteralPath $script -Encoding UTF8
+            $wrapper = Join-Path $root 'run.cmd'
+            $exe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+            @('@echo off',
+              ('"' + $exe + '" -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "' + $script + '" -Root "' + $root + '" -Expected "' + $actual + '" -Entry "' + $entry + '" -GitDir "' + $gitDir + '" >"' + (Join-Path $root 'suite.log') + '" 2>&1'),
+              'exit /b %ERRORLEVEL%') | Set-Content -LiteralPath $wrapper -Encoding ASCII
+            $action = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\cmd.exe') -Argument ('/d /c ""' + $wrapper + '""') -WorkingDirectory $source
+            $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 45)
+            $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddHours(2)
+            $null = Register-ScheduledTask -TaskName $task -Action $action -Trigger $trigger -Settings $settings -User "$env:COMPUTERNAME\$account" -Password $password -RunLevel Limited
+            $createdTask = $true
+            $password = $null
+            $secure.Dispose()
+            $principal = (Get-ScheduledTask -TaskName $task).Principal
+            if ([string]$principal.LogonType -ne 'Password' -or [string]$principal.RunLevel -ne 'Limited') { throw 'Unexpected task principal' }
+            $prior = (Get-ScheduledTaskInfo -TaskName $task).LastRunTime
+            Start-ScheduledTask -TaskName $task
+            $deadline = [datetime]::UtcNow.AddMinutes(46)
+            do {
+              Start-Sleep -Seconds 5
+              $state = (Get-ScheduledTask -TaskName $task).State
+              $info = Get-ScheduledTaskInfo -TaskName $task
+              if ([datetime]::UtcNow -ge $deadline) { throw 'Limited suite timeout' }
+            } until ($info.LastRunTime -ne $prior -and $state -eq 'Ready')
+            Write-Output "LIMITED_TASK_RESULT=$($info.LastTaskResult); SUITE=$env:SUITE; HEAD=$actual"
+            if ($info.LastTaskResult -ne 0) { throw "Limited suite failed: $($info.LastTaskResult)" }
+            # Diagnostic output is not an independently trusted process attestation.
+            $log = Join-Path $root 'suite.log'
+            $item = Get-Item -LiteralPath $log -Force
+            if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.Length -gt 16MB) { throw 'Invalid limited suite diagnostic log' }
+            if (!(Select-String -LiteralPath $log -Pattern '^LIMITED_SUITE_EXIT=0$' -Quiet)) { throw 'Suite completion marker missing' }
+            Write-Output 'LIMITED_SUITE_COMPATIBILITY_PASS'
+          } finally {
+            # Keep logs bounded and avoid interpreting candidate output as supervisor evidence.
+            $log = Join-Path $root 'suite.log'
+            $item = Get-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue
+            if ($item -and !$item.PSIsContainer -and !($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -and $item.Length -le 16MB) {
+              # Retain early preflight markers even when the real suite has
+              # emitted hundreds of subsequent lines.
+              Select-String -LiteralPath $log -Pattern '^LIMITED_(?:PS_COLD_START|PS_VARIANT|PS_DELTA_NAMES|PS_CACHE_FACTS|PS_MINIMAL|PS_PREFLIGHT_EXIT|TUNNEL_FIXTURE_ISOLATION|CHECKOUT_CLEAN|SUITE_BEGIN)(?:=|$)' |
+                Select-Object -First 30 | ForEach-Object { Write-Output ("GUEST PREFLIGHT: " + $_.Line.Substring(0,[Math]::Min(2048,$_.Line.Length))) }
+              Get-Content -LiteralPath $log -Tail 100 | ForEach-Object { Write-Output ("GUEST: " + $_) }
+            }
+            try {
+              if ($createdTask) {
+                Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
+                Unregister-ScheduledTask -TaskName $task -Confirm:$false
+              }
+            } finally {
+              try {
+                try {
+                  if ($createdProvisioner) {
+                    Stop-ScheduledTask -TaskName $provisionTask -ErrorAction SilentlyContinue
+                    Unregister-ScheduledTask -TaskName $provisionTask -Confirm:$false
+                  }
+                } finally {
+                  if ($batchPolicyChanged) { Set-FixtureBatchRight $originalBatch 'fixture-batch-restore' }
+                }
+              } finally {
+                if ($createdUser) { Remove-LocalUser -Name $account }
+              }
+            }
+            # This is a disposable hosted VM. No recursive supervisor cleanup
+            # of candidate-writable paths (which could contain junctions).
+          }
