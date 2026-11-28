@@ -1,0 +1,302 @@
+name: R16 native full MCP observer pilot
+
+# Disposable feasibility only. Candidate PR workflows are not trusted issuers.
+# No signing credentials, production grants, or attestation permissions.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/r16-raw-process-observer-pilot.cs'
+      - '.github/workflows/r16-native-full-mcp-pilot.yml'
+permissions:
+  contents: read
+concurrency:
+  group: r16-full-mcp-observer-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  observe:
+    runs-on: windows-latest
+    timeout-minutes: 65
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [mcp]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        if: matrix.mode == 'mcp'
+        with:
+          ref: dddc5e5619238f92c6592356735f0a9cdbce2b1d
+          path: candidate-mcp
+          persist-credentials: false
+      # Station provider must come from the reviewed merged baseline, never
+      # from the candidate checkout or guest-writable source.
+      - uses: actions/checkout@v7
+        if: matrix.mode == 'mcp'
+        with:
+          ref: 3abf37d67959bc264195f5882297fcf68c447b58
+          path: reviewed-station
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        if: matrix.mode == 'mcp'
+        with:
+          node-version: '24.18.0'
+          package-manager-cache: false
+      - name: Exercise actual Session 0 process handles and protected observer
+        shell: pwsh
+        env:
+          OBSERVER_MODE: ${{ matrix.mode }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $suffix = [guid]::NewGuid().ToString('N').Substring(0,12)
+          $root = Join-Path $env:SystemDrive "NexaObserver-$suffix"
+          $user = "NexaObs$suffix"
+          $task = "NexaObserver-$suffix"
+          $createdUser = $false
+          $createdTask = $false
+          $createdProvisioner = $false
+          $provisionTask = 'WriterWorkbench-NexaStationLeaseV1'
+          $policyChanged = $false
+          function Native-OK([string]$label) {
+            if ($LASTEXITCODE -ne 0) { throw "$label failed: $LASTEXITCODE" }
+          }
+          function Set-BatchRight([string]$value,[string]$label) {
+            $inf = Join-Path $root "$label.inf"
+            $db = Join-Path $root "$label.sdb"
+            @('[Unicode]','Unicode=yes','[Version]','signature="$CHICAGO$"','Revision=1','[Privilege Rights]',"SeBatchLogonRight = $value") |
+              Set-Content -LiteralPath $inf -Encoding Unicode
+            secedit /configure /db $db /cfg $inf /areas USER_RIGHTS /quiet
+            Native-OK $label
+          }
+          try {
+            $null = New-Item -ItemType Directory -Path $root
+            icacls $root /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)(F)' '*S-1-5-32-544:(OI)(CI)(F)' | Out-Null
+            Native-OK 'Observer root ACL'
+            $guest = Join-Path $root 'guest'
+            $null = New-Item -ItemType Directory -Path $guest
+            $password = [guid]::NewGuid().ToString('N') + 'Z!9a'
+            $secure = ConvertTo-SecureString $password -AsPlainText -Force
+            try {
+              $account = New-LocalUser -Name $user -Password $secure -AccountNeverExpires
+              $createdUser = $true
+              $sid = $account.SID.Value
+              [IO.File]::WriteAllText((Join-Path $root 'password.txt'),$password)
+            } finally {
+              $password = $null
+              $secure.Dispose()
+            }
+            icacls $guest /grant:r ("*" + $sid + ":(OI)(CI)(M)") | Out-Null
+            Native-OK 'Guest directory ACL'
+            [IO.File]::WriteAllText((Join-Path $root 'sentinel.txt'),'synthetic-protected-sentinel')
+            if ($env:OBSERVER_MODE -eq 'mcp') {
+              $candidate = 'dddc5e5619238f92c6592356735f0a9cdbce2b1d'
+              $input = Join-Path $env:GITHUB_WORKSPACE 'candidate-mcp'
+              if ((git -C $input rev-parse HEAD).Trim() -cne $candidate) { throw 'Candidate identity mismatch' }
+              Native-OK 'Candidate identity'
+              $source = Join-Path $guest 'source'
+              $run = Join-Path $guest 'run'
+              $tools = Join-Path $root 'tools'
+              $null = New-Item -ItemType Directory -Path $run,$tools
+              $env:GIT_CONFIG_NOSYSTEM = '1'
+              $env:GIT_CONFIG_GLOBAL = 'NUL'
+              git clone --no-local --no-hardlinks --no-checkout -- $input $source
+              Native-OK 'Candidate clone'
+              git -C $source config --local core.autocrlf false
+              Native-OK 'Candidate CRLF policy'
+              git -C $source config --local core.filemode false
+              Native-OK 'Candidate mode policy'
+              git -C $source checkout --detach $candidate
+              Native-OK 'Candidate checkout'
+              git -C $source remote remove origin
+              Native-OK 'Remove candidate remote'
+              $dirty = @(git -C $source status --porcelain=v1 --untracked-files=all)
+              Native-OK 'Candidate status'
+              if ($dirty.Count -ne 0 -or (git -C $source rev-parse HEAD).Trim() -cne $candidate) { throw 'Candidate checkout not exact and clean' }
+              Native-OK 'Candidate exact commit'
+              icacls $source /setowner ("*" + $sid) /T /Q | Out-Null
+              Native-OK 'Guest checkout ownership'
+              $nodeDir = Split-Path (Get-Command node.exe -ErrorAction Stop).Source
+              $gitDir = Split-Path (Get-Command git.exe -ErrorAction Stop).Source
+              robocopy $nodeDir $tools /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+              if ($LASTEXITCODE -ge 8) { throw 'Toolchain copy failed' }
+              icacls $tools /grant:r ("*" + $sid + ":(OI)(CI)(RX)") | Out-Null
+              Native-OK 'Guest readonly toolchain'
+              [IO.File]::WriteAllText((Join-Path $root 'git-dir.txt'),$gitDir)
+              Write-Output "RAW_OBSERVER_CANDIDATE=$candidate; SUITE=mcp"
+              $baseline = '3abf37d67959bc264195f5882297fcf68c447b58'
+              $reviewed = Join-Path $env:GITHUB_WORKSPACE 'reviewed-station'
+              if ((git -C $reviewed rev-parse HEAD).Trim() -cne $baseline) { throw 'Station baseline mismatch' }
+              Native-OK 'Station baseline identity'
+              $trusted = Join-Path $root 'trusted-station'
+              $null = New-Item -ItemType Directory -Path $trusted
+              $provider = Join-Path $trusted 'mcp-session0-station-lease-provider.cs'
+              $installer = Join-Path $trusted 'register-mcp-session0-station-lease.ps1'
+              # Extract original Git blob bytes, independent of checkout CRLF conversion.
+              $archive = Join-Path $root 'trusted-station.zip'
+              git -C $reviewed archive --format=zip --output=$archive $baseline scripts/register-mcp-session0-station-lease.ps1 scripts/mcp-session0-station-lease-provider.cs
+              Native-OK 'Pinned station archive'
+              Expand-Archive -LiteralPath $archive -DestinationPath $trusted
+              $provider = Join-Path $trusted 'scripts\mcp-session0-station-lease-provider.cs'
+              $installer = Join-Path $trusted 'scripts\register-mcp-session0-station-lease.ps1'
+              $hash = (Get-FileHash -LiteralPath $provider -Algorithm SHA256).Hash
+              if ($hash -cne '2DE166B7E428CDEC86C5A805111C7A1DB05A48715CA1FE68AEDA9E2E31481A3A') { throw 'Station source hash mismatch' }
+              $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+              $receipt = & $ps -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File $installer -DispatcherAccount $user -ExpectedSourceSha256 $hash
+              Native-OK 'Protected station provider installation'
+              $createdProvisioner = $true
+              $installed = ($receipt | Out-String).Trim() | ConvertFrom-Json
+              if (!$installed.installed -or $installed.started -or $installed.dispatcher_sid -ne $sid -or $installed.source_sha256 -ne $hash) { throw 'Station installation identity mismatch' }
+              Write-Output "RAW_OBSERVER_STATION_BASELINE=$baseline; SHA256=$hash"
+            }
+            $export = Join-Path $root 'original.inf'
+            secedit /export /cfg $export /areas USER_RIGHTS /quiet
+            Native-OK 'Export batch right'
+            $line = @(Get-Content -LiteralPath $export | Where-Object { $_ -match '^SeBatchLogonRight\s*=' })
+            if ($line.Count -gt 1) { throw 'Ambiguous batch policy' }
+            $original = if ($line.Count -eq 1) { ($line[0] -split '=',2)[1].Trim() } else { '' }
+            $entries = @($original -split ',' | Where-Object { $_.Trim() })
+            $policyChanged = $true
+            Set-BatchRight ((@($entries) + "*$sid") -join ',') 'grant'
+            $src = Join-Path $root 'observer.cs'
+            Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'scripts\r16-raw-process-observer-pilot.cs') -Destination $src
+            $exe = Join-Path $root 'observer.exe'
+            $compiler = Join-Path $env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+            & $compiler /nologo /target:exe /platform:x64 "/out:$exe" $src
+            Native-OK 'Compile native observer'
+            $args = '"' + $root + '" ' + $user + ' ' + $sid
+            if ($env:OBSERVER_MODE -eq 'loss') { $args += ' loss' }
+            if ($env:OBSERVER_MODE -eq 'mcp') { $args += ' mcp' }
+            $action = New-ScheduledTaskAction -Execute $exe -Argument $args -WorkingDirectory $root
+            $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+            $taskMinutes = if ($env:OBSERVER_MODE -eq 'mcp') { 59 } else { 3 }
+            $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes $taskMinutes) -MultipleInstances IgnoreNew
+            $null = Register-ScheduledTask -TaskName $task -Action $action -Principal $principal -Settings $settings
+            $createdTask = $true
+            $prior = (Get-ScheduledTaskInfo -TaskName $task).LastRunTime
+            Start-ScheduledTask -TaskName $task
+            if ($env:OBSERVER_MODE -eq 'loss') {
+              $log = Join-Path $root 'observer.log'
+              $lossDeadline = [datetime]::UtcNow.AddSeconds(25)
+              $ready = $null
+              do {
+                Start-Sleep -Milliseconds 100
+                $item = Get-Item -LiteralPath $log -ErrorAction SilentlyContinue
+                if ($item) {
+                  if ($item.Length -gt 16384 -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Invalid observer loss log' }
+                  $ready = @(Get-Content -LiteralPath $log | Where-Object { $_ -match '^RAW_OBSERVER_LOSS_READY supervisor=[0-9]+; members=[0-9]+(?:,[0-9]+)+$' })
+                  if ($ready.Count -gt 1) { throw 'Duplicate loss readiness' }
+                  if ($ready.Count -eq 1) { break }
+                }
+                if ([datetime]::UtcNow -ge $lossDeadline) { throw 'Observer loss readiness deadline' }
+              } while ($true)
+              if ($ready[0] -notmatch '^RAW_OBSERVER_LOSS_READY supervisor=([0-9]+); members=([0-9]+(?:,[0-9]+)+)$') { throw 'Invalid readiness' }
+              $supervisorId = [int]$Matches[1]
+              $memberIds = @($Matches[2].Split(',') | ForEach-Object { [int]$_ })
+              if ($memberIds.Count -lt 3 -or $memberIds.Count -gt 64 -or @($memberIds | Sort-Object -Unique).Count -ne $memberIds.Count -or $memberIds -contains $supervisorId) { throw 'Invalid job members' }
+              $supervisor = Get-Process -Id $supervisorId -ErrorAction Stop
+              $members = @()
+              try {
+                if ($supervisor.Path -ine $exe -or $supervisor.SessionId -ne 0 -or $supervisor.HasExited) { throw 'Unexpected supervisor process' }
+                # Open and retain real process handles before causing observer loss.
+                $null = $supervisor.Handle
+                foreach ($memberId in $memberIds) {
+                  $member = Get-Process -Id $memberId -ErrorAction Stop
+                  $members += $member
+                  $null = $member.Handle
+                  if ($member.HasExited -or $member.SessionId -ne 0) { throw 'Job member was not alive in Session 0' }
+                }
+                # Kill only the supervisor, not its tree or scheduled task.
+                # The private, non-inherited job handle must enforce cleanup.
+                $supervisor.Kill()
+                if (!$supervisor.WaitForExit(5000)) { throw 'Supervisor did not terminate' }
+                foreach ($member in $members) {
+                  if (!$member.WaitForExit(5000)) { throw 'Job member survived observer loss' }
+                }
+                if ([IO.File]::ReadAllText((Join-Path $root 'sentinel.txt')) -cne 'synthetic-protected-sentinel') { throw 'Sentinel changed' }
+                if (Test-Path -LiteralPath (Join-Path $root 'password.txt')) { throw 'Temporary logon material remains' }
+                Write-Output "RAW_OBSERVER_LOSS_PASS; observed=$($members.Count); survivors=0; certification=none"
+              } finally {
+                foreach ($member in $members) { $member.Dispose() }
+                $supervisor.Dispose()
+              }
+              # Abrupt loss is never interpreted as a successful suite outcome.
+              return
+            }
+            $deadline = [datetime]::UtcNow.AddMinutes($taskMinutes + 1)
+            do {
+              Start-Sleep -Seconds 1
+              $state = (Get-ScheduledTask -TaskName $task).State
+              $info = Get-ScheduledTaskInfo -TaskName $task
+              if ([datetime]::UtcNow -ge $deadline) { throw 'Observer deadline exceeded' }
+            } until ($state -eq 'Ready' -and $info.LastRunTime -ne $prior)
+            $log = Join-Path $root 'observer.log'
+            $item = Get-Item -LiteralPath $log
+            if ($item.Length -gt 16384 -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Invalid observer log' }
+            $lines = @(Get-Content -LiteralPath $log)
+            $lines | Write-Output
+            if ($env:OBSERVER_MODE -eq 'mcp') {
+              # Guest text is diagnostic only; prevent workflow commands/control
+              # sequences and bound output even on an unsuccessful suite.
+              foreach ($name in @('guest_profile_prepare.stdout','guest_profile_prepare.stderr','npm_prepare.stdout','npm_prepare.stderr','mcp.stdout','mcp.stderr')) {
+                $file = Join-Path $root ($name + '.b64')
+                $capture = Get-Item -LiteralPath $file -ErrorAction SilentlyContinue
+                if (!$capture) { continue }
+                if ($capture.PSIsContainer -or ($capture.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $capture.Length -gt 44000) { throw 'Invalid diagnostic capture' }
+                $decoded = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([IO.File]::ReadAllText($file)))
+                $decoded -split '\r?\n' | Select-Object -Last 100 | ForEach-Object {
+                  $safe = $_ -replace '[\x00-\x1f\x7f-\x9f]', '?'
+                  $safe = $safe.Replace('::', ': :')
+                  Write-Output ("GUEST_DIAGNOSTIC $name : " + $safe.Substring(0,[Math]::Min(2048,$safe.Length)))
+                }
+              }
+              foreach ($pattern in @(
+                '^RAW_OBSERVER guest_profile_prepare outcome=completed exit=0 active=0 total=[1-9][0-9]*$',
+                '^RAW_OBSERVER npm_prepare outcome=completed exit=0 active=0 total=[1-9][0-9]*$',
+                '^RAW_OBSERVER mcp outcome=completed exit=0 active=0 total=[1-9][0-9]*$',
+                '^RAW_OBSERVER_MCP_PILOT_PASS$'
+              )) {
+                if (@($lines | Where-Object { $_ -match $pattern }).Count -ne 1) { throw "Missing actual native suite observation: $pattern" }
+              }
+              if ($info.LastTaskResult -ne 0) { throw "Observer task failed: $($info.LastTaskResult)" }
+              if (Test-Path -LiteralPath (Join-Path $root 'password.txt')) { throw 'Temporary logon material remains' }
+              if ([IO.File]::ReadAllText((Join-Path $root 'sentinel.txt')) -cne 'synthetic-protected-sentinel') { throw 'Sentinel changed' }
+              return
+            }
+            foreach ($pattern in @(
+              '^RAW_OBSERVER isolation outcome=completed exit=0 active=0 total=[1-9][0-9]*$',
+              '^RAW_OBSERVER success outcome=completed exit=0 active=0 total=[1-9][0-9]*$',
+              '^RAW_OBSERVER failure outcome=completed exit=7 active=0 total=[1-9][0-9]*$',
+              '^RAW_OBSERVER descendant outcome=completed exit=7 active=0 total=(?:[2-9]|[1-9][0-9]+)$',
+              '^RAW_OBSERVER timeout outcome=timed_out exit=null active=0 total=[1-9][0-9]*$',
+              '^RAW_OBSERVER cancel outcome=cancelled exit=null active=0 total=[1-9][0-9]*$',
+              '^RAW_OBSERVER_PILOT_PASS$'
+            )) {
+              if (@($lines | Where-Object { $_ -match $pattern }).Count -ne 1) { throw "Missing native observation: $pattern" }
+            }
+            if ($info.LastTaskResult -ne 0) { throw "Observer task failed: $($info.LastTaskResult)" }
+            if (Test-Path -LiteralPath (Join-Path $root 'password.txt')) { throw 'Temporary logon material remains' }
+            if ([IO.File]::ReadAllText((Join-Path $root 'sentinel.txt')) -cne 'synthetic-protected-sentinel') { throw 'Sentinel changed' }
+          } finally {
+            if ($createdTask) {
+              Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
+              Unregister-ScheduledTask -TaskName $task -Confirm:$false
+            }
+            try {
+              Remove-Item -LiteralPath (Join-Path $root 'password.txt') -Force -ErrorAction SilentlyContinue
+              try {
+                if ($createdProvisioner) {
+                  Stop-ScheduledTask -TaskName $provisionTask -ErrorAction SilentlyContinue
+                  Unregister-ScheduledTask -TaskName $provisionTask -Confirm:$false
+                }
+              } finally {
+                if ($policyChanged) { Set-BatchRight $original 'restore' }
+              }
+            } finally {
+              if ($createdUser) { Remove-LocalUser -Name $user }
+            }
+            # Disposable VM; never recursively traverse guest-writable paths.
+          }
