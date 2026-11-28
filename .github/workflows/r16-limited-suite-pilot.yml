@@ -171,6 +171,15 @@ jobs:
             Write-Output "LIMITED_PS_PREFLIGHT_EXIT=$preflightExit"
             # A failed diagnostic does not replace or skip the mandatory suite.
           }
+          # The tunnel integration suite owns synthetic OAuth and loopback
+          # services, not the operator's external TRPG adapter. Match the
+          # existing Windows tailscale/recovery test fixture environment.
+          if ($Entry -eq 'tests\mcp-tunnel-launcher.test.mjs') {
+            $env:WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL = '1'
+            $env:WRITER_WORKBENCH_ISOLATED_TEST_CHECKPOINT = '1'
+            $env:WRITER_WORKBENCH_ISOLATED_TEST_TRANSACTION = '1'
+            Write-Output 'LIMITED_TUNNEL_FIXTURE_ISOLATION=1'
+          }
           Write-Output "LIMITED_SUITE_BEGIN=$Entry; HEAD=$Expected"
           & $node $Entry
           $code = $LASTEXITCODE
@@ -213,6 +222,10 @@ jobs:
             $log = Join-Path $root 'suite.log'
             $item = Get-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue
             if ($item -and !$item.PSIsContainer -and !($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -and $item.Length -le 16MB) {
+              # Retain early preflight markers even when the real suite has
+              # emitted hundreds of subsequent lines.
+              Select-String -LiteralPath $log -Pattern '^LIMITED_(?:PS_COLD_START|PS_PREFLIGHT_EXIT|TUNNEL_FIXTURE_ISOLATION|CHECKOUT_CLEAN|SUITE_BEGIN)(?:=|$)' |
+                Select-Object -First 8 | ForEach-Object { Write-Output ("GUEST PREFLIGHT: " + $_.Line.Substring(0,[Math]::Min(2048,$_.Line.Length))) }
               Get-Content -LiteralPath $log -Tail 100 | ForEach-Object { Write-Output ("GUEST: " + $_) }
             }
             try {
