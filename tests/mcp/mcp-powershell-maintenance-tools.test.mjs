@@ -157,6 +157,25 @@ try {
     assert.equal(normal.ok, true, JSON.stringify({ execution_ok: normal.execution_ok, exit_code: normal.exit_code, timed_out: normal.timed_out, duration_ms: normal.duration_ms, stdout: normal.stdout, stderr: normal.stderr }));
     assert.match(normal.stdout, /normal-powershell-ok/u);
 
+    const management = await runPowerShellProcess({
+      command: "param(); if ((Get-Process -Id $PID).Id -eq $PID) { Write-Output 'management-ok' } # final comment",
+      cwd: rootDir,
+      timeoutMs: 5_000,
+    });
+    assert.equal(management.ok, true, management.stderr);
+    assert.equal(management.stdout.trim(), "management-ok");
+    const explicitExit = await runPowerShellProcess({
+      command: "Write-Output 'explicit-exit'; exit 7",
+      cwd: rootDir,
+      timeoutMs: 5_000,
+    });
+    assert.equal(explicitExit.execution_ok, true, explicitExit.stderr);
+    assert.equal(explicitExit.timed_out, false);
+    assert.equal(explicitExit.exit_code, 7);
+    assert.equal(explicitExit.ok, false);
+    assert.equal(explicitExit.stdout.trim(), "explicit-exit");
+
+
     const oversized = await runPowerShellProcess({
       command: "Write-Output ('x' * 70000)",
       cwd: rootDir,
