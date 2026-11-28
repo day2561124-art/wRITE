@@ -94,18 +94,27 @@ export async function createTestProbeCredentialFile(directory, endpoint, credent
   if(process.platform==='win32'){
     const script=`$ErrorActionPreference='Stop'
 try {
- $acl=New-Object Security.AccessControl.FileSecurity
+ $acl=[Security.AccessControl.FileSecurity]::new()
  $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User
  $acl.SetOwner($sid)
  $acl.SetAccessRuleProtection($true,$false)
- foreach($identity in @($sid,(New-Object Security.Principal.SecurityIdentifier('S-1-5-18')),(New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')))) {
-  $rule=New-Object Security.AccessControl.FileSystemAccessRule($identity,'FullControl','Allow')
+ foreach($identity in @($sid,[Security.Principal.SecurityIdentifier]::new('S-1-5-18'),[Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))) {
+  $rule=[Security.AccessControl.FileSystemAccessRule]::new($identity,'FullControl','Allow')
   $acl.AddAccessRule($rule)
  }
- Set-Acl -LiteralPath $env:WRITER_PROBE_FIXTURE_FILE -AclObject $acl
-} catch {exit 2}`;
+ # Use the same Windows ACL API without triggering cmdlet module discovery.
+ [IO.File]::SetAccessControl($env:WRITER_PROBE_FIXTURE_FILE,$acl)
+ $actual=[IO.File]::GetAccessControl($env:WRITER_PROBE_FIXTURE_FILE)
+ if (-not $actual.AreAccessRulesProtected -or $actual.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) {exit 3}
+ $rules=$actual.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])
+ $allowed=@($sid.Value,'S-1-5-18','S-1-5-32-544')
+ if ($rules.Count -ne 3) {exit 3}
+ foreach($rule in $rules) {
+  if($rule.IsInherited -or $rule.IdentityReference.Value -notin $allowed -or $rule.AccessControlType -ne 'Allow' -or $rule.FileSystemRights -ne 'FullControl') {exit 3}
+ }
+} catch {[Console]::Error.WriteLine('ACL_FIXTURE_EXCEPTION:'+ $_.Exception.GetType().Name);exit 2}`;
     const result=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{env:{...process.env,WRITER_PROBE_FIXTURE_FILE:file,PSModulePath:path.join(process.env.SystemRoot??'C:/Windows','System32/WindowsPowerShell/v1.0/Modules')},windowsHide:true,encoding:'utf8',timeout:3000,maxBuffer:4096});
-    if(result.error||result.status!==0)throw Error('PROBE_FIXTURE_ACL_FAILED');
+    if(result.error||result.status!==0)throw Error('PROBE_FIXTURE_ACL_FAILED:'+(result.error?.code??String(result.status)));
   }
   return file;
 }
