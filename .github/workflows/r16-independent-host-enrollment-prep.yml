@@ -1,0 +1,216 @@
+name: R16 independent host enrollment preparation
+
+# Disposable Windows fixture, no real service, secrets, grants or deployment.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/prepare-r16-independent-verification.ps1'
+      - '.github/workflows/r16-independent-host-enrollment-prep.yml'
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Exercise create-only directory preparation with separate disposable accounts
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $admin=[Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+          $system=[Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+          $owner=[Security.Principal.SecurityIdentifier]::new('S-1-3-4')
+          $root=Join-Path $env:ProgramFiles 'WriterWorkbench-PiMaintenance-v3'
+          if(Test-Path -LiteralPath $root){throw 'Unexpected preexisting fixture root'}
+          $names=@('R16TestDispatch','R16TestIssuer','R16TestObserver')
+          $created=@()
+          $credentials=@{}
+          $batchPolicyChanged=$false
+          $policyRoot=Join-Path $env:RUNNER_TEMP ('r16-role-rights-'+[Guid]::NewGuid().ToString('N'))
+          try {
+            foreach($name in $names) {
+              $password=ConvertTo-SecureString ([Guid]::NewGuid().ToString()+'Aa1!') -AsPlainText -Force
+              $null=New-LocalUser -Name $name -Password $password
+              $credentials[$name]=[pscredential]::new("$env:COMPUTERNAME\$name",$password)
+              $created+= $name
+            }
+            $dispatch=(Get-LocalUser -Name $names[0]).SID
+            $issuer=(Get-LocalUser -Name $names[1]).SID
+            $supervisor=(Get-LocalUser -Name $names[2]).SID
+            # Same disposable-only batch-logon preparation as the passing
+            # Session 0 lease workflow. Preserve existing principals.
+            $null=New-Item -ItemType Directory -Path $policyRoot
+            $policy=Join-Path $policyRoot 'original.inf'
+            secedit /export /cfg $policy /areas USER_RIGHTS /quiet
+            if($LASTEXITCODE -ne 0){throw 'Fixture rights export failed'}
+            $line=@(Get-Content -LiteralPath $policy | Where-Object {$_ -match '^SeBatchLogonRight\s*='})
+            if($line.Count -gt 1){throw 'Ambiguous batch-logon policy'}
+            $originalBatch=if($line.Count -eq 1){($line[0] -split '=',2)[1].Trim()}else{''}
+            $entries=@($originalBatch -split ',' | ForEach-Object {$_.Trim()} | Where-Object {$_})
+            $newBatch=(@($entries)+@("*$($dispatch.Value)","*$($issuer.Value)","*$($supervisor.Value)") | Select-Object -Unique) -join ','
+            function Set-FixtureBatchRight([string]$Value,[string]$Label) {
+              $inf=Join-Path $policyRoot "$Label.inf"
+              $db=Join-Path $policyRoot "$Label.sdb"
+              @('[Unicode]','Unicode=yes','[Version]','signature="$CHICAGO$"','Revision=1','[Privilege Rights]',"SeBatchLogonRight = $Value") |
+                Set-Content -LiteralPath $inf -Encoding Unicode
+              secedit /configure /db $db /cfg $inf /areas USER_RIGHTS /quiet
+              if($LASTEXITCODE -ne 0){throw "Fixture batch-logon $Label failed"}
+            }
+            $batchPolicyChanged=$true
+            Set-FixtureBatchRight $newBatch 'grant'
+            wevtutil sl Microsoft-Windows-TaskScheduler/Operational /e:true
+            if($LASTEXITCODE -ne 0){throw 'Unable to enable fixture task history'}
+            $acl=[Security.AccessControl.DirectorySecurity]::new()
+            $acl.SetOwner($admin)
+            $acl.SetAccessRuleProtection($true,$false)
+            foreach($sid in @($admin,$system)){
+              $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid,'FullControl','ContainerInherit, ObjectInherit','None','Allow'))
+            }
+            $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($owner,'ReadPermissions','ContainerInherit, ObjectInherit','None','Allow'))
+            $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($dispatch,'ReadAndExecute','ContainerInherit, ObjectInherit','None','Allow'))
+            $null=[IO.Directory]::CreateDirectory($root,$acl)
+            $config=Join-Path $root 'config.json'
+            @{schema_version=3;approved_scripts=$true;dispatcher_sid=$dispatch.Value}|ConvertTo-Json|Set-Content -LiteralPath $config -Encoding UTF8
+            $before=(Get-FileHash -LiteralPath $config).Hash
+            $parentBefore=(Get-Acl -LiteralPath $root).Sddl
+            $target=Join-Path $root 'independent-verification'
+            $script=Join-Path $PWD 'scripts/prepare-r16-independent-verification.ps1'
+            $plan=& $script -IssuerAccount $names[1] -SupervisorAccount $names[2] -WhatIf
+            if(Test-Path -LiteralPath $target){throw 'WhatIf created target'}
+            $rejected=$false
+            try { & $script -IssuerAccount $names[1] -SupervisorAccount $names[1] -Confirm:$false } catch { $rejected=$true }
+            if(-not $rejected -or (Test-Path -LiteralPath $target)){throw 'Identity collision accepted'}
+            $result=(& $script -IssuerAccount $names[1] -SupervisorAccount $names[2] -Confirm:$false)|ConvertFrom-Json
+            if($result.status -cne 'DIRECTORIES_PREPARED_ONLY' -or $result.activation -ne $false){throw 'Invalid result'}
+            foreach($name in @('receipts','outcomes')){
+              $dir=Join-Path $target $name
+              $dacl=Get-Acl -LiteralPath $dir
+              if(-not $dacl.AreAccessRulesProtected){throw 'Unprotected DACL'}
+              $rules=@($dacl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]))
+              $reader=if($name -eq 'receipts'){$dispatch}else{$issuer}
+              $writer=if($name -eq 'receipts'){$issuer}else{$supervisor}
+              $excluded=if($name -eq 'receipts'){$supervisor}else{$dispatch}
+              $readRules=@($rules|Where-Object {$_.IdentityReference.Value -eq $reader.Value})
+              $writeRules=@($rules|Where-Object {$_.IdentityReference.Value -eq $writer.Value})
+              if($readRules.Count -ne 1 -or ($readRules[0].FileSystemRights -band [Security.AccessControl.FileSystemRights]::WriteData) -ne 0 -or $writeRules.Count -lt 1){throw 'Role mismatch'}
+              if(@($rules|Where-Object {$_.IdentityReference.Value -eq $excluded.Value}).Count -ne 0){throw 'Cross-role ACE'}
+              if(@(Get-ChildItem -LiteralPath $dir -Force).Count -ne 0){throw 'Unexpected evidence'}
+            }
+            if(Test-Path -LiteralPath (Join-Path $target 'consumer.json')){throw 'Self enrollment'}
+            $rejected=$false
+            try { & $script -IssuerAccount $names[1] -SupervisorAccount $names[2] -Confirm:$false } catch { $rejected=$true }
+            if(-not $rejected){throw 'Existing target accepted'}
+            if((Get-FileHash -LiteralPath $config).Hash -cne $before -or (Get-Acl -LiteralPath $root).Sddl -cne $parentBefore){throw 'Existing maintenance changed'}
+            # Real token access, using only temporary local accounts and
+            # fixed commands on the disposable runner. No grant or host change.
+            function Invoke-RoleProbe([string]$account,[string]$expectedSid,[string]$body) {
+              $prefix=@'
+          $ErrorActionPreference='Stop'
+          function Denied([scriptblock]$op) {
+            try { & $op | Out-Null } catch {
+              $e=$_.Exception
+              while($null -ne $e) {
+                if($e -is [UnauthorizedAccessException]){return}
+                $e=$e.InnerException
+              }
+              throw
+            }
+            throw 'Expected access denial'
+          }
+          '@
+              $identity='$i=[Security.Principal.WindowsIdentity]::GetCurrent();if($i.User.Value -cne '''+$expectedSid+'''){exit 81};if(([Security.Principal.WindowsPrincipal]::new($i)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){exit 82};'
+              $paths='$root='''+$target.Replace("'","''")+''';$receipts=[IO.Path]::Combine($root,''receipts'');$outcomes=[IO.Path]::Combine($root,''outcomes'');'
+              $command=$prefix+[Environment]::NewLine+$identity+$paths+[Environment]::NewLine+'try {'+$body+';exit 0}catch{exit 83}'
+              $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+              $exe=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+              # The hosted runner is a service session; Start-Process
+              # -Credential failed before process creation (Win32 87).
+              # Reuse the already reviewed limited Password-task mechanism.
+              $task='R16RoleProbe-'+[Guid]::NewGuid().ToString('N')
+              $action=New-ScheduledTaskAction -Execute $exe -Argument ("-NoProfile -NonInteractive -EncodedCommand "+$encoded) -WorkingDirectory (Join-Path $env:SystemRoot 'System32')
+              $settings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 1)
+              $trigger=New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(10)
+              $registered=$false
+              try {
+                $password=$credentials[$account].GetNetworkCredential().Password
+                try {
+                  $null=Register-ScheduledTask -TaskName $task -Action $action -Trigger $trigger -Settings $settings -User "$env:COMPUTERNAME\$account" -Password $password -RunLevel Limited
+                  $registered=$true
+                } finally {$password=$null}
+                $principal=(Get-ScheduledTask -TaskName $task).Principal
+                if([string]$principal.LogonType -ne 'Password' -or [string]$principal.RunLevel -ne 'Limited'){throw 'Fixture task principal mismatch'}
+                $prior=(Get-ScheduledTaskInfo -TaskName $task).LastRunTime
+                $started=Get-Date
+                Start-ScheduledTask -TaskName $task
+                $deadline=[DateTime]::UtcNow.AddSeconds(60)
+                do {
+                  Start-Sleep -Milliseconds 250
+                  $info=Get-ScheduledTaskInfo -TaskName $task
+                  $state=(Get-ScheduledTask -TaskName $task).State
+                  if($info.LastRunTime -ne $prior -and $state -eq 'Ready' -and $info.LastTaskResult -ne 267009){
+                    if($info.LastTaskResult -ne 0){throw "Role probe failed: $account exit=$($info.LastTaskResult)"}
+                    Write-Output "ROLE_TOKEN_PROBE_PASS account=$account"
+                    return
+                  }
+                } while([DateTime]::UtcNow -lt $deadline)
+                Write-Output "ROLE_TASK_STATE=$state; LAST_TASK_RESULT=$($info.LastTaskResult); LAST_RUN_TIME=$($info.LastRunTime)"
+                Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-TaskScheduler/Operational';StartTime=$started} -ErrorAction SilentlyContinue |
+                  Where-Object {$_.Message -like "*$task*"} | Select-Object -First 12 Id,LevelDisplayName,Message | Format-List
+                throw "Role probe timed out: $account"
+              } finally {
+                if($registered){
+                  if((Get-ScheduledTask -TaskName $task).State -eq 'Running'){Stop-ScheduledTask -TaskName $task}
+                  Unregister-ScheduledTask -TaskName $task -Confirm:$false
+                }
+              }
+            }
+            Invoke-RoleProbe $names[2] $supervisor.Value @'
+          [IO.File]::WriteAllText([IO.Path]::Combine($outcomes,'outcome-fixture.txt'),'outcome')
+          Denied {[IO.File]::WriteAllText([IO.Path]::Combine($receipts,'forbidden.txt'),'bad')}
+          Denied {[IO.File]::WriteAllText([IO.Path]::Combine($root,'forbidden.txt'),'bad')}
+          '@
+            Invoke-RoleProbe $names[1] $issuer.Value @'
+          $o=[IO.Path]::Combine($outcomes,'outcome-fixture.txt')
+          if([IO.File]::ReadAllText($o) -cne 'outcome'){exit 84}
+          Denied {[IO.File]::WriteAllText($o,'bad')}
+          Denied {[IO.File]::Delete($o)}
+          Denied {[IO.File]::WriteAllText([IO.Path]::Combine($outcomes,'forbidden.txt'),'bad')}
+          [IO.File]::WriteAllText([IO.Path]::Combine($receipts,'receipt-fixture.txt'),'receipt')
+          Denied {[IO.File]::WriteAllText([IO.Path]::Combine($root,'forbidden.txt'),'bad')}
+          '@
+            Invoke-RoleProbe $names[0] $dispatch.Value @'
+          $r=[IO.Path]::Combine($receipts,'receipt-fixture.txt')
+          if([IO.File]::ReadAllText($r) -cne 'receipt'){exit 85}
+          Denied {[IO.File]::WriteAllText($r,'bad')}
+          Denied {[IO.File]::Delete($r)}
+          Denied {[IO.File]::WriteAllText([IO.Path]::Combine($receipts,'forbidden.txt'),'bad')}
+          Denied {[IO.File]::ReadAllText([IO.Path]::Combine($outcomes,'outcome-fixture.txt'))}
+          Denied {[IO.File]::WriteAllText([IO.Path]::Combine($outcomes,'forbidden.txt'),'bad')}
+          Denied {[IO.File]::WriteAllText([IO.Path]::Combine($root,'forbidden.txt'),'bad')}
+          '@
+            Invoke-RoleProbe $names[2] $supervisor.Value @'
+          Denied {[IO.File]::ReadAllText([IO.Path]::Combine($receipts,'receipt-fixture.txt'))}
+          Denied {[IO.File]::Delete([IO.Path]::Combine($receipts,'receipt-fixture.txt'))}
+          '@
+            if([IO.File]::ReadAllText((Join-Path $target 'outcomes\outcome-fixture.txt')) -cne 'outcome' -or [IO.File]::ReadAllText((Join-Path $target 'receipts\receipt-fixture.txt')) -cne 'receipt'){throw 'Fixture data changed'}
+            foreach($location in @($target,(Join-Path $target 'receipts'),(Join-Path $target 'outcomes'))){
+              if(Test-Path -LiteralPath (Join-Path $location 'forbidden.txt')){throw 'Unexpected forbidden write'}
+            }
+            Write-Output 'R16_ENROLLMENT_EFFECTIVE_TOKEN_ACCESS_PASS; disposable_accounts_only=true; activation=false'
+            Write-Output 'R16_ENROLLMENT_DIRECTORY_PREPARATION_FIXTURE_PASS; activation=false; effective_token_access=fixture_only'
+          } finally {
+            # Only the new fixture root, on the disposable GitHub runner.
+            if(Test-Path -LiteralPath $root){Remove-Item -LiteralPath $root -Recurse -Force}
+            try {
+              if($batchPolicyChanged){Set-FixtureBatchRight $originalBatch 'restore'}
+            } finally {
+              foreach($name in $created){Remove-LocalUser -Name $name}
+              foreach($credential in $credentials.Values){$credential.Password.Dispose()}
+              if(Test-Path -LiteralPath $policyRoot){Remove-Item -LiteralPath $policyRoot -Recurse -Force}
+            }
+          }
