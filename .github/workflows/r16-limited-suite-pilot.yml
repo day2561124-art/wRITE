@@ -164,7 +164,7 @@ jobs:
           # Exercise the same controlled environment and pipe-based runner once,
           # record the real latency, and still require the unchanged suite.
           if ($Entry -eq 'tests\tools\mcp-contract.test.mjs') {
-            $preflight = 'import {runPowerShellProcess} from "./server/src/mcp-powershell-maintenance-tools.mjs"; const result = await runPowerShellProcess({command:"Write-Output ''limited-cold-start-ok''",cwd:process.cwd(),timeoutMs:20000}); console.log("LIMITED_PS_COLD_START="+JSON.stringify({execution_ok:result.execution_ok,ok:result.ok,exit_code:result.exit_code,timed_out:result.timed_out,duration_ms:result.duration_ms,stdout:result.stdout,stderr:result.stderr})); if (!result.ok || !result.stdout.includes("limited-cold-start-ok")) process.exitCode=1;'
+            $preflight = 'import {spawnSync} from "node:child_process"; import path from "node:path"; import {controlledProcessEnvironment} from "./server/src/process-control.mjs"; const exe=path.join(process.env.SystemRoot,"System32","WindowsPowerShell","v1.0","powershell.exe"); const command="Write-Output ''limited-launch-ok''"; const controlled=controlledProcessEnvironment({PSModulePath:path.join(path.dirname(exe),"Modules")}); for(const [name,env,stdin,encoded] of [["controlled-ignore",controlled,"ignore",false],["controlled-eof",controlled,"pipe",false],["controlled-encoded",controlled,"pipe",true],["fixture-env-eof",process.env,"pipe",false]]) { const start=Date.now(); const r=spawnSync(exe,["-NoLogo","-NoProfile","-NonInteractive",encoded?"-EncodedCommand":"-Command",encoded?Buffer.from(command,"utf16le").toString("base64"):command],{cwd:process.cwd(),env,stdio:[stdin,"pipe","pipe"],input:stdin==="pipe"?"":undefined,encoding:"utf8",windowsHide:true,timeout:8000,maxBuffer:65536}); console.log("LIMITED_PS_VARIANT="+JSON.stringify({name,exit_code:r.status,signal:r.signal,error:r.error?.code??null,elapsed_ms:Date.now()-start,marker:r.stdout?.includes("limited-launch-ok")??false})); }'
             # Node reads the exact diagnostic from stdin, not a generated source file.
             $preflight | & $node --input-type=module -
             $preflightExit = $LASTEXITCODE
@@ -224,8 +224,8 @@ jobs:
             if ($item -and !$item.PSIsContainer -and !($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -and $item.Length -le 16MB) {
               # Retain early preflight markers even when the real suite has
               # emitted hundreds of subsequent lines.
-              Select-String -LiteralPath $log -Pattern '^LIMITED_(?:PS_COLD_START|PS_PREFLIGHT_EXIT|TUNNEL_FIXTURE_ISOLATION|CHECKOUT_CLEAN|SUITE_BEGIN)(?:=|$)' |
-                Select-Object -First 8 | ForEach-Object { Write-Output ("GUEST PREFLIGHT: " + $_.Line.Substring(0,[Math]::Min(2048,$_.Line.Length))) }
+              Select-String -LiteralPath $log -Pattern '^LIMITED_(?:PS_COLD_START|PS_VARIANT|PS_PREFLIGHT_EXIT|TUNNEL_FIXTURE_ISOLATION|CHECKOUT_CLEAN|SUITE_BEGIN)(?:=|$)' |
+                Select-Object -First 12 | ForEach-Object { Write-Output ("GUEST PREFLIGHT: " + $_.Line.Substring(0,[Math]::Min(2048,$_.Line.Length))) }
               Get-Content -LiteralPath $log -Tail 100 | ForEach-Object { Write-Output ("GUEST: " + $_) }
             }
             try {
