@@ -58,22 +58,26 @@ export function inspectWindowsConsumerAcl(paths, systemRoot) {
   const input = Buffer.from(JSON.stringify(paths),"utf8").toString("base64");
   const script = [
     "$ErrorActionPreference='Stop'",
-    "$p=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + input + "')) | ConvertFrom-Json",
+    "$env:PSModulePath=[IO.Path]::Combine($PSHOME,'Modules')",
+    "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)",
+    "$p=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + input + "')) | Microsoft.PowerShell.Utility\\ConvertFrom-Json",
     "$i=[Security.Principal.WindowsIdentity]::GetCurrent()",
     "$principal=[Security.Principal.WindowsPrincipal]::new($i)",
     "$sections=[Security.AccessControl.AccessControlSections]::Owner -bor [Security.AccessControl.AccessControlSections]::Group -bor [Security.AccessControl.AccessControlSections]::Access",
-    "$entries=@(foreach($v in $p){$item=Get-Item -LiteralPath $v -Force; if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'Reparse point'}; $acl=Get-Acl -LiteralPath $v; [pscustomobject]@{path=$v; directory=[bool]$item.PSIsContainer; sddl=$acl.GetSecurityDescriptorSddlForm($sections)}})",
-    "[pscustomobject]@{sid=$i.User.Value; administrator=$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator); entries=$entries}|ConvertTo-Json -Depth 4 -Compress"
+    "$entries=@(foreach($v in $p){$item=Microsoft.PowerShell.Management\\Get-Item -LiteralPath $v -Force; if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'Reparse point'}; $acl=Microsoft.PowerShell.Security\\Get-Acl -LiteralPath $v; [pscustomobject]@{path=$v; directory=[bool]$item.PSIsContainer; sddl=$acl.GetSecurityDescriptorSddlForm($sections)}})",
+    "[pscustomobject]@{sid=$i.User.Value; administrator=$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator); entries=$entries}|Microsoft.PowerShell.Utility\\ConvertTo-Json -Depth 4 -Compress"
   ].join("\n");
   const exe=path.join(systemRoot,"System32","WindowsPowerShell","v1.0","powershell.exe");
   const result=spawnSync(exe,["-NoProfile","-NonInteractive","-EncodedCommand",Buffer.from(script,"utf16le").toString("base64")],
-    {windowsHide:true,encoding:"utf8",timeout:15000,maxBuffer:256*1024});
+    {windowsHide:true,encoding:"utf8",timeout:30000,maxBuffer:256*1024,cwd:systemRoot,
+      env:{SystemRoot:systemRoot,windir:systemRoot,PATH:path.join(systemRoot,"System32"),
+        PSModulePath:path.join(systemRoot,"System32","WindowsPowerShell","v1.0","Modules")}});
   if (result.status !== 0 || result.error || result.signal) fail();
   return JSON.parse(result.stdout);
 }
 
 export function createPinnedIndependentConsumerBinding({ directory, manifestSha256, inspect, readManifest=pinnedRead, clock=Date.now }={}) {
-  if (typeof directory !== "string" || !path.isAbsolute(directory) || !digest.test(manifestSha256)
+  if (typeof directory !== "string" || !path.isAbsolute(directory) || typeof manifestSha256 !== "string" || !digest.test(manifestSha256)
     || typeof inspect !== "function" || typeof readManifest !== "function") fail();
   const root=path.resolve(directory), receiptRoot=path.join(root,"receipts"), filename=path.join(root,"consumer.json");
   const paths=[...ancestry(root),filename,receiptRoot];
@@ -120,7 +124,7 @@ export function loadProductionIndependentConsumerGate({ releaseRoot, environment
   try {
     const pf=environment.ProgramW6432??environment.ProgramFiles;
     if (process.platform!=="win32" || typeof pf!=="string" || !path.isAbsolute(pf)
-      || !environment.NEXA_MANAGED_PROJECT_ROOT || !releaseRoot || !digest.test(pin)) fail();
+      || !environment.NEXA_MANAGED_PROJECT_ROOT || !releaseRoot || typeof pin!=="string" || !digest.test(pin)) fail();
     const releases=path.join(pf,"NexaRuntimeV3","releases");
     const rel=path.relative(releases,releaseRoot);
     const maintenance=path.join(pf,"WriterWorkbench-PiMaintenance-v3");
