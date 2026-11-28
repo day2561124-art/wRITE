@@ -302,7 +302,7 @@ internal static class Program {
                     var env=new SortedDictionary<string,string>(StringComparer.OrdinalIgnoreCase) {
                         {"APPDATA",Path.Combine(profile,"AppData","Roaming")},{"CI","1"},{"COMSPEC",Path.Combine(system,"cmd.exe")},
                         {"GIT_CONFIG_GLOBAL","NUL"},{"GIT_CONFIG_NOSYSTEM","1"},{"GIT_TERMINAL_PROMPT","0"},{"HOME",profile},{"LOCALAPPDATA",Path.Combine(profile,"AppData","Local")},
-                        {"PSModuleAnalysisCachePath",cache},{"NPM_CONFIG_CACHE",Path.Combine(scratch,"npm-cache")},{"PATH",tools+";"+git+";"+system+";"+Path.Combine(system,@"WindowsPowerShell\v1.0")},{"PATHEXT",".COM;.EXE;.BAT;.CMD"},
+                        {"PSModuleAnalysisCachePath",cache},{"PSModulePath",Path.Combine(system,@"WindowsPowerShell\v1.0\Modules")},{"NPM_CONFIG_CACHE",Path.Combine(scratch,"npm-cache")},{"PATH",tools+";"+git+";"+system+";"+Path.Combine(system,@"WindowsPowerShell\v1.0")},{"PATHEXT",".COM;.EXE;.BAT;.CMD"},
                         {"SystemDrive",Path.GetPathRoot(windows).TrimEnd('\\')},{"SystemRoot",windows},{"TEMP",scratch},{"TMP",scratch},{"USERPROFILE",profile},{"WINDIR",windows},
                         {"WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL","1"},{"WRITER_WORKBENCH_ISOLATED_TEST_CHECKPOINT","1"},{"WRITER_WORKBENCH_ISOLATED_TEST_TRANSACTION","1"}
                     };
@@ -311,7 +311,10 @@ internal static class Program {
                     // Populate only the guest's own cache as the guest. Never
                     // import or trust this cache from the supervisor process.
                     var powershell=Path.Combine(system,@"WindowsPowerShell\v1.0\powershell.exe");
-                    string warm="Write-Output 'guest-powershell-ready'; [Threading.Thread]::Sleep(1000)";
+                    string warm="$ErrorActionPreference='Stop'; Write-Output 'guest-powershell-ready'; "
+                        + "$deadline=[DateTime]::UtcNow.AddSeconds(40); $cache=$env:PSModuleAnalysisCachePath; "
+                        + "while ([DateTime]::UtcNow -lt $deadline) { if ([IO.File]::Exists($cache)) { $length=([IO.FileInfo]::new($cache)).Length; if ($length -gt 0) { [Console]::WriteLine('GUEST_CACHE_BYTES='+$length); break } }; [Threading.Thread]::Sleep(250) }; "
+                        + "if (-not [IO.File]::Exists($cache)) { [Console]::WriteLine('GUEST_CACHE_NOT_WRITTEN') }";
                     var warmArgs="-NoLogo -NoProfile -NonInteractive -EncodedCommand "+Convert.ToBase64String(Encoding.Unicode.GetBytes(warm));
                     if(!Run(token,sid,root,"guest_profile_prepare","",0,120000,false,log,powershell,warmArgs,source,environment)) return 1;
                     if(!Run(token,sid,root,"npm_prepare","",0,600000,false,log,node,"\""+npm+"\" ci --ignore-scripts --no-audit --no-fund",source,environment)) return 1;
