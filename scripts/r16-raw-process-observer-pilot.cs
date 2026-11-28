@@ -404,7 +404,7 @@ internal static class Program {
     }
 
     static int Main(string[] args) {
-        if(args.Length!=3 && (args.Length!=4 || (args[3]!="loss" && args[3]!="tunnel" && args[3]!="mcp" && args[3]!="tunnel_protected")) && (args.Length!=6 || (args[3]!="tunnel_protected" && args[3]!="tunnel_sealed"))) return 2;
+        if(args.Length!=3 && (args.Length!=4 || (args[3]!="loss" && args[3]!="tunnel" && args[3]!="mcp" && args[3]!="tunnel_protected")) && (args.Length!=6 || (args[3]!="tunnel_protected" && args[3]!="tunnel_sealed" && args[3]!="tunnel_sealed_git"))) return 2;
         var root=Path.GetFullPath(args[0]);
         var user=args[1]; var sid=args[2];
         if(!WindowsIdentity.GetCurrent().User.IsWellKnown(WellKnownSidType.LocalSystemSid) || Process.GetCurrentProcess().SessionId!=0) return 3;
@@ -419,11 +419,12 @@ internal static class Program {
                 stage="batch_logon";
                 Require(LogonUser(user,Environment.MachineName,password,4,0,out token),"batch_logon");
                 password=null; stage="batch_token_check"; CheckToken(token,sid);
-                if(args.Length>=4 && (args[3]=="tunnel" || args[3]=="mcp" || args[3]=="tunnel_protected" || args[3]=="tunnel_sealed")) {
+                if(args.Length>=4 && (args[3]=="tunnel" || args[3]=="mcp" || args[3]=="tunnel_protected" || args[3]=="tunnel_sealed" || args[3]=="tunnel_sealed_git")) {
                     bool separatePrep=args.Length==6;
-                    bool sealDependencies=args[3]=="tunnel_sealed";
+                    bool sealGit=args[3]=="tunnel_sealed_git";
+                    bool sealDependencies=args[3]=="tunnel_sealed" || sealGit;
                     bool protectedSource=args[3]=="tunnel_protected" || sealDependencies;
-                    string sealedDependencies=null, sealedTools=null;
+                    string sealedDependencies=null, sealedTools=null, sealedGit=null, gitTree=null;
                     bool fullMcp=args[3]=="mcp";
                     string suite=fullMcp?"mcp":"mcp_tunnel";
                     // Fixed native Node entry only; no candidate-defined command or supervisor credential.
@@ -440,6 +441,18 @@ internal static class Program {
                     var commonData=Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
                     if(!Path.IsPathRooted(programFiles)||!Directory.Exists(programFiles)||!Path.IsPathRooted(commonData)||!Directory.Exists(commonData)) throw new InvalidOperationException("SYSTEM_DIRECTORY_IDENTITY_MISSING");
                     var git=File.ReadAllText(Path.Combine(root,"git-dir.txt")).Trim();
+                    if(sealGit) {
+                        stage="seal_git_toolchain";
+                        var installed=File.ReadAllText(Path.Combine(root,"git-install-root.txt")).Trim();
+                        gitTree=Path.Combine(root,"git-tools-parent","git");
+                        if(!Path.IsPathRooted(installed) || !String.Equals(git,Path.Combine(gitTree,"bin"),StringComparison.OrdinalIgnoreCase)
+                            || !File.Exists(Path.Combine(installed,@"bin\git.exe")) || !File.Exists(Path.Combine(installed,@"mingw64\bin\git.exe")))
+                            throw new InvalidOperationException("GIT_TOOLCHAIN_LAYOUT_INVALID");
+                        var before=TreeDigest(installed,gitTree);
+                        sealedGit=TreeDigest(gitTree,null);
+                        if(before!=sealedGit) throw new InvalidOperationException("GIT_TOOLCHAIN_COPY_MISMATCH");
+                        log.WriteLine("COPIED_GIT_TOOLCHAIN_SHA256="+sealedGit);
+                    }
                     if(!Path.IsPathRooted(git) || !File.Exists(Path.Combine(git,"git.exe")) || !File.Exists(node) || !File.Exists(npm) || !File.Exists(entry)) throw new InvalidOperationException("FIXTURE_INPUT_MISSING");
                     // A batch token does not load the user's registry hive by itself.
                     // DPAPI and Windows PowerShell command discovery need the real
@@ -492,6 +505,15 @@ internal static class Program {
                         var expected=File.ReadAllText(Path.Combine(root,"candidate-sha.txt")).Trim();
                         if(expected.Length!=40 || observed!=expected) throw new InvalidOperationException("PROTECTED_GIT_HEAD_MISMATCH");
                         log.WriteLine("PROTECTED_GIT_IDENTITY_PASS");
+                        if(sealGit) {
+                            if(!Run(token,sid,root,"sealed_git_exec_path","",0,10000,false,log,guestGit,"--exec-path",source,environment)) return 1;
+                            var reported=Encoding.UTF8.GetString(Convert.FromBase64String(File.ReadAllText(Path.Combine(root,"sealed_git_exec_path.stdout.b64")))).Trim();
+                            var actual=Path.GetFullPath(reported.Replace('/','\\'));
+                            var expectedPath=Path.Combine(gitTree,@"mingw64\libexec\git-core");
+                            if(!String.Equals(actual,expectedPath,StringComparison.OrdinalIgnoreCase))
+                                throw new InvalidOperationException("GIT_TOOLCHAIN_EXEC_PATH_MISMATCH");
+                            log.WriteLine("COPIED_GIT_EXEC_PATH_PASS");
+                        }
                     }
                     string npmArgs="\""+npm+"\" ci --ignore-scripts --no-audit --no-fund";
                     if(separatePrep) {
@@ -561,6 +583,10 @@ internal static class Program {
                         if(TreeDigest(Path.Combine(source,"node_modules"),null)!=sealedDependencies || TreeDigest(tools,null)!=sealedTools)
                             throw new InvalidOperationException("SEALED_TREE_CHANGED");
                         log.WriteLine("SEALED_DEPENDENCY_POSTCHECK_PASS");
+                        if(sealGit) {
+                            if(TreeDigest(gitTree,null)!=sealedGit) throw new InvalidOperationException("SEALED_GIT_TOOLCHAIN_CHANGED");
+                            log.WriteLine("SEALED_GIT_TOOLCHAIN_POSTCHECK_PASS");
+                        }
                     }
                     } finally {
                         stage="guest_profile_unload";
