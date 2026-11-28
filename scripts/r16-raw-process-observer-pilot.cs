@@ -11,7 +11,7 @@ using System.Threading;
 
 internal static class Program {
     const uint Suspended=4, UnicodeEnvironment=0x400, NoWindow=0x08000000;
-    const uint WaitObject=0, WaitTimeout=258, Query=8, KillOnClose=0x2000;
+    const uint WaitObject=0, WaitTimeout=258, Query=8, Duplicate=2, KillOnClose=0x2000;
     [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
     struct Startup {
         public int cb;
@@ -63,6 +63,7 @@ internal static class Program {
     static void Require(bool value,string stage) { if(!value) throw new Win32Exception(Marshal.GetLastWin32Error(),stage); }
     static void Close(IntPtr handle) { if(handle!=IntPtr.Zero) CloseHandle(handle); }
     static string QuotePs(string value) { return "'" + value.Replace("'","''") + "'"; }
+    static string stage="initial";
     static void CheckToken(IntPtr token,string sid) {
         using(var identity=new WindowsIdentity(token)) {
             if(identity.User.Value!=sid || new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator)
@@ -80,16 +81,22 @@ internal static class Program {
         ProcessInfo child=new ProcessInfo();
         bool assigned=false;
         try {
+            stage=name+":job_create";
             job=CreateJobObject(IntPtr.Zero,IntPtr.Zero);
             Require(job!=IntPtr.Zero,"job_create");
             var limits=new ExtendedLimits(); limits.basic.flags=KillOnClose;
             Require(SetInformationJobObject(job,9,ref limits,Marshal.SizeOf(typeof(ExtendedLimits))),"job_limits");
             var startup=new Startup(); startup.cb=Marshal.SizeOf(typeof(Startup));
+            stage=name+":process_create";
             Require(CreateProcessAsUser(token,executable,command,IntPtr.Zero,IntPtr.Zero,false,Suspended|UnicodeEnvironment|NoWindow,environment,guest,ref startup,out child),"process_create");
             Require(AssignProcessToJobObject(job,child.process),"job_assign"); assigned=true;
-            Require(OpenProcessToken(child.process,Query,out childToken),"token_open");
+            stage=name+":token_open";
+            Require(OpenProcessToken(child.process,Query|Duplicate,out childToken),"token_open");
+            stage=name+":token_check";
             CheckToken(childToken,sid);
+            stage=name+":resume";
             Require(ResumeThread(child.thread)!=uint.MaxValue,"thread_resume");
+            stage=name+":wait";
             var elapsed=Stopwatch.StartNew();
             uint state=WaitForSingleObject(child.process,(uint)limitMs);
             string result;
@@ -102,6 +109,7 @@ internal static class Program {
                 if(limitMs>=2000 && !cancel) throw new InvalidOperationException("UNEXPECTED_NATIVE_TIMEOUT");
                 result=cancel?"cancelled":"timed_out";
             } else throw new Win32Exception(Marshal.GetLastWin32Error(),"process_wait");
+            stage=name+":cleanup";
             Require(TerminateJobObject(job,125),"job_terminate");
             Require(WaitForSingleObject(child.process,5000)==WaitObject,"child_terminated");
             var cleanup=Stopwatch.StartNew();
@@ -131,10 +139,12 @@ internal static class Program {
             log.AutoFlush=true;
             try {
                 var secret=Path.Combine(root,"password.txt");
+                stage="read_fixture_password";
                 var password=File.ReadAllText(secret);
                 File.Delete(secret);
+                stage="batch_logon";
                 Require(LogonUser(user,Environment.MachineName,password,4,0,out token),"batch_logon");
-                password=null; CheckToken(token,sid);
+                password=null; stage="batch_token_check"; CheckToken(token,sid);
                 var sentinel=QuotePs(Path.Combine(root,"sentinel.txt"));
                 string check="$p="+sentinel+"; try { [void][IO.File]::ReadAllText($p); exit 91 } catch [UnauthorizedAccessException] {} ; try { [IO.File]::WriteAllText($p,'bad'); exit 92 } catch [UnauthorizedAccessException] {} ; exit 0";
                 Run(token,sid,root,"isolation",check,0,10000,false,log);
@@ -147,7 +157,7 @@ internal static class Program {
                 if(File.ReadAllText(Path.Combine(root,"sentinel.txt"))!="synthetic-protected-sentinel") throw new InvalidOperationException("SENTINEL_CHANGED");
                 log.WriteLine("RAW_OBSERVER_PILOT_PASS");
                 return 0;
-            } catch(Exception e) { log.WriteLine("RAW_OBSERVER_PILOT_FAIL "+e.GetType().Name+" "+e.Message); return 1; }
+            } catch(Exception e) { log.WriteLine("RAW_OBSERVER_PILOT_FAIL stage="+stage+" type="+e.GetType().Name+" hresult="+e.HResult.ToString("X8")+" message="+e.Message); return 1; }
             finally { Close(token); }
         }
     }
