@@ -93,18 +93,26 @@ export async function createTestProbeCredentialFile(directory, endpoint, credent
   await fs.writeFile(file,JSON.stringify({schema:'workbench-probe/1.0',resource,upstream_origin:new URL(endpoint).origin,access_token:proof}),{flag:'wx',mode:0o600});
   if(process.platform==='win32'){
     const script=`$ErrorActionPreference='Stop'
+$stage='identity'
 try {
- $acl=[Security.AccessControl.FileSecurity]::new()
  $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User
- $acl.SetOwner($sid)
+ $file=$env:WRITER_PROBE_FIXTURE_FILE
+ $stage='read-existing'
+ $acl=[IO.File]::GetAccessControl($file)
+ $stage='owner'
+ if($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) {$acl.SetOwner($sid)}
+ $stage='protect'
  $acl.SetAccessRuleProtection($true,$false)
+ foreach($old in $acl.GetAccessRules($true,$false,[Security.Principal.SecurityIdentifier])) {$acl.RemoveAccessRuleSpecific($old)}
+ $stage='rules'
  foreach($identity in @($sid,[Security.Principal.SecurityIdentifier]::new('S-1-5-18'),[Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))) {
-  $rule=[Security.AccessControl.FileSystemAccessRule]::new($identity,'FullControl','Allow')
+  $rule=[Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.IdentityReference]$identity,[Security.AccessControl.FileSystemRights]::FullControl,[Security.AccessControl.AccessControlType]::Allow)
   $acl.AddAccessRule($rule)
  }
- # Use the same Windows ACL API without triggering cmdlet module discovery.
- [IO.File]::SetAccessControl($env:WRITER_PROBE_FIXTURE_FILE,$acl)
- $actual=[IO.File]::GetAccessControl($env:WRITER_PROBE_FIXTURE_FILE)
+ $stage='write'
+ [IO.File]::SetAccessControl($file,$acl)
+ $stage='verify'
+ $actual=[IO.File]::GetAccessControl($file)
  if (-not $actual.AreAccessRulesProtected -or $actual.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) {exit 3}
  $rules=$actual.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])
  $allowed=@($sid.Value,'S-1-5-18','S-1-5-32-544')
@@ -112,9 +120,12 @@ try {
  foreach($rule in $rules) {
   if($rule.IsInherited -or $rule.IdentityReference.Value -notin $allowed -or $rule.AccessControlType -ne 'Allow' -or $rule.FileSystemRights -ne 'FullControl') {exit 3}
  }
-} catch {[Console]::Error.WriteLine('ACL_FIXTURE_EXCEPTION:'+ $_.Exception.GetType().Name);exit 2}`;
+} catch {[Console]::Error.WriteLine('ACL_FIXTURE_EXCEPTION:'+$stage+':'+$_.Exception.GetType().Name+':'+$_.Exception.HResult);exit 2}`;
     const result=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{env:{...process.env,WRITER_PROBE_FIXTURE_FILE:file,PSModulePath:path.join(process.env.SystemRoot??'C:/Windows','System32/WindowsPowerShell/v1.0/Modules')},windowsHide:true,encoding:'utf8',timeout:3000,maxBuffer:4096});
-    if(result.error||result.status!==0)throw Error('PROBE_FIXTURE_ACL_FAILED:'+(result.error?.code??String(result.status)));
+    if(result.error||result.status!==0){
+      const diagnostic=String(result.stderr??'').match(/ACL_FIXTURE_EXCEPTION:[a-z-]+:[A-Za-z0-9_]+:-?\d+/u)?.[0];
+      throw Error('PROBE_FIXTURE_ACL_FAILED:'+(result.error?.code??String(result.status))+(diagnostic?':'+diagnostic:''));
+    }
   }
   return file;
 }
