@@ -3,6 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import {
   mkdtemp,
   mkdir,
+  lstat,
   readFile,
   rm,
   writeFile,
@@ -121,25 +122,37 @@ try {
   );
 
   if (process.platform === "win32") {
-    let normal, observedModulePath;
+    let normal, observedModulePath, observedCachePath;
     const oldModulePath = process.env.PSModulePath;
+    const oldCachePath = process.env.PSModuleAnalysisCachePath;
+    const untrustedCachePath = path.join(tempRoot, "untrusted-module-cache");
     try {
       process.env.PSModulePath = path.join(tempRoot, "untrusted-module-path");
+      process.env.PSModuleAnalysisCachePath = untrustedCachePath;
       normal = await runPowerShellProcess({
         command: "Write-Output 'normal-powershell-ok'",
         cwd: rootDir,
         timeoutMs: 5_000,
         spawnImpl: (file, args, options) => {
           observedModulePath = options.env.PSModulePath;
+          observedCachePath = options.env.PSModuleAnalysisCachePath;
           return spawn(file, args, options);
         },
       });
     } finally {
       if (oldModulePath === undefined) delete process.env.PSModulePath;
       else process.env.PSModulePath = oldModulePath;
+      if (oldCachePath === undefined) delete process.env.PSModuleAnalysisCachePath;
+      else process.env.PSModuleAnalysisCachePath = oldCachePath;
     }
     assert.equal(observedModulePath, path.join(process.env.SystemRoot ?? process.env.WINDIR,
       "System32", "WindowsPowerShell", "v1.0", "Modules"));
+    assert.equal(path.basename(observedCachePath), "ModuleAnalysisCache");
+    assert.notEqual(observedCachePath, untrustedCachePath);
+    assert.equal(path.dirname(path.dirname(observedCachePath)), os.tmpdir());
+    assert.match(path.basename(path.dirname(observedCachePath)), /^nexa-ps-module-cache-/u);
+    await assert.rejects(lstat(path.dirname(observedCachePath)), { code: "ENOENT" });
+    await assert.rejects(lstat(untrustedCachePath), { code: "ENOENT" });
     assert.equal(normal.execution_ok, true, normal.stderr);
     assert.equal(normal.ok, true, JSON.stringify({ execution_ok: normal.execution_ok, exit_code: normal.exit_code, timed_out: normal.timed_out, duration_ms: normal.duration_ms, stdout: normal.stdout, stderr: normal.stderr }));
     assert.match(normal.stdout, /normal-powershell-ok/u);
