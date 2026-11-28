@@ -1,0 +1,92 @@
+name: R16 sealed dependency tree negative gates
+
+# Disposable synthetic fixtures only. No credentials, signing or authority.
+on:
+  pull_request:
+    branches: [nexa/r16-sealed-dependency-tree-pilot, main]
+    paths:
+      - 'scripts/r16-raw-process-observer-pilot.cs'
+      - '.github/workflows/r16-sealed-tree-negative-gates.yml'
+permissions:
+  contents: read
+concurrency:
+  group: r16-sealed-tree-negative-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  fixture:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Exercise native tree reader against synthetic identity and content changes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $root = Join-Path $env:RUNNER_TEMP ('r16-seal-fixture-' + [guid]::NewGuid().ToString('N'))
+          $null = New-Item -ItemType Directory -Path $root
+          $exe = Join-Path $root 'observer.exe'
+          $src = Join-Path $env:GITHUB_WORKSPACE 'scripts\r16-raw-process-observer-pilot.cs'
+          $compiler = Join-Path $env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+          & $compiler /nologo /target:exe /platform:x64 "/out:$exe" $src
+          if ($LASTEXITCODE -ne 0) { throw 'Compile native observer failed' }
+          $type = [Reflection.Assembly]::LoadFrom($exe).GetType('Program',$true)
+          $flags = [Reflection.BindingFlags]::Static -bor [Reflection.BindingFlags]::NonPublic
+          $method = $type.GetMethod('TreeDigest',$flags)
+          if ($null -eq $method) { throw 'Native tree reader missing' }
+          function Digest([string]$from,[string]$to) {
+            $destination = if ([string]::IsNullOrEmpty($to)) { $null } else { $to }
+            $method.Invoke($null,[object[]]@($from,$destination))
+          }
+          function Must-Reject([string]$from,[string]$code) {
+            try {
+              $null = Digest $from
+            } catch {
+              $e = $_.Exception
+              while ($null -ne $e.InnerException) { $e = $e.InnerException }
+              if ($e.Message -cne $code) { throw "Unexpected rejection: $($e.Message)" }
+              Write-Output "REJECTED $code"
+              return
+            }
+            throw "Unexpected acceptance: $code"
+          }
+          $source = Join-Path $root 'source'
+          $copy = Join-Path $root 'copy'
+          $nested = Join-Path $source 'nested'
+          $null = New-Item -ItemType Directory -Path $source,$nested
+          $file = Join-Path $nested 'fixture.txt'
+          [IO.File]::WriteAllText($file,'first')
+          [IO.File]::WriteAllText((Join-Path $source 'other.txt'),'second')
+          $original = Digest $source $copy
+          if ($original -notmatch '^[a-f0-9]{64}$' -or $original -cne (Digest $copy)) { throw 'Copy digest mismatch' }
+          $copyFile = Join-Path $copy 'nested\fixture.txt'
+          [IO.File]::WriteAllText($copyFile,'changed')
+          if ((Digest $copy) -ceq $original) { throw 'Byte change undetected' }
+          [IO.File]::WriteAllText($copyFile,'first')
+          if ((Digest $copy) -cne $original) { throw 'Restoration digest mismatch' }
+          [IO.File]::WriteAllText((Join-Path $copy 'extra.txt'),'new')
+          if ((Digest $copy) -ceq $original) { throw 'Addition undetected' }
+          [IO.File]::Delete((Join-Path $copy 'extra.txt'))
+          [IO.File]::Delete($copyFile)
+          if ((Digest $copy) -ceq $original) { throw 'Deletion undetected' }
+          [IO.File]::WriteAllText($copyFile,'first')
+          if ((Digest $copy) -cne $original) { throw 'Restoration after deletion mismatch' }
+          $alias = Join-Path $source 'hardlink.txt'
+          $null = New-Item -ItemType HardLink -Path $alias -Target $file
+          Must-Reject $source 'DEPENDENCY_UNSUPPORTED_FILE_IDENTITY'
+          [IO.File]::Delete($alias)
+          if ((Digest $source) -cne $original) { throw 'Hardlink removal changed original' }
+          $outside = Join-Path $root 'outside'
+          $null = New-Item -ItemType Directory -Path $outside
+          $sentinel = Join-Path $outside 'sentinel.txt'
+          [IO.File]::WriteAllText($sentinel,'outside-original')
+          $junction = Join-Path $source 'junction'
+          $null = New-Item -ItemType Junction -Path $junction -Target $outside
+          Must-Reject $source 'DEPENDENCY_REPARSE_POINT'
+          Must-Reject $junction 'DEPENDENCY_UNSUPPORTED_OBJECT'
+          if ([IO.File]::ReadAllText($sentinel) -cne 'outside-original') { throw 'Outside sentinel changed' }
+          # Disposable runner, no recursive traversal of rejected links.
+          Write-Output 'SEALED_TREE_NEGATIVE_GATES_PASS; certification=none'
