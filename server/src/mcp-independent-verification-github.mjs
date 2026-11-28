@@ -28,8 +28,11 @@ const rowKey = r => r.suite + ":" + r.platform;
 const dateMs = s => typeof s === "string" && /^\d{4}-\d{2}-\d{2}T/u.test(s) ? Date.parse(s) : NaN;
 
 export function createGitHubVerificationCollector({ policy, readRun, readJobs, readWorkflowBytes, clock = Date.now } = {}) {
+  const policyFields = ["repository", "repository_id", "required", "max_age_ms"];
+  const separateSupervisor = exact(policy, [...policyFields, "supervisor_commit"]);
   if ([readRun, readJobs, readWorkflowBytes, clock].some(f => typeof f !== "function")
-    || !exact(policy, ["repository", "repository_id", "required", "max_age_ms"])
+    || (!separateSupervisor && !exact(policy, policyFields))
+    || (separateSupervisor && (typeof policy.supervisor_commit !== "string" || !sha.test(policy.supervisor_commit)))
     || typeof policy.repository !== "string" || !repoName.test(policy.repository)
     || !positive(policy.repository_id) || !positive(policy.max_age_ms) || policy.max_age_ms > 604800000
     || !Array.isArray(policy.required) || !policy.required.length || policy.required.length > 64
@@ -50,7 +53,8 @@ export function createGitHubVerificationCollector({ policy, readRun, readJobs, r
     // candidate file hash does not prove the executed workflow definition.
     // Until independently attested merge-ref provenance is implemented,
     // accept only direct commit push/dispatch runs.
-    if (!["push", "workflow_dispatch"].includes(run.event)) return "GITHUB_WORKFLOW_EVENT_UNSUPPORTED";
+    if (separateSupervisor ? run.event !== "workflow_dispatch" : !["push", "workflow_dispatch"].includes(run.event))
+      return "GITHUB_WORKFLOW_EVENT_UNSUPPORTED";
     if (!success(run)) return "GITHUB_RUN_NOT_SUCCESSFUL";
     return null;
   }
@@ -62,6 +66,12 @@ export function createGitHubVerificationCollector({ policy, readRun, readJobs, r
         && positive(r.run_id) && nonblank(r.suite) && ["windows", "linux"].includes(r.platform))
       || new Set(input.runs.map(rowKey)).size !== input.runs.length) return denied("INVALID_GITHUB_VERIFICATION_REQUEST");
     const request = structuredClone(input);
+    // In separate-supervisor mode, GitHub proves only the reviewed supervisor
+    // revision. Candidate identity remains unproven until the independent
+    // signed raw outcome binds the exact requested candidate and run attempt.
+    const executionCommit = separateSupervisor ? trusted.supervisor_commit : request.commit;
+    if (separateSupervisor && executionCommit === request.commit)
+      return denied("GITHUB_SUPERVISOR_CANDIDATE_NOT_SEPARATE");
     const rows = new Map(request.runs.map(r => [rowKey(r), r]));
     const observations = [];
     const runFences = [];
@@ -71,10 +81,10 @@ export function createGitHubVerificationCollector({ policy, readRun, readJobs, r
         if (!selection) return denied("GITHUB_VERIFICATION_COVERAGE_MISMATCH");
         const args = { repository: trusted.repository, run_id: selection.run_id };
         const run = await readRun(args);
-        const problem = await checkRun(run, selection.run_id, request.commit, required);
+        const problem = await checkRun(run, selection.run_id, executionCommit, required);
         if (problem) return denied(problem);
         const attempt = run.run_attempt;
-        const bytes = await readWorkflowBytes({ repository: trusted.repository, commit: request.commit, path: required.workflow_path });
+        const bytes = await readWorkflowBytes({ repository: trusted.repository, commit: executionCommit, path: required.workflow_path });
         if (!Buffer.isBuffer(bytes) || bytes.length > 256 * 1024
           || createHash("sha256").update(bytes).digest("hex") !== required.workflow_sha256)
           return denied("GITHUB_WORKFLOW_DEFINITION_MISMATCH");
@@ -85,7 +95,7 @@ export function createGitHubVerificationCollector({ policy, readRun, readJobs, r
         const matches = page.jobs.filter(j => j.name === required.job_name);
         if (matches.length !== 1) return denied("GITHUB_JOB_IDENTITY_UNVERIFIED");
         const job = matches[0];
-        if (!positive(job.id) || job.run_id !== selection.run_id || job.head_sha !== request.commit
+        if (!positive(job.id) || job.run_id !== selection.run_id || job.head_sha !== executionCommit
           || !Array.isArray(job.labels) || job.labels.includes("self-hosted")
           || !job.labels.includes(required.runner_label) || job.runner_group_name !== required.runner_group_name)
           return denied("GITHUB_JOB_IDENTITY_UNVERIFIED");
@@ -113,14 +123,16 @@ export function createGitHubVerificationCollector({ policy, readRun, readJobs, r
       }
       for (const fence of runFences) {
         const again = await readRun(fence.args);
-        if (await checkRun(again, fence.args.run_id, request.commit, fence.row)
+        if (await checkRun(again, fence.args.run_id, executionCommit, fence.row)
           || typeof fence.updated_at !== "string" || again.updated_at !== fence.updated_at || again.run_attempt !== fence.attempt)
           return denied("GITHUB_RUN_CHANGED_DURING_OBSERVATION");
       }
       // Provider conclusions are not raw test process exit codes. An
       // independently trusted issuer must adopt only reviewed test semantics;
       // this collector never turns API status into signed PASS evidence.
-      return Object.freeze({ observed: true, code: "GITHUB_EXACT_RUN_OBSERVED", execution_authorized: false,
+      return Object.freeze({ observed: true,
+        code: separateSupervisor ? "GITHUB_SUPERVISOR_RUN_OBSERVED" : "GITHUB_EXACT_RUN_OBSERVED", execution_authorized: false,
+        ...(separateSupervisor ? { supervisor_commit: executionCommit, candidate_binding_pending: true } : {}),
         commit: request.commit, observations: Object.freeze(observations.map(Object.freeze)) });
     } catch { return denied("GITHUB_VERIFICATION_SOURCE_UNAVAILABLE"); }
   };
