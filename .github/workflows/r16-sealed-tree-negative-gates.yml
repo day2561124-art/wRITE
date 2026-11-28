@@ -79,6 +79,20 @@ jobs:
           Must-Reject $source 'DEPENDENCY_UNSUPPORTED_FILE_IDENTITY'
           [IO.File]::Delete($alias)
           if ((Digest $source) -cne $original) { throw 'Hardlink removal changed original' }
+          # Ordinary bytes remain unchanged when a named stream is inserted.
+          # Both a file and a directory stream must fail closed.
+          Set-Content -LiteralPath $file -Stream 'r16-fixture' -Value 'named-data'
+          Must-Reject $source 'DEPENDENCY_NAMED_DATA_STREAM'
+          Remove-Item -LiteralPath $file -Stream 'r16-fixture'
+          if ((Digest $source) -cne $original) { throw 'File stream removal changed original' }
+          Set-Content -LiteralPath $nested -Stream 'r16-fixture' -Value 'named-directory-data'
+          Must-Reject $source 'DEPENDENCY_NAMED_DATA_STREAM'
+          Remove-Item -LiteralPath $nested -Stream 'r16-fixture'
+          if ((Digest $source) -cne $original) { throw 'Directory stream removal changed original' }
+          Set-Content -LiteralPath $source -Stream 'r16-root-fixture' -Value 'named-root-data'
+          Must-Reject $source 'DEPENDENCY_NAMED_DATA_STREAM'
+          Remove-Item -LiteralPath $source -Stream 'r16-root-fixture'
+          if ((Digest $source) -cne $original) { throw 'Root stream removal changed original' }
           $outside = Join-Path $root 'outside'
           $null = New-Item -ItemType Directory -Path $outside
           $sentinel = Join-Path $outside 'sentinel.txt'
