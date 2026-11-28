@@ -362,7 +362,7 @@ internal static class Program {
     }
 
     static int Main(string[] args) {
-        if(args.Length!=3 && (args.Length!=4 || (args[3]!="loss" && args[3]!="tunnel" && args[3]!="mcp" && args[3]!="tunnel_protected")) && (args.Length!=6 || (args[3]!="tunnel_protected" && args[3]!="tunnel_sealed"))) return 2;
+        if(args.Length!=3 && (args.Length!=4 || (args[3]!="loss" && args[3]!="tunnel" && args[3]!="mcp" && args[3]!="tunnel_protected")) && (args.Length!=6 || (args[3]!="tunnel_protected" && args[3]!="tunnel_sealed" && args[3]!="mcp_sealed"))) return 2;
         var root=Path.GetFullPath(args[0]);
         var user=args[1]; var sid=args[2];
         if(!WindowsIdentity.GetCurrent().User.IsWellKnown(WellKnownSidType.LocalSystemSid) || Process.GetCurrentProcess().SessionId!=0) return 3;
@@ -377,12 +377,12 @@ internal static class Program {
                 stage="batch_logon";
                 Require(LogonUser(user,Environment.MachineName,password,4,0,out token),"batch_logon");
                 password=null; stage="batch_token_check"; CheckToken(token,sid);
-                if(args.Length>=4 && (args[3]=="tunnel" || args[3]=="mcp" || args[3]=="tunnel_protected" || args[3]=="tunnel_sealed")) {
+                if(args.Length>=4 && (args[3]=="tunnel" || args[3]=="mcp" || args[3]=="tunnel_protected" || args[3]=="tunnel_sealed" || args[3]=="mcp_sealed")) {
                     bool separatePrep=args.Length==6;
-                    bool sealDependencies=args[3]=="tunnel_sealed";
+                    bool sealDependencies=args[3]=="tunnel_sealed" || args[3]=="mcp_sealed";
                     bool protectedSource=args[3]=="tunnel_protected" || sealDependencies;
                     string sealedDependencies=null, sealedTools=null;
-                    bool fullMcp=args[3]=="mcp";
+                    bool fullMcp=args[3]=="mcp" || args[3]=="mcp_sealed";
                     string suite=fullMcp?"mcp":"mcp_tunnel";
                     // Fixed native Node entry only; no candidate-defined command or supervisor credential.
                     var guest=Path.Combine(root,"guest");
