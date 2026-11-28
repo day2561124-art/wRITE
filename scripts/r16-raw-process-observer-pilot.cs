@@ -89,13 +89,15 @@ internal static class Program {
             return ids;
         } finally { Marshal.FreeHGlobal(buffer); }
     }
-    static void Run(IntPtr token,string sid,string root,string name,string script,uint expectedExit,int limitMs,bool cancel,StreamWriter log) {
+    static bool Run(IntPtr token,string sid,string root,string name,string script,uint expectedExit,int limitMs,bool cancel,StreamWriter log,string nativeExe=null,string nativeArgs=null,string workDir=null,string envBlock=null) {
         var windows=Environment.GetFolderPath(Environment.SpecialFolder.Windows);
         var executable=Path.Combine(windows,@"System32\WindowsPowerShell\v1.0\powershell.exe");
         var guest=Path.Combine(root,"guest");
         string encoded=Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
-        var command=new StringBuilder("\""+executable+"\" -NoLogo -NoProfile -NonInteractive -EncodedCommand "+encoded);
-        var environment=Marshal.StringToHGlobalUni("PATH="+Path.Combine(windows,"System32")+"\0SystemRoot="+windows+"\0TEMP="+guest+"\0TMP="+guest+"\0WINDIR="+windows+"\0\0");
+        if(nativeExe!=null) executable=nativeExe;
+        bool actualSuite=nativeExe!=null;
+        var command=new StringBuilder("\""+executable+"\" "+(actualSuite?nativeArgs:"-NoLogo -NoProfile -NonInteractive -EncodedCommand "+encoded));
+        var environment=Marshal.StringToHGlobalUni(envBlock??("PATH="+Path.Combine(windows,"System32")+"\0SystemRoot="+windows+"\0TEMP="+guest+"\0TMP="+guest+"\0WINDIR="+windows+"\0\0"));
         IntPtr job=IntPtr.Zero,childToken=IntPtr.Zero;
         ProcessInfo child=new ProcessInfo();
         bool assigned=false;
@@ -107,7 +109,7 @@ internal static class Program {
             Require(SetInformationJobObject(job,9,ref limits,Marshal.SizeOf(typeof(ExtendedLimits))),"job_limits");
             var startup=new Startup(); startup.cb=Marshal.SizeOf(typeof(Startup));
             stage=name+":process_create";
-            Require(CreateProcessAsUser(token,executable,command,IntPtr.Zero,IntPtr.Zero,false,Suspended|UnicodeEnvironment|NoWindow,environment,guest,ref startup,out child),"process_create");
+            Require(CreateProcessAsUser(token,executable,command,IntPtr.Zero,IntPtr.Zero,false,Suspended|UnicodeEnvironment|NoWindow,environment,workDir??guest,ref startup,out child),"process_create");
             Require(AssignProcessToJobObject(job,child.process),"job_assign"); assigned=true;
             stage=name+":token_open";
             Require(OpenProcessToken(child.process,Query|Duplicate,out childToken),"token_open");
@@ -141,10 +143,10 @@ internal static class Program {
             uint exit=0;
             if(state==WaitObject) {
                 Require(GetExitCodeProcess(child.process,out exit),"exit_read");
-                if(cancel || exit!=expectedExit || limitMs<2000) throw new InvalidOperationException("UNEXPECTED_NATIVE_EXIT");
+                if(!actualSuite && (cancel || exit!=expectedExit || limitMs<2000)) throw new InvalidOperationException("UNEXPECTED_NATIVE_EXIT");
                 result="completed";
             } else if(state==WaitTimeout) {
-                if(limitMs>=2000 && !cancel) throw new InvalidOperationException("UNEXPECTED_NATIVE_TIMEOUT");
+                if(!actualSuite && limitMs>=2000 && !cancel) throw new InvalidOperationException("UNEXPECTED_NATIVE_TIMEOUT");
                 result=cancel?"cancelled":"timed_out";
             } else throw new Win32Exception(Marshal.GetLastWin32Error(),"process_wait");
             stage=name+":cleanup";
@@ -160,6 +162,7 @@ internal static class Program {
             if(facts.activeProcesses!=0) throw new InvalidOperationException("JOB_NOT_EMPTY");
             if(name=="descendant" && facts.totalProcesses<2) throw new InvalidOperationException("DESCENDANT_NOT_OBSERVED");
             log.WriteLine("RAW_OBSERVER "+name+" outcome="+result+" exit="+(result=="completed"?exit.ToString():"null")+" active=0 total="+facts.totalProcesses);
+            return result=="completed" && exit==0;
         } finally {
             if(assigned) TerminateJobObject(job,125);
             else if(child.process!=IntPtr.Zero) TerminateProcess(child.process,125);
@@ -168,7 +171,7 @@ internal static class Program {
         }
     }
     static int Main(string[] args) {
-        if(args.Length!=3 && (args.Length!=4 || args[3]!="loss")) return 2;
+        if(args.Length!=3 && (args.Length!=4 || (args[3]!="loss" && args[3]!="tunnel"))) return 2;
         var root=Path.GetFullPath(args[0]);
         var user=args[1]; var sid=args[2];
         if(!WindowsIdentity.GetCurrent().User.IsWellKnown(WellKnownSidType.LocalSystemSid) || Process.GetCurrentProcess().SessionId!=0) return 3;
@@ -183,6 +186,36 @@ internal static class Program {
                 stage="batch_logon";
                 Require(LogonUser(user,Environment.MachineName,password,4,0,out token),"batch_logon");
                 password=null; stage="batch_token_check"; CheckToken(token,sid);
+                if(args.Length==4 && args[3]=="tunnel") {
+                    // Fixed native Node entry only; no candidate-defined command or supervisor credential.
+                    var guest=Path.Combine(root,"guest");
+                    var source=Path.Combine(guest,"source");
+                    var scratch=Path.Combine(guest,"run");
+                    var tools=Path.Combine(root,"tools");
+                    var node=Path.Combine(tools,"node.exe");
+                    var npm=Path.Combine(tools,@"node_modules\npm\bin\npm-cli.js");
+                    var entry=Path.Combine(source,@"tests\mcp-tunnel-launcher.test.mjs");
+                    var windows=Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+                    var system=Path.Combine(windows,"System32");
+                    var git=File.ReadAllText(Path.Combine(root,"git-dir.txt")).Trim();
+                    if(!Path.IsPathRooted(git) || !File.Exists(Path.Combine(git,"git.exe")) || !File.Exists(node) || !File.Exists(npm) || !File.Exists(entry)) throw new InvalidOperationException("FIXTURE_INPUT_MISSING");
+                    var profile=Path.Combine(scratch,"profile");
+                    Directory.CreateDirectory(profile);
+                    // No inherited GitHub token, OIDC, or supervisor environment.
+                    var env=new SortedDictionary<string,string>(StringComparer.OrdinalIgnoreCase) {
+                        {"APPDATA",Path.Combine(profile,"AppData","Roaming")},{"CI","1"},{"COMSPEC",Path.Combine(system,"cmd.exe")},
+                        {"GIT_CONFIG_GLOBAL","NUL"},{"GIT_CONFIG_NOSYSTEM","1"},{"GIT_TERMINAL_PROMPT","0"},{"HOME",profile},{"LOCALAPPDATA",Path.Combine(profile,"AppData","Local")},
+                        {"NPM_CONFIG_CACHE",Path.Combine(scratch,"npm-cache")},{"PATH",tools+";"+git+";"+system+";"+Path.Combine(system,@"WindowsPowerShell\v1.0")},{"PATHEXT",".COM;.EXE;.BAT;.CMD"},
+                        {"SystemDrive",Path.GetPathRoot(windows).TrimEnd('\\')},{"SystemRoot",windows},{"TEMP",scratch},{"TMP",scratch},{"USERPROFILE",profile},{"WINDIR",windows},
+                        {"WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL","1"},{"WRITER_WORKBENCH_ISOLATED_TEST_CHECKPOINT","1"},{"WRITER_WORKBENCH_ISOLATED_TEST_TRANSACTION","1"}
+                    };
+                    var block=new StringBuilder(); foreach(var item in env) block.Append(item.Key+"="+item.Value+"\0"); block.Append("\0");
+                    var environment=block.ToString();
+                    if(!Run(token,sid,root,"npm_prepare","",0,600000,false,log,node,"\""+npm+"\" ci --ignore-scripts --no-audit --no-fund",source,environment)) return 1;
+                    if(!Run(token,sid,root,"mcp_tunnel","",0,1200000,false,log,node,"\""+entry+"\"",source,environment)) return 1;
+                    log.WriteLine("RAW_OBSERVER_TUNNEL_PILOT_PASS");
+                    return 0;
+                }
                 if(args.Length==4) {
                     string loss="$ErrorActionPreference='Stop'; $p=[Diagnostics.ProcessStartInfo]::new([IO.Path]::Combine($PSHOME,'powershell.exe'),'-NoProfile -NonInteractive -Command [Threading.Thread]::Sleep(90000)'); $p.UseShellExecute=$false; $p.CreateNoWindow=$true; $child=[Diagnostics.Process]::Start($p); if ($null -eq $child -or $child.HasExited) { exit 93 }; [Threading.Thread]::Sleep(90000)";
                     Run(token,sid,root,"observer_loss",loss,0,10000,false,log);
