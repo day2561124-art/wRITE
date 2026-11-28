@@ -674,3 +674,83 @@ test("protected outcome source selects only exact attempt files and rejects alia
   await writeFile(file,JSON.stringify({...envelope,extra:"unexpected"}));
   await assert.rejects(read(binding),{code:"INDEPENDENT_RECEIPT_FORMAT_INVALID"});
 });
+
+
+test("pinned production consumer uses immutable manifest, enrolled identity and reviewed ACLs; drift never falls back", async t => {
+  const { mkdtemp, mkdir, writeFile, readFile, rm, realpath } = await import("node:fs/promises");
+  const { createHash } = await import("node:crypto");
+  const { default: os } = await import("node:os");
+  const { default: path } = await import("node:path");
+  const { createPinnedIndependentConsumerBinding, loadProductionIndependentConsumerGate } =
+    await import("../../server/src/mcp-independent-verification-consumer-binding.mjs");
+  const dir = await realpath(await mkdtemp(path.join(os.tmpdir(),"r16-consumer-binding-")));
+  t.after(()=>rm(dir,{recursive:true,force:true}));
+  const receiptRoot=path.join(dir,"receipts"), manifest=path.join(dir,"consumer.json");
+  await mkdir(receiptRoot);
+  const parents=[];
+  for(let p=dir;;p=path.dirname(p)){parents.unshift(p);if(path.dirname(p)===p)break;}
+  const paths=[...parents,manifest,receiptRoot];
+  const hash=v=>createHash("sha256").update(v).digest("hex");
+  const enrolledSid="S-1-5-21-100-200-300-1001";
+  const descriptors=paths.map((_,i)=>"fixture-reviewed-descriptor-"+i);
+  let actualSid=enrolledSid, admin=false, changed=false;
+  const inspect=actualPaths=>{
+    assert.deepEqual(actualPaths,paths);
+    return {sid:actualSid,administrator:admin,entries:actualPaths.map((p,i)=>({
+      path:p,directory:p!==manifest,sddl:descriptors[i]+(changed&&p===receiptRoot?"-drift":"")
+    }))};
+  };
+  const cfg={schema_version:1,consumer_sid:enrolledSid,
+    issuer_public_key:publicKey.export({format:"pem",type:"spki"}).toString(),
+    policy:{repository:expected.repository,issuer:expected.issuer,max_age_ms:expected.max_age_ms,
+      suite_workflows:required,additional_required:[]},acl_sha256:descriptors.map(hash)};
+  const raw=Buffer.from(JSON.stringify(cfg),"utf8");
+  await writeFile(manifest,raw);
+  const receiptFile=path.join(receiptRoot,candidate.integration_candidate_id+".r"+candidate.revision+"."+candidate.integration_commit+".json");
+  await writeFile(receiptFile,JSON.stringify(signed(body())));
+  const opts={directory:dir,manifestSha256:hash(raw),inspect,clock:()=>nowMs};
+  const state={...candidate,state:"preflight_passed"};
+  const plan={required_suites:required.map(v=>v.suite)};
+  const gate=createPinnedIndependentConsumerBinding(opts);
+  const good=await gate.reviewForValidation(state,plan);
+  assert.equal(good.verified,true);
+  assert.equal(good.execution_authorized,false);
+  const ready={...state,state:"ready",revision:state.revision+3};
+  assert.equal((await gate.reviewForApply(ready,plan,good.evidence_reference)).verified,true);
+  assert.throws(()=>createPinnedIndependentConsumerBinding({...opts,manifestSha256:"0".repeat(64)}),/UNVERIFIED/);
+  changed=true;
+  assert.equal((await gate.reviewForValidation(state,plan)).verified,false);
+  assert.equal((await gate.reviewForApply(ready,plan,good.evidence_reference)).verified,false);
+  assert.throws(()=>createPinnedIndependentConsumerBinding(opts),/UNVERIFIED/);
+  changed=false; actualSid="S-1-5-21-100-200-300-1002";
+  assert.equal((await gate.reviewForValidation(state,plan)).verified,false);
+  actualSid=enrolledSid; admin=true;
+  assert.equal((await gate.reviewForValidation(state,plan)).verified,false);
+  admin=false;
+  await writeFile(manifest,JSON.stringify({...cfg,consumer_sid:"S-1-5-21-1-2-3-4"}));
+  assert.equal((await gate.reviewForValidation(state,plan)).verified,false);
+  await writeFile(manifest,raw);
+  assert.deepEqual(await readFile(manifest),raw);
+  assert.equal((await gate.reviewForValidation(state,plan)).verified,true);
+  assert.equal(loadProductionIndependentConsumerGate({environment:{}}),undefined);
+  const invalid=loadProductionIndependentConsumerGate({environment:{NEXA_INDEPENDENT_VERIFICATION_CONSUMER_SHA256:"invalid"}});
+  assert.deepEqual(await invalid.reviewForValidation(state,plan),{
+    verified:false,execution_authorized:false,code:"INDEPENDENT_CONSUMER_BINDING_UNVERIFIED"});
+  assert.equal((await invalid.reviewForApply(ready,plan,good.evidence_reference)).verified,false);
+});
+
+test("Windows native consumer probe reads real identity and ACL without writing", {skip:process.platform!=="win32"}, async t => {
+  const { mkdtemp, writeFile, rm, realpath } = await import("node:fs/promises");
+  const { default: os } = await import("node:os");
+  const { default: path } = await import("node:path");
+  const { inspectWindowsConsumerAcl } = await import("../../server/src/mcp-independent-verification-consumer-binding.mjs");
+  const dir=await realpath(await mkdtemp(path.join(os.tmpdir(),"r16-native-acl-")));
+  t.after(()=>rm(dir,{recursive:true,force:true}));
+  const file=path.join(dir,"consumer.json");
+  await writeFile(file,"synthetic");
+  const result=inspectWindowsConsumerAcl([dir,file],process.env.SystemRoot);
+  assert.match(result.sid,/^S-1-/);
+  assert.equal(typeof result.administrator,"boolean");
+  assert.deepEqual(result.entries.map(v=>[v.path,v.directory]),[[dir,true],[file,false]]);
+  assert.ok(result.entries.every(v=>typeof v.sddl==="string"&&v.sddl.includes("D:")));
+});

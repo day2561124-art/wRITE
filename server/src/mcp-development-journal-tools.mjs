@@ -83,6 +83,8 @@ const reviewedIntegrationPreflightSources = new Set([
   "0c00c1fa46317c9b616a1764c159bc269413688dd7a55092664adbd41d53a06e",
   // Reviewed #147: worktree recovery registration matching only; preflight guard unchanged.
   "eb80eaee0f8597e74910a9f252fc3c569fadb7c4eece1efcac3d1c5394dc4ef9",
+  // Reviewed #178: default service consumer binding only; preflight guard unchanged.
+  "00cf31053a8526c1dd175cfbe5da027e648689cdb22506973980e53710719d49",
 ]);
 export const DEV_JOURNAL_SCHEMA_VERSION = 1;
 export const DEV_JOURNAL_HEALTH = Object.freeze(["healthy", "recovering", "degraded", "corrupt"]);

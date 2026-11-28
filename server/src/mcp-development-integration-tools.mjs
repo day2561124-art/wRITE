@@ -28,7 +28,8 @@ import {
   dev_workspace_get_workstream,
 } from "./mcp-development-workstream-tools.mjs";
 import { controlledProcessEnvironment } from "./process-control.mjs";
-import { projectPaths, projectRoot } from "./project-paths.mjs";
+import { projectPaths, projectRoot, releaseRoot } from "./project-paths.mjs";
+import { loadProductionIndependentConsumerGate } from "./mcp-independent-verification-consumer-binding.mjs";
 import {
   DEV_OPERATION_ID_PATTERN_SOURCE,
   beginDevJournalOperation,
@@ -1974,7 +1975,9 @@ export function createDevIntegrationService({
   };
 }
 
-const defaultService = createDevIntegrationService();
+const defaultService = createDevIntegrationService({
+  independentEvidenceGate: loadProductionIndependentConsumerGate({ releaseRoot }),
+});
 
 export const dev_workspace_integration_preflight = defaultService.preflight;
 export const dev_workspace_get_integration_candidate = defaultService.getCandidate;
