@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
 using System.Threading;
+using System.Collections.Generic;
 
 internal static class Program {
     const uint Suspended=4, UnicodeEnvironment=0x400, NoWindow=0x08000000;
@@ -53,6 +54,7 @@ internal static class Program {
     [DllImport("kernel32.dll",SetLastError=true)] static extern bool SetInformationJobObject(IntPtr job,int kind,ref ExtendedLimits limits,int size);
     [DllImport("kernel32.dll",SetLastError=true)] static extern bool AssignProcessToJobObject(IntPtr job,IntPtr process);
     [DllImport("kernel32.dll",SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr job,int kind,out Accounting value,int size,IntPtr returned);
+    [DllImport("kernel32.dll",EntryPoint="QueryInformationJobObject",SetLastError=true)] static extern bool QueryJobProcessIds(IntPtr job,int kind,IntPtr value,int size,IntPtr returned);
     [DllImport("kernel32.dll",SetLastError=true)] static extern bool TerminateJobObject(IntPtr job,uint exitCode);
     [DllImport("kernel32.dll",SetLastError=true)] static extern bool TerminateProcess(IntPtr process,uint exitCode);
     [DllImport("kernel32.dll",SetLastError=true)] static extern uint ResumeThread(IntPtr thread);
@@ -69,6 +71,23 @@ internal static class Program {
             if(identity.User.Value!=sid || new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator)
                 || identity.User.IsWellKnown(WellKnownSidType.LocalSystemSid)) throw new InvalidOperationException("GUEST_TOKEN_MISMATCH");
         }
+    }
+    static List<string> ReadJobProcessIds(IntPtr job) {
+        const int capacity=64;
+        int bytes=8+IntPtr.Size*capacity;
+        IntPtr buffer=Marshal.AllocHGlobal(bytes);
+        try {
+            Require(QueryJobProcessIds(job,3,buffer,bytes,IntPtr.Zero),"job_process_ids");
+            int assigned=Marshal.ReadInt32(buffer,0), count=Marshal.ReadInt32(buffer,4);
+            if(assigned!=count || count<1 || count>capacity) throw new InvalidOperationException("JOB_PROCESS_LIST_INCOMPLETE");
+            var ids=new List<string>();
+            for(int i=0;i<count;i++) {
+                long pid=Marshal.ReadIntPtr(buffer,8+i*IntPtr.Size).ToInt64();
+                if(pid<=0 || pid>Int32.MaxValue || ids.Contains(pid.ToString())) throw new InvalidOperationException("INVALID_JOB_PROCESS_ID");
+                ids.Add(pid.ToString());
+            }
+            return ids;
+        } finally { Marshal.FreeHGlobal(buffer); }
     }
     static void Run(IntPtr token,string sid,string root,string name,string script,uint expectedExit,int limitMs,bool cancel,StreamWriter log) {
         var windows=Environment.GetFolderPath(Environment.SpecialFolder.Windows);
@@ -96,6 +115,25 @@ internal static class Program {
             CheckToken(childToken,sid);
             stage=name+":resume";
             Require(ResumeThread(child.thread)!=uint.MaxValue,"thread_resume");
+            if(name=="observer_loss") {
+                // The fixture launches an explicit child which stays alive. Record
+                // membership from the native job, not a candidate-written receipt.
+                stage=name+":membership";
+                var deadline=Stopwatch.StartNew();
+                List<string> ids;
+                do {
+                    if(WaitForSingleObject(child.process,0)!=WaitTimeout) throw new InvalidOperationException("LOSS_FIXTURE_EXITED_EARLY");
+                    ids=ReadJobProcessIds(job);
+                    if(ids.Count>=3) break;
+                    Thread.Sleep(50);
+                } while(deadline.ElapsedMilliseconds<10000);
+                if(ids.Count<3 || !ids.Contains(child.pid.ToString())) throw new InvalidOperationException("LOSS_MEMBERS_NOT_OBSERVED");
+                log.WriteLine("RAW_OBSERVER_LOSS_READY supervisor="+Process.GetCurrentProcess().Id+"; members="+String.Join(",",ids.ToArray()));
+                // An outside fixture controller must forcibly terminate this
+                // supervisor. A normal return cannot certify observer loss.
+                Thread.Sleep(60000);
+                throw new InvalidOperationException("LOSS_CONTROLLER_DID_NOT_TERMINATE");
+            }
             stage=name+":wait";
             var elapsed=Stopwatch.StartNew();
             uint state=WaitForSingleObject(child.process,(uint)limitMs);
@@ -130,7 +168,7 @@ internal static class Program {
         }
     }
     static int Main(string[] args) {
-        if(args.Length!=3) return 2;
+        if(args.Length!=3 && (args.Length!=4 || args[3]!="loss")) return 2;
         var root=Path.GetFullPath(args[0]);
         var user=args[1]; var sid=args[2];
         if(!WindowsIdentity.GetCurrent().User.IsWellKnown(WellKnownSidType.LocalSystemSid) || Process.GetCurrentProcess().SessionId!=0) return 3;
@@ -145,6 +183,11 @@ internal static class Program {
                 stage="batch_logon";
                 Require(LogonUser(user,Environment.MachineName,password,4,0,out token),"batch_logon");
                 password=null; stage="batch_token_check"; CheckToken(token,sid);
+                if(args.Length==4) {
+                    string loss="$ErrorActionPreference='Stop'; $p=[Diagnostics.ProcessStartInfo]::new([IO.Path]::Combine($PSHOME,'powershell.exe'),'-NoProfile -NonInteractive -Command [Threading.Thread]::Sleep(90000)'); $p.UseShellExecute=$false; $p.CreateNoWindow=$true; $child=[Diagnostics.Process]::Start($p); if ($null -eq $child -or $child.HasExited) { exit 93 }; [Threading.Thread]::Sleep(90000)";
+                    Run(token,sid,root,"observer_loss",loss,0,10000,false,log);
+                    return 1;
+                }
                 var sentinel=QuotePs(Path.Combine(root,"sentinel.txt"));
                 string check="$p="+sentinel+"; try { [void][IO.File]::ReadAllText($p); exit 91 } catch [UnauthorizedAccessException] {} ; try { [IO.File]::WriteAllText($p,'bad'); exit 92 } catch [UnauthorizedAccessException] {} ; exit 0";
                 Run(token,sid,root,"isolation",check,0,10000,false,log);
