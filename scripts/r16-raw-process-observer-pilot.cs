@@ -76,6 +76,7 @@ internal static class Program {
     [DllImport("kernel32.dll",SetLastError=true)] static extern bool TerminateProcess(IntPtr process,uint exitCode);
     [DllImport("kernel32.dll",SetLastError=true)] static extern uint ResumeThread(IntPtr thread);
     [DllImport("kernel32.dll",SetLastError=true)] static extern uint WaitForSingleObject(IntPtr handle,uint ms);
+    [DllImport("kernel32.dll",SetLastError=true)] static extern uint WaitForMultipleObjects(uint count,IntPtr[] handles,bool all,uint ms);
     [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetExitCodeProcess(IntPtr process,out uint code);
     [DllImport("kernel32.dll",SetLastError=true)] static extern bool CloseHandle(IntPtr handle);
 
@@ -146,6 +147,8 @@ internal static class Program {
         IntPtr job=IntPtr.Zero,childToken=IntPtr.Zero;
         ProcessInfo child=new ProcessInfo();
         bool assigned=false,attrsInitialized=false;
+        EventWaitHandle cancellation=null;
+        Thread cancellationSource=null;
         IntPtr input=IntPtr.Zero,inputWrite=IntPtr.Zero,output=IntPtr.Zero,outputWrite=IntPtr.Zero,error=IntPtr.Zero,errorWrite=IntPtr.Zero,attrs=IntPtr.Zero,handleList=IntPtr.Zero;
         Capture stdout=null,stderr=null;
         try {
@@ -213,17 +216,27 @@ internal static class Program {
                 throw new InvalidOperationException("LOSS_CONTROLLER_DID_NOT_TERMINATE");
             }
             stage=name+":wait";
-            var elapsed=Stopwatch.StartNew();
-            uint state=WaitForSingleObject(child.process,(uint)limitMs);
+            uint state;
+            if(cancel) {
+                cancellation=new EventWaitHandle(false,EventResetMode.ManualReset);
+                var signal=cancellation;
+                cancellationSource=new Thread(delegate() { Thread.Sleep(1000); signal.Set(); });
+                cancellationSource.IsBackground=true;
+                cancellationSource.Start();
+                state=WaitForMultipleObjects(2,new[]{child.process,cancellation.SafeWaitHandle.DangerousGetHandle()},false,(uint)limitMs);
+            } else state=WaitForSingleObject(child.process,(uint)limitMs);
             string result;
             uint exit=0;
             if(state==WaitObject) {
                 Require(GetExitCodeProcess(child.process,out exit),"exit_read");
                 if(!actualSuite && (cancel || exit!=expectedExit || limitMs<2000)) throw new InvalidOperationException("UNEXPECTED_NATIVE_EXIT");
                 result="completed";
+            } else if(state==WaitObject+1 && cancel) {
+                if(WaitForSingleObject(child.process,0)!=WaitTimeout) throw new InvalidOperationException("CANCELLED_CHILD_NOT_RUNNING");
+                result="cancelled";
             } else if(state==WaitTimeout) {
-                if(!actualSuite && limitMs>=2000 && !cancel) throw new InvalidOperationException("UNEXPECTED_NATIVE_TIMEOUT");
-                result=cancel?"cancelled":"timed_out";
+                if(cancel || (!actualSuite && limitMs>=2000)) throw new InvalidOperationException("UNEXPECTED_NATIVE_TIMEOUT");
+                result="timed_out";
             } else throw new Win32Exception(Marshal.GetLastWin32Error(),"process_wait");
             stage=name+":cleanup";
             Require(TerminateJobObject(job,125),"job_terminate");
@@ -246,6 +259,8 @@ internal static class Program {
             }
             return result=="completed" && exit==0;
         } finally {
+            if(cancellationSource!=null) cancellationSource.Join();
+            if(cancellation!=null) cancellation.Dispose();
             if(assigned) TerminateJobObject(job,125);
             else if(child.process!=IntPtr.Zero) TerminateProcess(child.process,125);
             Close(childToken); Close(child.thread); Close(child.process); Close(job);
@@ -257,7 +272,7 @@ internal static class Program {
         }
     }
     static int Main(string[] args) {
-        if(args.Length!=3 && (args.Length!=4 || (args[3]!="loss" && args[3]!="tunnel"))) return 2;
+        if(args.Length!=3 && (args.Length!=4 || (args[3]!="loss" && args[3]!="tunnel" && args[3]!="mcp"))) return 2;
         var root=Path.GetFullPath(args[0]);
         var user=args[1]; var sid=args[2];
         if(!WindowsIdentity.GetCurrent().User.IsWellKnown(WellKnownSidType.LocalSystemSid) || Process.GetCurrentProcess().SessionId!=0) return 3;
@@ -272,7 +287,9 @@ internal static class Program {
                 stage="batch_logon";
                 Require(LogonUser(user,Environment.MachineName,password,4,0,out token),"batch_logon");
                 password=null; stage="batch_token_check"; CheckToken(token,sid);
-                if(args.Length==4 && args[3]=="tunnel") {
+                if(args.Length==4 && (args[3]=="tunnel" || args[3]=="mcp")) {
+                    bool fullMcp=args[3]=="mcp";
+                    string suite=fullMcp?"mcp":"mcp_tunnel";
                     // Fixed native Node entry only; no candidate-defined command or supervisor credential.
                     var guest=Path.Combine(root,"guest");
                     var source=Path.Combine(guest,"source");
@@ -280,7 +297,7 @@ internal static class Program {
                     var tools=Path.Combine(root,"tools");
                     var node=Path.Combine(tools,"node.exe");
                     var npm=Path.Combine(tools,@"node_modules\npm\bin\npm-cli.js");
-                    var entry=Path.Combine(source,@"tests\mcp-tunnel-launcher.test.mjs");
+                    var entry=Path.Combine(source,fullMcp?@"tests\tools\mcp-contract.test.mjs":@"tests\mcp-tunnel-launcher.test.mjs");
                     var windows=Environment.GetFolderPath(Environment.SpecialFolder.Windows);
                     var system=Path.Combine(windows,"System32");
                     var git=File.ReadAllText(Path.Combine(root,"git-dir.txt")).Trim();
@@ -318,12 +335,12 @@ internal static class Program {
                     var warmArgs="-NoLogo -NoProfile -NonInteractive -EncodedCommand "+Convert.ToBase64String(Encoding.Unicode.GetBytes(warm));
                     if(!Run(token,sid,root,"guest_profile_prepare","",0,120000,false,log,powershell,warmArgs,source,environment)) return 1;
                     if(!Run(token,sid,root,"npm_prepare","",0,600000,false,log,node,"\""+npm+"\" ci --ignore-scripts --no-audit --no-fund",source,environment)) return 1;
-                    if(!Run(token,sid,root,"mcp_tunnel","",0,1200000,false,log,node,"\""+entry+"\"",source,environment)) return 1;
+                    if(!Run(token,sid,root,suite,"",0,fullMcp?2700000:1200000,false,log,node,"\""+entry+"\"",source,environment)) return 1;
                     } finally {
                         stage="guest_profile_unload";
                         Require(UnloadUserProfile(token,loaded.handle),"unload_guest_profile");
                     }
-                    log.WriteLine("RAW_OBSERVER_TUNNEL_PILOT_PASS");
+                    log.WriteLine(fullMcp?"RAW_OBSERVER_MCP_PILOT_PASS":"RAW_OBSERVER_TUNNEL_PILOT_PASS");
                     return 0;
                 }
                 if(args.Length==4) {
@@ -339,7 +356,7 @@ internal static class Program {
                 string descendant="$ErrorActionPreference='Stop'; $p=[Diagnostics.ProcessStartInfo]::new([IO.Path]::Combine($PSHOME,'powershell.exe'),'-NoProfile -NonInteractive -Command [Threading.Thread]::Sleep(90000)'); $p.UseShellExecute=$false; $p.CreateNoWindow=$true; $child=[Diagnostics.Process]::Start($p); if ($null -eq $child -or $child.HasExited) { exit 93 }; exit 7";
                 Run(token,sid,root,"descendant",descendant,7,10000,false,log);
                 Run(token,sid,root,"timeout","[Threading.Thread]::Sleep(90000)",0,1000,false,log);
-                Run(token,sid,root,"cancel","[Threading.Thread]::Sleep(90000)",0,1000,true,log);
+                Run(token,sid,root,"cancel","[Threading.Thread]::Sleep(90000)",0,10000,true,log);
                 if(File.ReadAllText(Path.Combine(root,"sentinel.txt"))!="synthetic-protected-sentinel") throw new InvalidOperationException("SENTINEL_CHANGED");
                 log.WriteLine("RAW_OBSERVER_PILOT_PASS");
                 return 0;
