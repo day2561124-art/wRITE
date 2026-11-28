@@ -9,6 +9,7 @@ using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using System.Collections.Generic;
+using Microsoft.Win32.SafeHandles;
 
 internal static class Program {
     const uint Suspended=4, UnicodeEnvironment=0x400, NoWindow=0x08000000;
@@ -21,6 +22,10 @@ internal static class Program {
         public short show,reserved2;
         public IntPtr reservedPtr,input,output,error;
     }
+    [StructLayout(LayoutKind.Sequential)]
+    struct StartupEx { public Startup info; public IntPtr attributes; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct PipeSecurity { public int size; public IntPtr descriptor; public int inherit; }
     [StructLayout(LayoutKind.Sequential)]
     struct ProcessInfo { public IntPtr process,thread; public uint pid,tid; }
     [StructLayout(LayoutKind.Sequential)]
@@ -48,6 +53,13 @@ internal static class Program {
     static extern bool LogonUser(string user,string domain,string password,int type,int provider,out IntPtr token);
     [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
     static extern bool CreateProcessAsUser(IntPtr token,string executable,StringBuilder command,IntPtr pa,IntPtr ta,bool inherit,uint flags,IntPtr env,string cwd,ref Startup startup,out ProcessInfo info);
+    [DllImport("advapi32.dll",EntryPoint="CreateProcessAsUserW",CharSet=CharSet.Unicode,SetLastError=true)]
+    static extern bool CreateProcessWithCapture(IntPtr token,string executable,StringBuilder command,IntPtr pa,IntPtr ta,bool inherit,uint flags,IntPtr env,string cwd,ref StartupEx startup,out ProcessInfo info);
+    [DllImport("kernel32.dll",SetLastError=true)] static extern bool CreatePipe(out IntPtr read,out IntPtr write,ref PipeSecurity security,uint size);
+    [DllImport("kernel32.dll",SetLastError=true)] static extern bool SetHandleInformation(IntPtr handle,uint mask,uint flags);
+    [DllImport("kernel32.dll",SetLastError=true)] static extern bool InitializeProcThreadAttributeList(IntPtr attrs,int count,uint flags,ref IntPtr size);
+    [DllImport("kernel32.dll",SetLastError=true)] static extern bool UpdateProcThreadAttribute(IntPtr attrs,uint flags,IntPtr key,IntPtr value,IntPtr size,IntPtr previous,IntPtr returned);
+    [DllImport("kernel32.dll")] static extern void DeleteProcThreadAttributeList(IntPtr attrs);
     [DllImport("advapi32.dll",SetLastError=true)]
     static extern bool OpenProcessToken(IntPtr process,uint access,out IntPtr token);
     [DllImport("kernel32.dll",SetLastError=true)] static extern IntPtr CreateJobObject(IntPtr sa,IntPtr name);
@@ -64,6 +76,34 @@ internal static class Program {
 
     static void Require(bool value,string stage) { if(!value) throw new Win32Exception(Marshal.GetLastWin32Error(),stage); }
     static void Close(IntPtr handle) { if(handle!=IntPtr.Zero) CloseHandle(handle); }
+    static void Close(ref IntPtr handle) { Close(handle); handle=IntPtr.Zero; }
+    // Keep a bounded rolling diagnostic tail; do not interpret guest text as evidence.
+    sealed class Capture {
+        const int Limit=32768;
+        readonly byte[] ring=new byte[Limit];
+        int next,count;
+        internal bool failed;
+        internal readonly Thread reader;
+        internal Capture(IntPtr handle) {
+            reader=new Thread(delegate() {
+                try {
+                    using(var stream=new FileStream(new SafeFileHandle(handle,true),FileAccess.Read,4096,false)) {
+                        var chunk=new byte[4096]; int n;
+                        while((n=stream.Read(chunk,0,chunk.Length))>0) {
+                            for(int i=0;i<n;i++) { ring[next]=chunk[i]; next=(next+1)%Limit; if(count<Limit) count++; }
+                        }
+                    }
+                } catch(IOException e) { int code=e.HResult&0xffff; failed=code!=109&&code!=232; }
+                catch(Exception) { failed=true; }
+            });
+            reader.IsBackground=true; reader.Start();
+        }
+        internal string Tail() {
+            byte[] value=new byte[count]; int start=(next-count+Limit)%Limit;
+            for(int i=0;i<count;i++) value[i]=ring[(start+i)%Limit];
+            return Convert.ToBase64String(value);
+        }
+    }
     static string QuotePs(string value) { return "'" + value.Replace("'","''") + "'"; }
     static string stage="initial";
     static void CheckToken(IntPtr token,string sid) {
@@ -100,7 +140,9 @@ internal static class Program {
         var environment=Marshal.StringToHGlobalUni(envBlock??("PATH="+Path.Combine(windows,"System32")+"\0SystemRoot="+windows+"\0TEMP="+guest+"\0TMP="+guest+"\0WINDIR="+windows+"\0\0"));
         IntPtr job=IntPtr.Zero,childToken=IntPtr.Zero;
         ProcessInfo child=new ProcessInfo();
-        bool assigned=false;
+        bool assigned=false,attrsInitialized=false;
+        IntPtr input=IntPtr.Zero,inputWrite=IntPtr.Zero,output=IntPtr.Zero,outputWrite=IntPtr.Zero,error=IntPtr.Zero,errorWrite=IntPtr.Zero,attrs=IntPtr.Zero,handleList=IntPtr.Zero;
+        Capture stdout=null,stderr=null;
         try {
             stage=name+":job_create";
             job=CreateJobObject(IntPtr.Zero,IntPtr.Zero);
@@ -109,12 +151,41 @@ internal static class Program {
             Require(SetInformationJobObject(job,9,ref limits,Marshal.SizeOf(typeof(ExtendedLimits))),"job_limits");
             var startup=new Startup(); startup.cb=Marshal.SizeOf(typeof(Startup));
             stage=name+":process_create";
-            Require(CreateProcessAsUser(token,executable,command,IntPtr.Zero,IntPtr.Zero,false,Suspended|UnicodeEnvironment|NoWindow,environment,workDir??guest,ref startup,out child),"process_create");
+            if(actualSuite) {
+                // Inherit exactly three pipe endpoints, never the job or privileged handles.
+                var pipe=new PipeSecurity {size=Marshal.SizeOf(typeof(PipeSecurity)),inherit=1};
+                Require(CreatePipe(out input,out inputWrite,ref pipe,0),"stdin_pipe");
+                Require(CreatePipe(out output,out outputWrite,ref pipe,0),"stdout_pipe");
+                Require(CreatePipe(out error,out errorWrite,ref pipe,0),"stderr_pipe");
+                Require(SetHandleInformation(output,1,0),"stdout_private");
+                Require(SetHandleInformation(error,1,0),"stderr_private");
+                Close(ref inputWrite);
+                IntPtr size=IntPtr.Zero;
+                InitializeProcThreadAttributeList(IntPtr.Zero,1,0,ref size);
+                Require(size!=IntPtr.Zero,"attribute_size");
+                attrs=Marshal.AllocHGlobal(size);
+                Require(InitializeProcThreadAttributeList(attrs,1,0,ref size),"attribute_init"); attrsInitialized=true;
+                handleList=Marshal.AllocHGlobal(IntPtr.Size*3);
+                Marshal.WriteIntPtr(handleList,0,input);
+                Marshal.WriteIntPtr(handleList,IntPtr.Size,outputWrite);
+                Marshal.WriteIntPtr(handleList,IntPtr.Size*2,errorWrite);
+                Require(UpdateProcThreadAttribute(attrs,0,new IntPtr(0x20002),handleList,new IntPtr(IntPtr.Size*3),IntPtr.Zero,IntPtr.Zero),"handle_list");
+                startup.cb=Marshal.SizeOf(typeof(StartupEx)); startup.flags=0x100; startup.input=input; startup.output=outputWrite; startup.error=errorWrite;
+                var extended=new StartupEx {info=startup,attributes=attrs};
+                Require(CreateProcessWithCapture(token,executable,command,IntPtr.Zero,IntPtr.Zero,true,Suspended|UnicodeEnvironment|NoWindow|0x80000,environment,workDir??guest,ref extended,out child),"process_create_capture");
+            } else {
+                Require(CreateProcessAsUser(token,executable,command,IntPtr.Zero,IntPtr.Zero,false,Suspended|UnicodeEnvironment|NoWindow,environment,workDir??guest,ref startup,out child),"process_create");
+            }
             Require(AssignProcessToJobObject(job,child.process),"job_assign"); assigned=true;
             stage=name+":token_open";
             Require(OpenProcessToken(child.process,Query|Duplicate,out childToken),"token_open");
             stage=name+":token_check";
             CheckToken(childToken,sid);
+            if(actualSuite) {
+                Close(ref input); Close(ref outputWrite); Close(ref errorWrite);
+                stdout=new Capture(output); output=IntPtr.Zero;
+                stderr=new Capture(error); error=IntPtr.Zero;
+            }
             stage=name+":resume";
             Require(ResumeThread(child.thread)!=uint.MaxValue,"thread_resume");
             if(name=="observer_loss") {
@@ -162,11 +233,21 @@ internal static class Program {
             if(facts.activeProcesses!=0) throw new InvalidOperationException("JOB_NOT_EMPTY");
             if(name=="descendant" && facts.totalProcesses<2) throw new InvalidOperationException("DESCENDANT_NOT_OBSERVED");
             log.WriteLine("RAW_OBSERVER "+name+" outcome="+result+" exit="+(result=="completed"?exit.ToString():"null")+" active=0 total="+facts.totalProcesses);
+            if(actualSuite) {
+                if(!stdout.reader.Join(5000)||!stderr.reader.Join(5000)||stdout.failed||stderr.failed) throw new InvalidOperationException("CAPTURE_DRAIN_FAILED");
+                // Distinct prefixed encoded records in protected log; bounded, non-authoritative.
+                File.WriteAllText(Path.Combine(root,name+".stdout.b64"),stdout.Tail());
+                File.WriteAllText(Path.Combine(root,name+".stderr.b64"),stderr.Tail());
+            }
             return result=="completed" && exit==0;
         } finally {
             if(assigned) TerminateJobObject(job,125);
             else if(child.process!=IntPtr.Zero) TerminateProcess(child.process,125);
             Close(childToken); Close(child.thread); Close(child.process); Close(job);
+            Close(ref input); Close(ref inputWrite); Close(ref output); Close(ref outputWrite); Close(ref error); Close(ref errorWrite);
+            if(attrsInitialized) DeleteProcThreadAttributeList(attrs);
+            if(attrs!=IntPtr.Zero) Marshal.FreeHGlobal(attrs);
+            if(handleList!=IntPtr.Zero) Marshal.FreeHGlobal(handleList);
             Marshal.FreeHGlobal(environment);
         }
     }
