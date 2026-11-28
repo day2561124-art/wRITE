@@ -103,11 +103,42 @@ jobs:
               $command=$prefix+[Environment]::NewLine+$identity+$paths+[Environment]::NewLine+'try {'+$body+';exit 0}catch{exit 83}'
               $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
               $exe=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-              $proc=Start-Process -FilePath $exe -ArgumentList @('-NoProfile','-NonInteractive','-EncodedCommand',$encoded) -Credential $credentials[$account] -WorkingDirectory (Join-Path $env:SystemRoot 'System32') -PassThru
+              # The hosted runner is a service session; Start-Process
+              # -Credential failed before process creation (Win32 87).
+              # Reuse the already reviewed limited Password-task mechanism.
+              $task='R16RoleProbe-'+[Guid]::NewGuid().ToString('N')
+              $action=New-ScheduledTaskAction -Execute $exe -Argument ("-NoProfile -NonInteractive -EncodedCommand "+$encoded) -WorkingDirectory (Join-Path $env:SystemRoot 'System32')
+              $settings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 1)
+              $trigger=New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(10)
+              $registered=$false
               try {
-                if(-not $proc.WaitForExit(30000)) { $proc.Kill();throw "Role probe timed out: $account" }
-                if($proc.ExitCode -ne 0){throw "Role probe failed: $account exit=$($proc.ExitCode)"}
-              } finally {$proc.Dispose()}
+                $password=$credentials[$account].GetNetworkCredential().Password
+                try {
+                  $null=Register-ScheduledTask -TaskName $task -Action $action -Trigger $trigger -Settings $settings -User "$env:COMPUTERNAME\$account" -Password $password -RunLevel Limited
+                  $registered=$true
+                } finally {$password=$null}
+                $principal=(Get-ScheduledTask -TaskName $task).Principal
+                if([string]$principal.LogonType -ne 'Password' -or [string]$principal.RunLevel -ne 'Limited'){throw 'Fixture task principal mismatch'}
+                $prior=(Get-ScheduledTaskInfo -TaskName $task).LastRunTime
+                Start-ScheduledTask -TaskName $task
+                $deadline=[DateTime]::UtcNow.AddSeconds(60)
+                do {
+                  Start-Sleep -Milliseconds 250
+                  $info=Get-ScheduledTaskInfo -TaskName $task
+                  $state=(Get-ScheduledTask -TaskName $task).State
+                  if($info.LastRunTime -ne $prior -and $state -eq 'Ready' -and $info.LastTaskResult -ne 267009){
+                    if($info.LastTaskResult -ne 0){throw "Role probe failed: $account exit=$($info.LastTaskResult)"}
+                    Write-Output "ROLE_TOKEN_PROBE_PASS account=$account"
+                    return
+                  }
+                } while([DateTime]::UtcNow -lt $deadline)
+                throw "Role probe timed out: $account"
+              } finally {
+                if($registered){
+                  if((Get-ScheduledTask -TaskName $task).State -eq 'Running'){Stop-ScheduledTask -TaskName $task}
+                  Unregister-ScheduledTask -TaskName $task -Confirm:$false
+                }
+              }
             }
             Invoke-RoleProbe $names[2] $supervisor.Value @'
           [IO.File]::WriteAllText([IO.Path]::Combine($outcomes,'outcome-fixture.txt'),'outcome')
