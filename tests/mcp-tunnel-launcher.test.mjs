@@ -1176,7 +1176,7 @@ async function verifyLauncherMcpProfile({
     }
     assert(
       names.length === expectedCount,
-      `${label} launcher profile exposed ${names.length} tools; expected ${expectedCount}.`,
+      `${label} launcher profile exposed ${names.length} tools; expected ${expectedCount}. Names: ${[...names].sort().join(', ')}.`,
     );
     assert(
       names.includes("dev_read_file_range") === expectRangeRead,
@@ -1615,7 +1615,7 @@ async function main() {
       fakeScript,
       argsLog,
       profile: undefined,
-      expectedCount: 107,
+      expectedCount: 110,
       expectRangeRead: true,
       expectPatch: true,
       expectDelete: true,
@@ -1647,7 +1647,7 @@ async function main() {
 
     for(const dir of [fixtureDir,serviceFixtureDir]){for(const file of await readdir(dir,{recursive:true})){const full=path.join(dir,file);if(!/\.(?:log|json)$/u.test(file)||privateProbeFiles.has(full))continue;const text=await readFile(full,'utf8');assert(!text.includes(httpCredentials.proof),'Synthetic OAuth proof leaked to launcher logs/state');}}
     console.log("MCP tunnel launcher integration tests passed.");
-    console.log("- Launcher default MCP HTTP profile: chatgpt_developer (107 tools: 106 child-owned plus parent-owned dev_mcp_reload)");
+    console.log("- Launcher default MCP HTTP profile: chatgpt_developer (110 tools: 109 child-owned plus parent-owned dev_mcp_reload)");
     console.log("- External MCP_TOOL_PROFILE override: chatgpt_public (40 tools, development write/test/PowerShell tools absent)");
   } catch (error) {
     // Preserve bounded, redacted diagnostics before this owned fixture is removed.
