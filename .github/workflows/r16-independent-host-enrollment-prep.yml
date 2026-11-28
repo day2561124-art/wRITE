@@ -1,0 +1,87 @@
+name: R16 independent host enrollment preparation
+
+# Disposable Windows fixture, no real service, secrets, grants or deployment.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/prepare-r16-independent-verification.ps1'
+      - '.github/workflows/r16-independent-host-enrollment-prep.yml'
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Exercise create-only directory preparation with separate disposable accounts
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $admin=[Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+          $system=[Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+          $owner=[Security.Principal.SecurityIdentifier]::new('S-1-3-4')
+          $root=Join-Path $env:ProgramFiles 'WriterWorkbench-PiMaintenance-v3'
+          if(Test-Path -LiteralPath $root){throw 'Unexpected preexisting fixture root'}
+          $names=@('R16TestDispatch','R16TestIssuer','R16TestObserver')
+          $created=@()
+          try {
+            foreach($name in $names) {
+              $password=ConvertTo-SecureString ([Guid]::NewGuid().ToString()+'Aa1!') -AsPlainText -Force
+              $null=New-LocalUser -Name $name -Password $password
+              $created+= $name
+            }
+            $dispatch=(Get-LocalUser -Name $names[0]).SID
+            $issuer=(Get-LocalUser -Name $names[1]).SID
+            $supervisor=(Get-LocalUser -Name $names[2]).SID
+            $acl=[Security.AccessControl.DirectorySecurity]::new()
+            $acl.SetOwner($admin)
+            $acl.SetAccessRuleProtection($true,$false)
+            foreach($sid in @($admin,$system)){
+              $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid,'FullControl','ContainerInherit, ObjectInherit','None','Allow'))
+            }
+            $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($owner,'ReadPermissions','ContainerInherit, ObjectInherit','None','Allow'))
+            $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($dispatch,'ReadAndExecute','ContainerInherit, ObjectInherit','None','Allow'))
+            $null=[IO.Directory]::CreateDirectory($root,$acl)
+            $config=Join-Path $root 'config.json'
+            @{schema_version=3;approved_scripts=$true;dispatcher_sid=$dispatch.Value}|ConvertTo-Json|Set-Content -LiteralPath $config -Encoding UTF8
+            $before=(Get-FileHash -LiteralPath $config).Hash
+            $parentBefore=(Get-Acl -LiteralPath $root).Sddl
+            $target=Join-Path $root 'independent-verification'
+            $script=Join-Path $PWD 'scripts/prepare-r16-independent-verification.ps1'
+            $plan=& $script -IssuerAccount $names[1] -SupervisorAccount $names[2] -WhatIf
+            if(Test-Path -LiteralPath $target){throw 'WhatIf created target'}
+            $rejected=$false
+            try { & $script -IssuerAccount $names[1] -SupervisorAccount $names[1] -Confirm:$false } catch { $rejected=$true }
+            if(-not $rejected -or (Test-Path -LiteralPath $target)){throw 'Identity collision accepted'}
+            $result=(& $script -IssuerAccount $names[1] -SupervisorAccount $names[2] -Confirm:$false)|ConvertFrom-Json
+            if($result.status -cne 'DIRECTORIES_PREPARED_ONLY' -or $result.activation -ne $false){throw 'Invalid result'}
+            foreach($name in @('receipts','outcomes')){
+              $dir=Join-Path $target $name
+              $dacl=Get-Acl -LiteralPath $dir
+              if(-not $dacl.AreAccessRulesProtected){throw 'Unprotected DACL'}
+              $rules=@($dacl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]))
+              $reader=if($name -eq 'receipts'){$dispatch}else{$issuer}
+              $writer=if($name -eq 'receipts'){$issuer}else{$supervisor}
+              $excluded=if($name -eq 'receipts'){$supervisor}else{$dispatch}
+              $readRules=@($rules|Where-Object {$_.IdentityReference.Value -eq $reader.Value})
+              $writeRules=@($rules|Where-Object {$_.IdentityReference.Value -eq $writer.Value})
+              if($readRules.Count -ne 1 -or ($readRules[0].FileSystemRights -band [Security.AccessControl.FileSystemRights]::WriteData) -ne 0 -or $writeRules.Count -lt 1){throw 'Role mismatch'}
+              if(@($rules|Where-Object {$_.IdentityReference.Value -eq $excluded.Value}).Count -ne 0){throw 'Cross-role ACE'}
+              if(@(Get-ChildItem -LiteralPath $dir -Force).Count -ne 0){throw 'Unexpected evidence'}
+            }
+            if(Test-Path -LiteralPath (Join-Path $target 'consumer.json')){throw 'Self enrollment'}
+            $rejected=$false
+            try { & $script -IssuerAccount $names[1] -SupervisorAccount $names[2] -Confirm:$false } catch { $rejected=$true }
+            if(-not $rejected){throw 'Existing target accepted'}
+            if((Get-FileHash -LiteralPath $config).Hash -cne $before -or (Get-Acl -LiteralPath $root).Sddl -cne $parentBefore){throw 'Existing maintenance changed'}
+            Write-Output 'R16_ENROLLMENT_DIRECTORY_PREPARATION_FIXTURE_PASS; activation=false; effective_token_access=unverified'
+          } finally {
+            # Only the new fixture root, on the disposable GitHub runner.
+            if(Test-Path -LiteralPath $root){Remove-Item -LiteralPath $root -Recurse -Force}
+            foreach($name in $created){Remove-LocalUser -Name $name}
+          }
