@@ -424,7 +424,7 @@ internal static class Program {
                     bool sealGit=args[3]=="tunnel_sealed_git";
                     bool sealDependencies=args[3]=="tunnel_sealed" || sealGit;
                     bool protectedSource=args[3]=="tunnel_protected" || sealDependencies;
-                    string sealedDependencies=null, sealedTools=null, sealedGit=null, gitTree=null;
+                    string sealedDependencies=null, sealedTools=null, sealedGit=null, gitTree=null, sealedGitExecPath=null;
                     bool fullMcp=args[3]=="mcp";
                     string suite=fullMcp?"mcp":"mcp_tunnel";
                     // Fixed native Node entry only; no candidate-defined command or supervisor credential.
@@ -446,8 +446,18 @@ internal static class Program {
                         var installed=File.ReadAllText(Path.Combine(root,"git-install-root.txt")).Trim();
                         gitTree=Path.Combine(root,"git-tools-parent","git");
                         if(!Path.IsPathRooted(installed) || !String.Equals(git,Path.Combine(gitTree,"bin"),StringComparison.OrdinalIgnoreCase)
-                            || !File.Exists(Path.Combine(installed,@"bin\git.exe")) || !File.Exists(Path.Combine(installed,@"mingw64\bin\git.exe")))
+                            || !File.Exists(Path.Combine(installed,@"bin\git.exe")))
                             throw new InvalidOperationException("GIT_TOOLCHAIN_LAYOUT_INVALID");
+                        var relativeExec=File.ReadAllText(Path.Combine(root,"git-exec-relative.txt")).Trim();
+                        if(relativeExec.Length==0 || Path.IsPathRooted(relativeExec))
+                            throw new InvalidOperationException("GIT_TOOLCHAIN_EXEC_PATH_INVALID");
+                        var installedExec=Path.GetFullPath(Path.Combine(installed,relativeExec));
+                        var installedPrefix=Path.GetFullPath(installed).TrimEnd('\\')+"\\";
+                        if(!installedExec.StartsWith(installedPrefix,StringComparison.OrdinalIgnoreCase) || !Directory.Exists(installedExec))
+                            throw new InvalidOperationException("GIT_TOOLCHAIN_EXEC_PATH_INVALID");
+                        sealedGitExecPath=Path.GetFullPath(Path.Combine(gitTree,relativeExec));
+                        if(!sealedGitExecPath.StartsWith(gitTree+"\\",StringComparison.OrdinalIgnoreCase))
+                            throw new InvalidOperationException("GIT_TOOLCHAIN_EXEC_PATH_INVALID");
                         var before=TreeDigest(installed,gitTree);
                         sealedGit=TreeDigest(gitTree,null);
                         if(before!=sealedGit) throw new InvalidOperationException("GIT_TOOLCHAIN_COPY_MISMATCH");
@@ -509,8 +519,7 @@ internal static class Program {
                             if(!Run(token,sid,root,"sealed_git_exec_path","",0,10000,false,log,guestGit,"--exec-path",source,environment)) return 1;
                             var reported=Encoding.UTF8.GetString(Convert.FromBase64String(File.ReadAllText(Path.Combine(root,"sealed_git_exec_path.stdout.b64")))).Trim();
                             var actual=Path.GetFullPath(reported.Replace('/','\\'));
-                            var expectedPath=Path.Combine(gitTree,@"mingw64\libexec\git-core");
-                            if(!String.Equals(actual,expectedPath,StringComparison.OrdinalIgnoreCase))
+                            if(!Directory.Exists(sealedGitExecPath) || !String.Equals(actual,sealedGitExecPath,StringComparison.OrdinalIgnoreCase))
                                 throw new InvalidOperationException("GIT_TOOLCHAIN_EXEC_PATH_MISMATCH");
                             log.WriteLine("COPIED_GIT_EXEC_PATH_PASS");
                         }
